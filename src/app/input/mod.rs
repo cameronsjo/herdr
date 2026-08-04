@@ -51,12 +51,13 @@ mod terminal;
 pub(crate) use self::{
     lease::{ConsumedInputLease, ForwardedInputLease, InputLeaseKey, InputLeaseTable, RepeatPlan},
     modal::{
-        handle_global_menu_key, handle_keybind_help_key, handle_navigator_key,
+        handle_global_menu_key, handle_keybind_help_key, handle_navigator_key, handle_palette_key,
         insert_keybind_help_query_text, insert_navigator_search_text, insert_rename_input_text,
         open_new_workspace_dialog,
     },
     navigate::{
         terminal_direct_indexed_navigation_action, terminal_direct_non_indexed_navigation_action,
+        NavigateAction,
     },
     settings::open_settings_at,
 };
@@ -75,6 +76,12 @@ use super::App;
 // ---------------------------------------------------------------------------
 
 impl App {
+    /// Runs an action chosen from an overlay. `Direct` lands it the same way
+    /// pressing its shortcut would.
+    pub(super) fn run_overlay_action(&mut self, action: navigate::NavigateAction) {
+        self.execute_tui_navigate_action(action, navigate::ActionContext::Direct);
+    }
+
     pub(super) async fn handle_key(
         &mut self,
         key: TerminalKey,
@@ -114,8 +121,17 @@ impl App {
                 Mode::Settings => self.handle_settings_key(key_event),
                 Mode::GlobalMenu => handle_global_menu_key(&mut self.state, key_event),
                 Mode::KeybindHelp => handle_keybind_help_key(&mut self.state, key),
+                Mode::Palette => {
+                    if let Some(action) = handle_palette_key(&mut self.state, key) {
+                        self.run_overlay_action(action);
+                    }
+                }
                 Mode::Navigator => {
-                    handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
+                    if let Some(action) =
+                        handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
+                    {
+                        self.run_overlay_action(action);
+                    }
                 }
                 Mode::Terminal => unreachable!(),
             },
@@ -906,6 +922,266 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel().1,
             crate::api::EventHub::default(),
         )
+    }
+
+    fn app_with_two_workspaces() -> App {
+        let mut app = test_app();
+        app.state.workspaces = vec![
+            crate::workspace::Workspace::test_new("alpha"),
+            crate::workspace::Workspace::test_new("beta"),
+        ];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app
+    }
+
+    #[tokio::test]
+    async fn move_pane_to_space_arms_the_navigator_with_the_focused_pane() {
+        let mut app = app_with_two_workspaces();
+        let focused = app
+            .state
+            .focused_public_pane_id()
+            .expect("workspace has a focused pane");
+
+        app.run_overlay_action(NavigateAction::MovePaneToSpace);
+
+        assert_eq!(app.state.mode, Mode::Navigator);
+        assert_eq!(app.state.navigator.pending_pane_move, Some(focused));
+    }
+
+    #[tokio::test]
+    async fn completing_a_move_targets_the_selected_workspace_and_disarms() {
+        let mut app = app_with_two_workspaces();
+        app.run_overlay_action(NavigateAction::MovePaneToSpace);
+
+        let rows = app.state.navigator_rows_from(&app.terminal_runtimes);
+        let beta_row = rows
+            .iter()
+            .position(|row| {
+                matches!(
+                    row.target,
+                    crate::app::state::NavigatorTarget::Workspace { ws_idx: 1 }
+                )
+            })
+            .expect("beta workspace has a navigator row");
+        app.state.navigator.selected = beta_row;
+        let beta_id = app.state.workspaces[1].id.clone();
+        let beta_tabs_before = app.state.workspaces[1].tabs.len();
+
+        app.complete_pending_pane_move();
+
+        assert_eq!(app.state.navigator.pending_pane_move, None);
+        assert_eq!(app.state.mode, Mode::Terminal);
+        let beta = app
+            .state
+            .workspaces
+            .iter()
+            .find(|ws| ws.id == beta_id)
+            .expect("beta survives the move");
+        assert_eq!(
+            beta.tabs.len(),
+            beta_tabs_before + 1,
+            "the moved pane should land in a new tab in beta"
+        );
+        // Alpha held only the moved pane, and herdr closes an emptied workspace.
+        assert_eq!(app.state.workspaces.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn each_navigator_row_kind_maps_to_its_own_destination() {
+        use crate::api::schema::PaneMoveDestination;
+        use crate::app::state::NavigatorTarget;
+
+        let app = app_with_two_workspaces();
+        let pane_id = app.state.workspaces[1]
+            .focused_pane_id()
+            .expect("beta has a focused pane");
+
+        let space = app.pane_move_destination_for(NavigatorTarget::Workspace { ws_idx: 1 });
+        assert!(
+            matches!(space, Some(PaneMoveDestination::NewTab { .. })),
+            "a space row opens a new tab, got {space:?}"
+        );
+
+        let tab = app.pane_move_destination_for(NavigatorTarget::Tab {
+            ws_idx: 1,
+            tab_idx: 0,
+        });
+        assert!(
+            matches!(
+                tab,
+                Some(PaneMoveDestination::Tab {
+                    target_pane_id: None,
+                    ..
+                })
+            ),
+            "a tab row splits against the tab's own focused pane, got {tab:?}"
+        );
+
+        let new_space = app.pane_move_destination_for(NavigatorTarget::NewWorkspace);
+        assert!(
+            matches!(new_space, Some(PaneMoveDestination::NewWorkspace { .. })),
+            "the new-space row creates a space, got {new_space:?}"
+        );
+
+        let pane = app.pane_move_destination_for(NavigatorTarget::Pane {
+            ws_idx: 1,
+            tab_idx: 0,
+            pane_id,
+        });
+        assert_eq!(
+            pane, tab,
+            "which pane a move lands beside is layout, not a destination"
+        );
+    }
+
+    fn pane_move_response(changed: bool, reason: Option<&str>) -> String {
+        let mut move_result = serde_json::json!({ "changed": changed });
+        if let Some(reason) = reason {
+            move_result["reason"] = serde_json::Value::String(reason.to_string());
+        }
+        serde_json::json!({
+            "id": "1",
+            "result": { "type": "pane_move", "move_result": move_result }
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_move_that_changes_nothing_is_reported() {
+        let mut app = app_with_two_workspaces();
+
+        app.toast_unchanged_move(&pane_move_response(false, Some("same_tab")));
+
+        let toast = app
+            .state
+            .toast
+            .as_ref()
+            .expect("the server calls this a success, so nothing else would report it");
+        assert_eq!(toast.title, "pane not moved");
+        assert_eq!(toast.context, "it is already in that tab");
+    }
+
+    #[tokio::test]
+    async fn a_zoomed_tab_says_what_to_do_about_it() {
+        let mut app = app_with_two_workspaces();
+
+        app.toast_unchanged_move(&pane_move_response(false, Some("zoomed_tab")));
+
+        let toast = app.state.toast.as_ref().expect("a toast");
+        assert_eq!(toast.context, "unzoom the tab first");
+    }
+
+    #[tokio::test]
+    async fn a_move_that_lands_stays_quiet() {
+        let mut app = app_with_two_workspaces();
+
+        app.toast_unchanged_move(&pane_move_response(true, None));
+
+        assert!(
+            app.state.toast.is_none(),
+            "a move that actually happened needs no explanation"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_armed_picker_offers_no_pane_rows() {
+        let mut app = app_with_two_workspaces();
+        app.run_overlay_action(NavigateAction::MovePaneToSpace);
+
+        let rows = app.state.navigator_rows_from(&app.terminal_runtimes);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row.target, crate::app::state::NavigatorTarget::Pane { .. })),
+            "a pane is where a move lands, not a destination to pick"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, crate::app::state::NavigatorTarget::NewWorkspace)),
+            "the armed picker must offer a new space without backing out"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_armed_picker_does_not_open_on_a_self_move() {
+        let mut app = app_with_two_workspaces();
+        app.run_overlay_action(NavigateAction::MovePaneToSpace);
+
+        let rows = app.state.navigator_rows_from(&app.terminal_runtimes);
+        let selected = rows
+            .get(app.state.navigator.selected)
+            .expect("the seeded selection points at a real row");
+        let destination = app.pane_move_destination_for(selected.target.clone());
+        assert!(
+            destination.is_some(),
+            "the row the picker opens on must be a usable destination, got {selected:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unarmed_navigator_still_offers_pane_rows() {
+        let mut app = app_with_two_workspaces();
+        app.state.open_navigator_from(&app.terminal_runtimes);
+
+        let rows = app.state.navigator_rows_from(&app.terminal_runtimes);
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, crate::app::state::NavigatorTarget::Pane { .. })),
+            "focus switching still needs pane rows"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row.target, crate::app::state::NavigatorTarget::NewWorkspace)),
+            "the new-space row is a move destination only"
+        );
+    }
+
+    #[tokio::test]
+    async fn navigator_enter_with_no_matches_keeps_the_picker_open() {
+        let mut app = app_with_two_workspaces();
+        app.state.open_navigator_from(&app.terminal_runtimes);
+        app.state.navigator.query = "zzzznomatch".to_string();
+        assert!(
+            app.state
+                .navigator_rows_from(&app.terminal_runtimes)
+                .is_empty(),
+            "the filter must match nothing for this test to mean anything"
+        );
+
+        app.run_overlay_action(NavigateAction::AcceptNavigatorRow);
+
+        assert_eq!(
+            app.state.mode,
+            Mode::Navigator,
+            "enter on a filter that matches nothing must not discard the picker"
+        );
+    }
+
+    #[tokio::test]
+    async fn navigator_enter_with_no_matches_keeps_a_move_armed() {
+        let mut app = app_with_two_workspaces();
+        app.run_overlay_action(NavigateAction::MovePaneToSpace);
+        app.state.navigator.query = "zzzznomatch".to_string();
+
+        app.run_overlay_action(NavigateAction::AcceptNavigatorRow);
+
+        assert!(
+            app.state.navigator.pending_pane_move.is_some(),
+            "a filter that matches nothing must not consume the armed move"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_disarmed_navigator_still_focuses_on_accept() {
+        let mut app = app_with_two_workspaces();
+        app.state.open_navigator_from(&app.terminal_runtimes);
+
+        app.accept_navigator_row();
+
+        assert_eq!(app.state.navigator.pending_pane_move, None);
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     #[tokio::test]

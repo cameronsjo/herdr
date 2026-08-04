@@ -11,6 +11,7 @@ mod menus;
 mod mobile;
 mod navigator;
 mod onboarding;
+mod palette;
 mod panes;
 mod release_notes;
 mod scrollbar;
@@ -39,6 +40,7 @@ use self::mobile::{
 use self::navigator::render_navigator_overlay;
 pub(crate) use self::onboarding::onboarding_welcome_continue_rect;
 use self::onboarding::render_onboarding_overlay;
+use self::palette::render_palette_overlay;
 pub(crate) use self::panes::popup_pane_rects;
 use self::panes::{render_empty, render_popup_pane, resize_popup_pane};
 pub(crate) use self::release_notes::{
@@ -94,6 +96,7 @@ pub(crate) use self::{
         mobile_switcher_areas, mobile_switcher_max_scroll, mobile_switcher_target_at,
         mobile_switcher_workspace_doc_range, MobileSwitcherTarget,
     },
+    palette::filtered_palette_commands,
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
     tabs::compute_tab_bar_view,
@@ -456,6 +459,7 @@ pub fn render_with_runtime_registry(
         Mode::ConfirmRemoveWorktree => render_remove_worktree_overlay(app, frame, frame.area()),
         Mode::GlobalMenu => render_global_launcher_menu(app, frame),
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
+        Mode::Palette => render_palette_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
     }
@@ -1446,34 +1450,34 @@ mod tests {
 
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "previous workspace"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "previous workspace"));
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "next workspace"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "next workspace"));
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "previous agent"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "previous agent"));
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "next agent"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "next agent"));
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "focus agent 1-9"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "focus agent 1-9"));
         assert!(workspace_tab
             .iter()
-            .any(|(key, label)| key == "unset" && label.as_ref() == "switch workspace 1-9"));
+            .any(|entry| entry.key == "unset" && entry.label.as_ref() == "switch workspace 1-9"));
         assert!(panes
             .iter()
-            .any(|(key, label)| key == "prefix+h" && label.as_ref() == "focus pane left"));
+            .any(|entry| entry.key == "prefix+h" && entry.label.as_ref() == "focus pane left"));
         assert!(panes
             .iter()
-            .any(|(key, label)| key == "prefix+j" && label.as_ref() == "focus pane down"));
+            .any(|entry| entry.key == "prefix+j" && entry.label.as_ref() == "focus pane down"));
         assert!(panes
             .iter()
-            .any(|(key, label)| key == "prefix+k" && label.as_ref() == "focus pane up"));
+            .any(|entry| entry.key == "prefix+k" && entry.label.as_ref() == "focus pane up"));
         assert!(panes
             .iter()
-            .any(|(key, label)| key == "prefix+l" && label.as_ref() == "focus pane right"));
+            .any(|entry| entry.key == "prefix+l" && entry.label.as_ref() == "focus pane right"));
     }
 
     #[test]
@@ -1509,10 +1513,10 @@ mod tests {
             .clone();
         assert!(custom
             .iter()
-            .any(|(key, label)| key == "prefix+alt+g" && label.as_ref() == "open lazygit"));
+            .any(|entry| entry.key == "prefix+alt+g" && entry.label.as_ref() == "open lazygit"));
         assert!(custom
             .iter()
-            .any(|(key, label)| key == "prefix+alt+h" && label.as_ref() == "custom command"));
+            .any(|entry| entry.key == "prefix+alt+h" && entry.label.as_ref() == "custom command"));
 
         let rendered_help = keybind_help_lines(&app)
             .into_iter()
@@ -1546,13 +1550,13 @@ switch_workspace = "ctrl+1..9"
 
         let switch_tab_key = workspace_tab
             .iter()
-            .find(|(_, label)| label.as_ref() == "switch tab 1-9")
-            .map(|(key, _)| key.as_str())
+            .find(|entry| entry.label.as_ref() == "switch tab 1-9")
+            .map(|entry| entry.key.as_str())
             .expect("switch tab help entry");
         let switch_workspace_key = workspace_tab
             .iter()
-            .find(|(_, label)| label.as_ref() == "switch workspace 1-9")
-            .map(|(key, _)| key.as_str())
+            .find(|entry| entry.label.as_ref() == "switch workspace 1-9")
+            .map(|entry| entry.key.as_str())
             .expect("switch workspace help entry");
 
         assert_eq!(switch_tab_key, "prefix+1..9 / alt+1..9");

@@ -14,6 +14,8 @@ use crate::{
     layout::NavDirection,
 };
 
+use super::navigate::NavigateAction;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ModalAction {
     Continue,
@@ -159,19 +161,18 @@ pub(crate) fn handle_global_menu_key(state: &mut AppState, key: KeyEvent) {
     }
 }
 
+#[must_use]
 pub(crate) fn handle_navigator_key(
     state: &mut AppState,
     terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     key: KeyEvent,
-) {
+) -> Option<NavigateAction> {
     if state.navigator.search_focused {
         match key.code {
             KeyCode::Esc => {
                 state.navigator.search_focused = false;
             }
-            KeyCode::Enter => {
-                state.accept_navigator_selection_from(terminal_runtimes);
-            }
+            KeyCode::Enter => return Some(NavigateAction::AcceptNavigatorRow),
             KeyCode::Backspace => {
                 state.navigator.state_filter = None;
                 state.navigator.query.pop();
@@ -197,16 +198,14 @@ pub(crate) fn handle_navigator_key(
             }
             _ => {}
         }
-        return;
+        return None;
     }
 
     match key.code {
         KeyCode::Esc => {
             leave_modal(state);
         }
-        KeyCode::Enter => {
-            state.accept_navigator_selection_from(terminal_runtimes);
-        }
+        KeyCode::Enter => return Some(NavigateAction::AcceptNavigatorRow),
         KeyCode::Char('/') => {
             state.navigator.state_filter = None;
             state.navigator.search_focused = true;
@@ -271,6 +270,7 @@ pub(crate) fn handle_navigator_key(
         }
         _ => {}
     }
+    None
 }
 
 pub(crate) fn insert_navigator_search_text(
@@ -305,6 +305,65 @@ pub(super) fn keybind_help_back(state: &mut AppState) {
     } else {
         leave_modal(state);
     }
+}
+
+pub(crate) fn open_palette(state: &mut AppState) {
+    state.mode = Mode::Palette;
+    state.command_palette.query.clear();
+    reset_palette_selection(state);
+}
+
+fn reset_palette_selection(state: &mut AppState) {
+    state.command_palette.selected = 0;
+    state.command_palette.scroll = 0;
+}
+
+fn move_palette_selection(state: &mut AppState, delta: i32) {
+    let count = crate::ui::filtered_palette_commands(state).len();
+    if count == 0 {
+        state.command_palette.selected = 0;
+        return;
+    }
+    let current = state.command_palette.selected.min(count - 1) as i32;
+    state.command_palette.selected = (current + delta).rem_euclid(count as i32) as usize;
+    state.ensure_palette_selection_visible();
+}
+
+/// Enter on a filter matching nothing leaves the palette open.
+fn run_palette_selection(state: &mut AppState) -> Option<NavigateAction> {
+    let action = crate::ui::filtered_palette_commands(state)
+        .get(state.command_palette.selected)
+        .map(|command| command.action)?;
+    leave_modal(state);
+    Some(action)
+}
+
+#[must_use]
+pub(crate) fn handle_palette_key(state: &mut AppState, key: TerminalKey) -> Option<NavigateAction> {
+    let text_char = keybind_help_text_char(key.clone());
+    match key.code {
+        KeyCode::Esc => leave_modal(state),
+        KeyCode::Enter => return run_palette_selection(state),
+        KeyCode::Up | KeyCode::BackTab => move_palette_selection(state, -1),
+        KeyCode::Down | KeyCode::Tab => move_palette_selection(state, 1),
+        KeyCode::PageUp => move_palette_selection(state, -8),
+        KeyCode::PageDown => move_palette_selection(state, 8),
+        KeyCode::Backspace => {
+            state.command_palette.query.pop();
+            reset_palette_selection(state);
+        }
+        KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
+            state.command_palette.query.clear();
+            reset_palette_selection(state);
+        }
+        _ => {
+            if let Some(character) = text_char {
+                state.command_palette.query.push(character);
+                reset_palette_selection(state);
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
@@ -449,6 +508,7 @@ pub(super) fn open_new_tab_dialog(state: &mut AppState) {
 }
 
 pub(super) fn leave_modal(state: &mut AppState) {
+    state.navigator.pending_pane_move = None;
     if state.active.is_some() {
         state.mode = Mode::Terminal;
     } else {
@@ -1887,7 +1947,7 @@ mod tests {
         state.mode = Mode::Navigator;
         state.navigator.search_focused = true;
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
@@ -1897,7 +1957,7 @@ mod tests {
         assert!(!state.navigator.search_focused);
         assert!(state.navigator.query.is_empty());
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Char('w'), KeyModifiers::empty()),
@@ -1909,13 +1969,65 @@ mod tests {
         );
         assert!(state.navigator.query.is_empty());
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
 
         assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn navigator_enter_defers_the_accept_to_the_dispatcher() {
+        let mut state = state_with_workspaces(&["alpha", "beta"]);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.mode = Mode::Navigator;
+
+        for pending in [None, Some("w1p1".to_string())] {
+            for search_focused in [false, true] {
+                state.navigator.pending_pane_move = pending.clone();
+                state.navigator.search_focused = search_focused;
+
+                let action = handle_navigator_key(
+                    &mut state,
+                    &terminal_runtimes,
+                    KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+                );
+
+                assert_eq!(action, Some(NavigateAction::AcceptNavigatorRow));
+                assert_eq!(state.navigator.pending_pane_move, pending);
+            }
+        }
+    }
+
+    #[test]
+    fn navigator_escape_disarms_a_pending_move() {
+        let mut state = state_with_workspaces(&["alpha", "beta"]);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.mode = Mode::Navigator;
+        state.navigator.search_focused = false;
+        state.navigator.pending_pane_move = Some("w1p1".to_string());
+
+        let action = handle_navigator_key(
+            &mut state,
+            &terminal_runtimes,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+
+        assert_eq!(action, None);
+        assert_eq!(state.navigator.pending_pane_move, None);
+    }
+
+    #[test]
+    fn opening_the_navigator_clears_a_stale_pending_move() {
+        let mut state = state_with_workspaces(&["alpha", "beta"]);
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        state.navigator.pending_pane_move = Some("w1p1".to_string());
+
+        state.open_navigator_from(&terminal_runtimes);
+
+        assert_eq!(state.navigator.pending_pane_move, None);
     }
 
     #[test]
@@ -1926,7 +2038,7 @@ mod tests {
         state.navigator.search_focused = true;
         state.navigator.query = "a".into();
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
@@ -1936,7 +2048,7 @@ mod tests {
         assert!(!state.navigator.search_focused);
         assert_eq!(state.navigator.query, "a");
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
@@ -1945,7 +2057,7 @@ mod tests {
         assert_eq!(state.navigator.selected, 1);
         assert_eq!(state.navigator.query, "a");
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
@@ -1955,7 +2067,7 @@ mod tests {
         assert!(state.navigator.search_focused);
         assert_eq!(state.navigator.query, "a");
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
@@ -1963,7 +2075,7 @@ mod tests {
 
         assert_eq!(state.navigator.query, "al");
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
@@ -1972,7 +2084,7 @@ mod tests {
         assert_eq!(state.mode, Mode::Navigator);
         assert!(!state.navigator.search_focused);
 
-        handle_navigator_key(
+        let _ = handle_navigator_key(
             &mut state,
             &terminal_runtimes,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),

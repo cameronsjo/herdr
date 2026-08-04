@@ -374,6 +374,17 @@ fn selected_detail(app: &AppState, terminal_runtimes: &TerminalRuntimeRegistry) 
     let Some(row) = rows.get(app.navigator.selected) else {
         return String::new();
     };
+    // While armed the row's own identity matters less than what accepting it
+    // does, and nothing else on screen says which destination a depth implies.
+    if app.navigator.pending_pane_move.is_some() {
+        return match row.target {
+            NavigatorTarget::NewWorkspace => "moves this pane to a new space".to_string(),
+            NavigatorTarget::Workspace { .. } => "moves this pane to a new tab here".to_string(),
+            NavigatorTarget::Tab { .. } | NavigatorTarget::Pane { .. } => {
+                "splits this pane into this tab".to_string()
+            }
+        };
+    }
     match row.target {
         NavigatorTarget::Workspace { ws_idx } => workspace_detail(app, terminal_runtimes, ws_idx),
         NavigatorTarget::Tab { ws_idx, tab_idx } => {
@@ -384,6 +395,7 @@ fn selected_detail(app: &AppState, terminal_runtimes: &TerminalRuntimeRegistry) 
             tab_idx,
             pane_id,
         } => pane_detail(app, terminal_runtimes, ws_idx, tab_idx, pane_id),
+        NavigatorTarget::NewWorkspace => String::new(),
     }
 }
 
@@ -539,21 +551,25 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     let p = &app.palette;
     let key = Style::default().fg(p.accent).add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(p.overlay0);
+    // While a move is armed, enter relocates the pane instead of switching to the
+    // row, so the footer has to say which one it is.
+    let armed = app.navigator.pending_pane_move.is_some();
+    let accept = if armed { " move here  " } else { " switch  " };
     let line = if app.navigator.search_focused {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(accept, dim),
             Span::styled("↑↓", key),
             Span::styled(" move  ", dim),
             Span::styled("ctrl+u", key),
             Span::styled(" clear  ", dim),
             Span::styled("esc", key),
-            Span::styled(" back", dim),
+            Span::styled(if armed { " cancel" } else { " back" }, dim),
         ])
     } else {
         Line::from(vec![
             Span::styled(" enter", key),
-            Span::styled(" switch  ", dim),
+            Span::styled(accept, dim),
             Span::styled("/", key),
             Span::styled(" search  ", dim),
             Span::styled("b/w/i/d/a", key),
@@ -561,7 +577,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
             Span::styled("j/k/↑↓", key),
             Span::styled(" move  ", dim),
             Span::styled("esc", key),
-            Span::styled(" close", dim),
+            Span::styled(if armed { " cancel" } else { " close" }, dim),
         ])
     };
     frame.render_widget(Paragraph::new(line), area);

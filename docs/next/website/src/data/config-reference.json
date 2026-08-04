@@ -266,6 +266,12 @@
           "description": "Open the workspace navigation surface."
         },
         {
+          "key": "keys.command_palette",
+          "type": "keybinding",
+          "default": "\"prefix+/\"",
+          "description": "Open the command palette, listing every runnable action with its shortcut and filtering as you type."
+        },
+        {
           "key": "keys.goto",
           "type": "keybinding",
           "default": "\"prefix+g\"",

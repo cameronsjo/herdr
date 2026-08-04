@@ -813,6 +813,7 @@ pub enum Mode {
     GlobalMenu,
     KeybindHelp,
     Navigator,
+    Palette,
 }
 
 impl Mode {
@@ -861,6 +862,8 @@ pub(crate) enum NavigatorTarget {
         tab_idx: usize,
         pane_id: PaneId,
     },
+    /// Destination-only row, offered while a pane move is armed.
+    NewWorkspace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -936,6 +939,8 @@ pub(crate) struct NavigatorState {
     pub search_focused: bool,
     pub state_filter: Option<NavigatorStateFilter>,
     pub expanded_workspaces: std::collections::HashSet<String>,
+    /// While set, accepting a navigator row moves that pane instead of focusing it.
+    pub pending_pane_move: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1373,6 +1378,14 @@ pub struct KeybindHelpState {
     pub search_focused: bool,
 }
 
+#[derive(Default)]
+pub struct PaletteState {
+    pub query: String,
+    /// Index into the filtered command list; a match is always selected.
+    pub selected: usize,
+    pub scroll: u16,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarWidthSource {
     ConfigDefault,
@@ -1437,6 +1450,7 @@ pub struct AppState {
     pub release_notes: Option<ReleaseNotesState>,
     pub product_announcement: Option<ProductAnnouncementState>,
     pub keybind_help: KeybindHelpState,
+    pub command_palette: PaletteState,
     pub navigator: NavigatorState,
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
@@ -1800,6 +1814,7 @@ impl AppState {
             release_notes: None,
             product_announcement: None,
             keybind_help: KeybindHelpState::default(),
+            command_palette: PaletteState::default(),
             navigator: NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,

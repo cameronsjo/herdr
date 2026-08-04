@@ -16,6 +16,7 @@ mod creation;
 mod git_refresh;
 mod ids;
 mod input;
+pub(crate) use input::NavigateAction;
 mod popup;
 mod runtime;
 mod runtime_mutations;
@@ -565,6 +566,7 @@ impl App {
                 }
             }),
             keybind_help: state::KeybindHelpState::default(),
+            command_palette: state::PaletteState::default(),
             navigator: state::NavigatorState::default(),
             copy_mode: None,
             workspace_scroll: 0,
@@ -1832,6 +1834,11 @@ impl App {
             Mode::ContextMenu => {
                 self.handle_context_menu_key_via_api(key_event);
             }
+            Mode::Palette => {
+                if let Some(action) = input::handle_palette_key(&mut self.state, key) {
+                    self.run_overlay_action(action);
+                }
+            }
             Mode::KeybindHelp => {
                 input::handle_keybind_help_key(&mut self.state, key);
             }
@@ -1851,7 +1858,11 @@ impl App {
                 self.handle_settings_key(key_event);
             }
             Mode::Navigator => {
-                input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
+                if let Some(action) =
+                    input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
+                {
+                    self.run_overlay_action(action);
+                }
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.

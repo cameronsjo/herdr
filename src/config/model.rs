@@ -346,6 +346,9 @@ pub struct KeysConfig {
     pub close_workspace: BindingConfig,
     /// Open the workspace navigation surface. Default: "prefix+w"
     pub workspace_picker: BindingConfig,
+    /// Open the keybind help ready to filter, so a command can be typed and run
+    /// without opening the help first. Default: "prefix+/"
+    pub command_palette: BindingConfig,
     /// Open the session navigator. Default: "prefix+g"
     pub goto: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
@@ -466,6 +469,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_picker: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    command_palette: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     goto: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
@@ -584,6 +589,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(rename_workspace);
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
+        apply_field!(command_palette);
         apply_field!(goto);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
@@ -682,6 +688,7 @@ impl KeysConfig {
         copy_effective_action_field!(rename_workspace, keybinds.rename_workspace);
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
+        copy_effective_action_field!(command_palette, keybinds.command_palette);
         copy_effective_action_field!(goto, keybinds.goto);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
@@ -965,6 +972,7 @@ impl Default for KeysConfig {
             rename_workspace: BindingConfig::one("prefix+shift+w"),
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
+            command_palette: BindingConfig::one("prefix+/"),
             goto: BindingConfig::one("prefix+g"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
