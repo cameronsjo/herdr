@@ -5,6 +5,8 @@
 ### Added
 - Settings and `ui.status_indicators = "symbols"` can now use distinct static shapes for blocked, working, done, idle, and unknown agent states. (#2260)
 - The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
+- Added a command palette on `prefix+/` listing every runnable action with its shortcut, filtered as you type and ranked so an exact command name outranks a longer command containing it.
+- Added palette commands to move the focused pane to an existing space, a new space, or a new tab. Choosing an existing space opens the session navigator as a destination picker offering a new space, each space as a new tab there, or each tab to split into, with the selected row's effect shown above the footer.
 
 ### Fixed
 - Claude Code confirmation prompts using `Enter to confirm · Esc to cancel` now report `blocked` instead of `idle`. (#2268)

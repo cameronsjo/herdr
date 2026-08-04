@@ -266,6 +266,21 @@ impl AppState {
         })
     }
 
+    pub(crate) fn public_pane_id(&self, ws_idx: usize, pane_id: PaneId) -> Option<String> {
+        let ws = self.workspaces.get(ws_idx)?;
+        let pane_number = ws.public_pane_number(pane_id)?;
+        Some(crate::workspace::public_pane_id_for_number(
+            &ws.id,
+            pane_number,
+        ))
+    }
+
+    pub(crate) fn focused_public_pane_id(&self) -> Option<String> {
+        let ws_idx = self.active?;
+        let pane_id = self.workspaces.get(ws_idx)?.focused_pane_id()?;
+        self.public_pane_id(ws_idx, pane_id)
+    }
+
     pub(crate) fn pane_focus_target_indices(
         &self,
         target: &PaneFocusTarget,
@@ -360,15 +375,14 @@ impl AppState {
         self.navigator.state_filter = None;
         self.navigator.scroll = 0;
         self.navigator.expanded_workspaces.clear();
+        self.navigator.pending_pane_move = None;
 
         for ws in &self.workspaces {
             self.navigator.expanded_workspaces.insert(ws.id.clone());
         }
 
         self.mode = Mode::Navigator;
-        self.navigator.selected = self
-            .current_navigator_row_index_from(terminal_runtimes)
-            .unwrap_or(0);
+        self.reseat_navigator_selection_from(terminal_runtimes);
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
@@ -385,6 +399,27 @@ impl AppState {
         let query = self.navigator.query.trim().to_lowercase();
         let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
         let mut rows = Vec::new();
+        if self.navigator.pending_pane_move.is_some() {
+            let row = NavigatorRow {
+                target: NavigatorTarget::NewWorkspace,
+                depth: 0,
+                label: "+ new space".to_string(),
+                meta: String::new(),
+                status: crate::detect::AgentState::Unknown,
+                seen: true,
+                is_current: false,
+                is_workspace: false,
+                is_tab: false,
+                expanded: false,
+                search_text: "new space".to_string(),
+                matched: true,
+            };
+            if !matches!(query_kind, NavigatorQueryKind::Text)
+                || navigator_matches(&query, &row.search_text)
+            {
+                rows.push(row);
+            }
+        }
         for (ws_idx, ws) in self.workspaces.iter().enumerate() {
             let workspace_label = ws.display_name_from(&self.terminals, terminal_runtimes);
             let activity = workspace_activity_summary(ws, &self.terminals);
@@ -453,7 +488,13 @@ impl AppState {
             if let Some(tab_row) = tab_row.as_mut() {
                 tab_row.matched = tab_matches;
             }
-            let mut pane_rows = self.navigator_pane_rows_for_tab(ws_idx, tab_idx, multi_tab);
+            // A pane is where a moved pane lands, not a destination of its own,
+            // so the armed picker offers spaces and tabs only.
+            let mut pane_rows = if self.navigator.pending_pane_move.is_some() {
+                Vec::new()
+            } else {
+                self.navigator_pane_rows_for_tab(ws_idx, tab_idx, multi_tab)
+            };
             let filtered_panes = match query_kind {
                 NavigatorQueryKind::Empty => pane_rows,
                 NavigatorQueryKind::State(filter) => pane_rows
@@ -592,6 +633,17 @@ impl AppState {
             });
         }
         rows
+    }
+
+    /// Arming a move changes which rows exist, so the selection has to be
+    /// chosen against the row set the user will actually see.
+    pub(crate) fn reseat_navigator_selection_from(
+        &mut self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+    ) {
+        self.navigator.selected = self
+            .current_navigator_row_index_from(terminal_runtimes)
+            .unwrap_or(0);
     }
 
     fn current_navigator_row_index_from(
@@ -788,6 +840,8 @@ impl AppState {
 
     pub(crate) fn focus_navigator_target(&mut self, target: NavigatorTarget) -> bool {
         match target {
+            // Exists only as a move destination, so there is nothing to focus.
+            NavigatorTarget::NewWorkspace => false,
             NavigatorTarget::Workspace { ws_idx } => {
                 if ws_idx >= self.workspaces.len() {
                     return false;

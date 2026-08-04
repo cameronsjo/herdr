@@ -17,6 +17,14 @@ The prefix solves this. Press the prefix key, default `ctrl+b`, and the next key
 
 Press `prefix+?` at any time to see every active binding. Press `/` in the keybind help to filter actions and shortcuts; use Backspace to edit the filter or `ctrl+u` to clear it.
 
+Press `prefix+/` to open the command palette. It lists every action you can run, with that action's shortcut alongside it, and filters as you type. Arrow keys move the selection, `enter` runs the selected command, and `esc` closes. Clicking a row runs it too.
+
+Matches are ranked by how well they answer what you typed, so a query naming one command exactly wins over a longer command that merely contains it.
+
+Three commands move the focused pane and have no shortcut of their own, so the palette is where you reach them: `move pane to space`, `move pane to new space`, and `move pane to new tab`.
+
+`move pane to space` opens the session navigator to pick a destination. Filter it the same way, then press `enter`. Pick `+ new space` to give the pane a space of its own, a space to put it in a new tab there, or a tab to split it into that tab. The line above the footer says what the selected row will do, and `esc` cancels without moving anything.
+
 ## Learn these five first
 
 | Action | Key |

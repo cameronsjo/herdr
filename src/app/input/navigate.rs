@@ -400,6 +400,39 @@ impl App {
                 leave_navigate_mode(&mut self.state);
             }
             NavigateAction::Help => super::modal::open_keybind_help(&mut self.state),
+            NavigateAction::OpenCommandPalette => {
+                super::modal::open_palette(&mut self.state);
+            }
+            NavigateAction::MovePaneToSpace => {
+                if let Some(pane_id) = self.state.focused_public_pane_id() {
+                    self.state.open_navigator_from(&self.terminal_runtimes);
+                    self.state.navigator.pending_pane_move = Some(pane_id);
+                    self.state
+                        .reseat_navigator_selection_from(&self.terminal_runtimes);
+                }
+            }
+            NavigateAction::MovePaneToNewSpace => {
+                self.move_focused_pane_via_api(
+                    crate::api::schema::PaneMoveDestination::NewWorkspace {
+                        label: None,
+                        tab_label: None,
+                    },
+                );
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::MovePaneToNewTab => {
+                self.move_focused_pane_via_api(crate::api::schema::PaneMoveDestination::NewTab {
+                    workspace_id: None,
+                    label: None,
+                });
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::AcceptNavigatorRow => {
+                // Returns early: `finish_action_context` would close the picker,
+                // since a failed accept deliberately leaves the mode unchanged.
+                self.accept_navigator_row();
+                return;
+            }
             NavigateAction::Settings => super::settings::open_settings(&mut self.state),
             NavigateAction::ReloadConfig => {
                 self.runtime_server_reload_config("tui.server.reload_config");
@@ -581,6 +614,161 @@ impl App {
                 env: Default::default(),
             },
         );
+    }
+
+    fn move_pane_via_api(
+        &mut self,
+        pane_id: String,
+        destination: crate::api::schema::PaneMoveDestination,
+    ) {
+        let response = self.runtime_pane_move(
+            "tui.pane.move",
+            crate::api::schema::PaneMoveParams {
+                pane_id,
+                destination,
+                focus: true,
+            },
+        );
+        self.toast_api_error("move pane failed", &response);
+        self.toast_unchanged_move(&response);
+    }
+
+    /// The server reports "it is already there" as a success carrying
+    /// `changed: false`, so without this the move reads as nothing happening.
+    pub(super) fn toast_unchanged_move(&mut self, response: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
+            return;
+        };
+        if value
+            .pointer("/result/move_result/changed")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+        {
+            return;
+        }
+        let context = match value
+            .pointer("/result/move_result/reason")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("zoomed_tab") => "unzoom the tab first",
+            _ => "it is already in that tab",
+        };
+        let previous_toast = self.state.toast.clone();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "pane not moved".to_string(),
+            context: context.to_string(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous_toast);
+    }
+
+    pub(crate) fn move_focused_pane_via_api(
+        &mut self,
+        destination: crate::api::schema::PaneMoveDestination,
+    ) {
+        let Some(pane_id) = self.state.focused_public_pane_id() else {
+            return;
+        };
+        self.move_pane_via_api(pane_id, destination);
+    }
+
+    pub(super) fn accept_navigator_row(&mut self) {
+        if self.state.navigator.pending_pane_move.is_some() {
+            self.complete_pending_pane_move();
+        } else {
+            self.state
+                .accept_navigator_selection_from(&self.terminal_runtimes);
+        }
+    }
+
+    pub(crate) fn complete_pending_pane_move(&mut self) {
+        if self.state.navigator.pending_pane_move.is_none() {
+            return;
+        }
+        let destination = self
+            .state
+            .navigator_rows_from(&self.terminal_runtimes)
+            .get(self.state.navigator.selected)
+            .map(|row| row.target.clone())
+            .and_then(|target| self.pane_move_destination_for(target));
+        // Leave the move armed when nothing resolved, so the pane id survives.
+        let Some(destination) = destination else {
+            return;
+        };
+        let Some(pane_id) = self.state.navigator.pending_pane_move.take() else {
+            return;
+        };
+        self.move_pane_via_api(pane_id, destination);
+        self.state.mode = Mode::Terminal;
+    }
+
+    pub(super) fn pane_move_destination_for(
+        &self,
+        target: crate::app::state::NavigatorTarget,
+    ) -> Option<crate::api::schema::PaneMoveDestination> {
+        use crate::app::state::NavigatorTarget;
+        match target {
+            // `public_workspace_id` indexes without a bounds check.
+            NavigatorTarget::Workspace { ws_idx } => {
+                Some(crate::api::schema::PaneMoveDestination::NewTab {
+                    workspace_id: Some(self.state.workspaces.get(ws_idx)?.id.clone()),
+                    label: None,
+                })
+            }
+            NavigatorTarget::Tab { ws_idx, tab_idx } => {
+                Some(crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id: self.public_tab_id(ws_idx, tab_idx)?,
+                    // The server splits against the tab's focused pane.
+                    target_pane_id: None,
+                    split: crate::api::schema::SplitDirection::Right,
+                    ratio: None,
+                })
+            }
+            NavigatorTarget::NewWorkspace => {
+                Some(crate::api::schema::PaneMoveDestination::NewWorkspace {
+                    label: None,
+                    tab_label: None,
+                })
+            }
+            // Unreachable while armed, since the picker drops pane rows; a pane
+            // resolves to its tab rather than to a position beside itself.
+            NavigatorTarget::Pane {
+                ws_idx, tab_idx, ..
+            } => Some(crate::api::schema::PaneMoveDestination::Tab {
+                tab_id: self.public_tab_id(ws_idx, tab_idx)?,
+                target_pane_id: None,
+                split: crate::api::schema::SplitDirection::Right,
+                ratio: None,
+            }),
+        }
+    }
+
+    fn toast_api_error(&mut self, title: &str, response: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
+            tracing::warn!(
+                title,
+                "api response was not valid json, dropping error toast"
+            );
+            return;
+        };
+        let Some(message) = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        let previous_toast = self.state.toast.clone();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: title.to_string(),
+            context: message.to_string(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous_toast);
     }
 
     pub(crate) fn close_focused_pane_via_api_requires_confirmation(&mut self) -> bool {
@@ -1341,6 +1529,11 @@ pub(crate) enum NavigateAction {
     SwitchTab(usize),
     FocusAgent(usize),
     WorkspacePicker,
+    OpenCommandPalette,
+    MovePaneToSpace,
+    MovePaneToNewSpace,
+    MovePaneToNewTab,
+    AcceptNavigatorRow,
     PreviousWorkspace,
     NextWorkspace,
     PreviousAgent,
@@ -1476,6 +1669,7 @@ fn non_indexed_action_for_key(
         (&kb.help, NavigateAction::Help),
         (&kb.settings, NavigateAction::Settings),
         (&kb.workspace_picker, NavigateAction::WorkspacePicker),
+        (&kb.command_palette, NavigateAction::OpenCommandPalette),
         (&kb.new_workspace, NavigateAction::NewWorkspace),
         (&kb.new_worktree, NavigateAction::NewWorktree),
         (&kb.open_worktree, NavigateAction::OpenWorktree),
@@ -1758,6 +1952,27 @@ pub(super) fn execute_navigate_action_in_context(
             leave_navigate_mode(state);
         }
         NavigateAction::Help => super::modal::open_keybind_help(state),
+        NavigateAction::OpenCommandPalette => {
+            super::modal::open_palette(state);
+        }
+        NavigateAction::MovePaneToSpace => {
+            if let Some(pane_id) = state.focused_public_pane_id() {
+                state.open_navigator_from(terminal_runtimes);
+                state.navigator.pending_pane_move = Some(pane_id);
+                state.reseat_navigator_selection_from(terminal_runtimes);
+            }
+        }
+        NavigateAction::MovePaneToNewSpace | NavigateAction::MovePaneToNewTab => {
+            leave_navigate_mode(state)
+        }
+        NavigateAction::AcceptNavigatorRow => {
+            if state.navigator.pending_pane_move.take().is_some() {
+                state.mode = Mode::Terminal;
+            } else {
+                state.accept_navigator_selection_from(terminal_runtimes);
+            }
+            return;
+        }
         NavigateAction::Settings => super::settings::open_settings(state),
         NavigateAction::ReloadConfig => {
             state.request_reload_config = true;
@@ -1903,6 +2118,27 @@ mod tests {
     use crate::{
         app::App, config::Config, input::TerminalKey, terminal::TerminalState, workspace::Workspace,
     };
+
+    #[test]
+    fn prefix_slash_opens_the_palette_ready_to_type() {
+        let mut state = state_with_workspaces(&["test"]);
+
+        // The real binding table, not the test-only dispatch twin.
+        let action = action_for_key(
+            &state,
+            TerminalKey::new(KeyCode::Char('/'), KeyModifiers::empty()),
+            BindingDispatch::Prefix,
+        );
+        assert_eq!(action, Some(NavigateAction::OpenCommandPalette));
+
+        execute_navigate_action(&mut state, NavigateAction::OpenCommandPalette);
+        assert_eq!(state.mode, Mode::Palette);
+        assert!(state.command_palette.query.is_empty());
+        assert_eq!(
+            state.command_palette.selected, 0,
+            "a command must already be selected so enter runs without arrowing first"
+        );
+    }
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {

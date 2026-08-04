@@ -177,6 +177,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # reload_config = "prefix+shift+r"
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
+# command_palette = "prefix+/"
 # goto = "prefix+g"
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"

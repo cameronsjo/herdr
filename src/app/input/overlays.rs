@@ -159,12 +159,10 @@ impl App {
                                     &self.terminal_runtimes,
                                 );
                             } else {
-                                self.state
-                                    .accept_navigator_selection_from(&self.terminal_runtimes);
+                                self.accept_navigator_row();
                             }
                         } else {
-                            self.state
-                                .accept_navigator_selection_from(&self.terminal_runtimes);
+                            self.accept_navigator_row();
                         }
                     } else if !self.state.navigator_popup_contains(mouse.column, mouse.row) {
                         leave_modal(&mut self.state);
@@ -184,6 +182,43 @@ impl App {
                         self.state.navigator.scroll.saturating_add(3).min(max);
                     self.state
                         .align_navigator_selection_to_scroll_from(&self.terminal_runtimes);
+                }
+                _ => {}
+            }
+            return true;
+        }
+
+        if self.state.mode == Mode::Palette {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(index) = self.state.palette_row_at(mouse.column, mouse.row) {
+                        self.state.command_palette.selected = index;
+                        let action = crate::ui::filtered_palette_commands(&self.state)
+                            .get(index)
+                            .map(|command| command.action);
+                        if let Some(action) = action {
+                            leave_modal(&mut self.state);
+                            self.run_overlay_action(action);
+                        }
+                    } else {
+                        let rect = self.state.palette_popup_rect();
+                        let inside = mouse.column >= rect.x
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row >= rect.y
+                            && mouse.row < rect.y + rect.height;
+                        if !inside {
+                            leave_modal(&mut self.state);
+                        }
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.state.command_palette.scroll =
+                        self.state.command_palette.scroll.saturating_sub(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    let max = self.state.palette_max_scroll();
+                    self.state.command_palette.scroll =
+                        self.state.command_palette.scroll.saturating_add(3).min(max);
                 }
                 _ => {}
             }
@@ -609,6 +644,54 @@ impl AppState {
         }
     }
 
+    pub(super) fn palette_popup_rect(&self) -> Rect {
+        crate::ui::centered_popup_rect(self.screen_rect(), 76, 22).unwrap_or_default()
+    }
+
+    pub(super) fn palette_body_rect(&self) -> Option<Rect> {
+        let inner = self.onboarding_modal_inner(76, 22)?;
+        if inner.height < 6 || inner.width < 20 {
+            return None;
+        }
+        Some(crate::ui::modal_stack_areas(inner, 2, 1, 0, 1).content)
+    }
+
+    pub(crate) fn palette_max_scroll(&self) -> u16 {
+        let Some(body) = self.palette_body_rect() else {
+            return 0;
+        };
+        let total = crate::ui::filtered_palette_commands(self).len();
+        total.saturating_sub(body.height.max(1) as usize) as u16
+    }
+
+    fn palette_row_at(&self, col: u16, row: u16) -> Option<usize> {
+        let body = self.palette_body_rect()?;
+        if col < body.x || col >= body.x + body.width || row < body.y || row >= body.y + body.height
+        {
+            return None;
+        }
+        let index = self.command_palette.scroll as usize + (row - body.y) as usize;
+        (index < crate::ui::filtered_palette_commands(self).len()).then_some(index)
+    }
+
+    pub(super) fn ensure_palette_selection_visible(&mut self) {
+        let Some(body) = self.palette_body_rect() else {
+            return;
+        };
+        let viewport = body.height.max(1) as usize;
+        let selected = self.command_palette.selected;
+        let scroll = self.command_palette.scroll as usize;
+
+        let adjusted = if selected < scroll {
+            selected
+        } else if selected >= scroll + viewport {
+            selected + 1 - viewport
+        } else {
+            return;
+        };
+        self.command_palette.scroll = adjusted.min(self.palette_max_scroll() as usize) as u16;
+    }
+
     pub(super) fn keybind_help_popup_rect(&self) -> Rect {
         crate::ui::centered_popup_rect(self.screen_rect(), 76, 22).unwrap_or_default()
     }
@@ -763,6 +846,38 @@ mod tests {
         assert_eq!(app.state.mode, Mode::KeybindHelp);
         assert!(!app.state.keybind_help.search_focused);
         assert!(app.state.keybind_help.query.is_empty());
+    }
+
+    #[test]
+    fn clicking_a_palette_row_runs_that_command() {
+        let mut app = app_for_mouse_test();
+        app.state.mode = Mode::Palette;
+        app.state.command_palette.query = "settings".into();
+
+        let body = app.state.palette_body_rect().expect("body rect");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            body.x + 2,
+            body.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Settings);
+    }
+
+    #[test]
+    fn clicking_past_the_last_palette_row_leaves_the_palette_open() {
+        let mut app = app_for_mouse_test();
+        app.state.mode = Mode::Palette;
+        app.state.command_palette.query = "settings".into();
+
+        let body = app.state.palette_body_rect().expect("body rect");
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            body.x + 2,
+            body.y + body.height - 1,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Palette);
     }
 
     #[test]
