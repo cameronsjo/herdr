@@ -495,13 +495,8 @@ impl AppState {
             tab_row.matched = tab_matches;
             let show_tab_row =
                 multi_tab || (matches!(query_kind, NavigatorQueryKind::Text) && tab_matches);
-            // A pane is where a moved pane lands, not a destination of its own,
-            // so the armed picker offers spaces and tabs only.
-            let mut pane_rows = if self.navigator.pending_pane_move.is_some() {
-                Vec::new()
-            } else {
-                self.navigator_pane_rows_for_tab(ws_idx, tab_idx, show_tab_row)
-            };
+            let mut pane_rows =
+                self.navigator_pane_rows_for_tab_unless_moving(ws_idx, tab_idx, show_tab_row);
             let filtered_panes = match query_kind {
                 NavigatorQueryKind::Empty => pane_rows,
                 NavigatorQueryKind::State(filter) => pane_rows
@@ -558,6 +553,24 @@ impl AppState {
             expanded: true,
             search_text,
             matched: true,
+        }
+    }
+
+    /// A pane is where a moved pane lands, not a destination of its own, so
+    /// the armed picker offers spaces and tabs only. Kept as its own seam
+    /// (rather than inlined at the call site) so upstream edits to the
+    /// surrounding tab-row logic in `navigator_child_rows` keep merging
+    /// cleanly instead of re-conflicting with this fork-only gate.
+    fn navigator_pane_rows_for_tab_unless_moving(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+        show_tab_row: bool,
+    ) -> Vec<NavigatorRow> {
+        if self.navigator.pending_pane_move.is_some() {
+            Vec::new()
+        } else {
+            self.navigator_pane_rows_for_tab(ws_idx, tab_idx, show_tab_row)
         }
     }
 
