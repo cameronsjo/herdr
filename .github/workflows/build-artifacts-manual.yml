@@ -131,10 +131,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Apple Silicon only. This fork's macOS consumers are all arm64, and the
+        # x86_64 build fails on undefined ghostty_* symbols from zig's x86_64
+        # output — building it only produced a red run on every rebuild.
         include:
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            name: herdr-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
             name: herdr-macos-aarch64
