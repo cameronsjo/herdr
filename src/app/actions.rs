@@ -477,23 +477,30 @@ impl AppState {
         let multi_tab = ws.tabs.len() > 1;
         let mut rows = Vec::new();
         for tab_idx in 0..ws.tabs.len() {
-            let mut tab_row = multi_tab.then(|| self.navigator_tab_row(ws_idx, tab_idx));
-            let tab_matches = tab_row.as_ref().is_some_and(|row| match query_kind {
+            let mut tab_row = self.navigator_tab_row(ws_idx, tab_idx);
+            let tab_matches = match query_kind {
                 NavigatorQueryKind::Empty => true,
                 NavigatorQueryKind::State(filter) => {
-                    navigator_state_filter_matches(filter, row.status, row.seen)
+                    navigator_state_filter_matches(filter, tab_row.status, tab_row.seen)
                 }
-                NavigatorQueryKind::Text => navigator_matches(query, &row.search_text),
-            });
-            if let Some(tab_row) = tab_row.as_mut() {
-                tab_row.matched = tab_matches;
-            }
+                NavigatorQueryKind::Text => navigator_matches(
+                    query,
+                    if multi_tab {
+                        &tab_row.search_text
+                    } else {
+                        &tab_row.label
+                    },
+                ),
+            };
+            tab_row.matched = tab_matches;
+            let show_tab_row =
+                multi_tab || (matches!(query_kind, NavigatorQueryKind::Text) && tab_matches);
             // A pane is where a moved pane lands, not a destination of its own,
             // so the armed picker offers spaces and tabs only.
             let mut pane_rows = if self.navigator.pending_pane_move.is_some() {
                 Vec::new()
             } else {
-                self.navigator_pane_rows_for_tab(ws_idx, tab_idx, multi_tab)
+                self.navigator_pane_rows_for_tab(ws_idx, tab_idx, show_tab_row)
             };
             let filtered_panes = match query_kind {
                 NavigatorQueryKind::Empty => pane_rows,
@@ -515,10 +522,8 @@ impl AppState {
                     .collect::<Vec<_>>(),
             };
 
-            if let Some(tab_row) = tab_row {
-                if tab_matches || !filtered_panes.is_empty() {
-                    rows.push(tab_row);
-                }
+            if show_tab_row && (tab_matches || !filtered_panes.is_empty()) {
+                rows.push(tab_row);
             }
             rows.extend(filtered_panes);
         }
@@ -560,7 +565,7 @@ impl AppState {
         &self,
         ws_idx: usize,
         tab_idx: usize,
-        multi_tab: bool,
+        show_tab_row: bool,
     ) -> Vec<NavigatorRow> {
         let Some(ws) = self.workspaces.get(ws_idx) else {
             return Vec::new();
@@ -619,7 +624,7 @@ impl AppState {
                     tab_idx,
                     pane_id,
                 },
-                depth: if multi_tab { 2 } else { 1 },
+                depth: if show_tab_row { 2 } else { 1 },
                 label,
                 meta,
                 status: state,
@@ -3722,6 +3727,52 @@ mod tests {
                 tab_idx: 1
             }
         )));
+    }
+
+    #[test]
+    fn navigator_search_matches_named_tabs_in_single_tab_workspaces() {
+        let mut state = app_with_workspaces(&["multi", "single"]);
+        state.workspaces[0].tabs[0].custom_name = Some("Foo".into());
+        state.workspaces[0].test_add_tab(Some("Bar"));
+        state.workspaces[1].tabs[0].custom_name = Some("Baz".into());
+        state.ensure_test_terminals();
+
+        state.open_navigator();
+        state.navigator.query = "foo".into();
+        assert!(state.navigator_rows().iter().any(|row| {
+            row.matched
+                && matches!(
+                    row.target,
+                    crate::app::state::NavigatorTarget::Tab {
+                        ws_idx: 0,
+                        tab_idx: 0
+                    }
+                )
+        }));
+
+        state.navigator.query = "baz".into();
+        state.select_first_navigator_match_from(&crate::terminal::TerminalRuntimeRegistry::new());
+        let rows = state.navigator_rows();
+        assert!(rows
+            .get(state.navigator.selected)
+            .is_some_and(|row| matches!(
+                row.target,
+                crate::app::state::NavigatorTarget::Tab {
+                    ws_idx: 1,
+                    tab_idx: 0
+                }
+            )));
+        assert!(!rows.iter().any(|row| matches!(
+            row.target,
+            crate::app::state::NavigatorTarget::Workspace { ws_idx: 0 }
+                | crate::app::state::NavigatorTarget::Tab { ws_idx: 0, .. }
+                | crate::app::state::NavigatorTarget::Pane { ws_idx: 0, .. }
+        )));
+
+        assert!(state.accept_navigator_selection());
+        assert_eq!(state.active, Some(1));
+        assert_eq!(state.workspaces[1].active_tab_index(), 0);
+        assert_eq!(state.mode, Mode::Terminal);
     }
 
     #[tokio::test]
