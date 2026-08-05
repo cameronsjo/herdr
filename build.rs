@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -38,11 +39,11 @@ fn env_bool(name: &str) -> Option<bool> {
 /// archive can link one day and fail the next. `libtool -static` rewrites the
 /// member offsets with the padding the linker expects.
 ///
-/// `-arch_only` is required, not optional: without it `libtool` keeps only the
-/// members matching the host architecture, so cross-arch builds produce an
-/// archive with nothing in it and the link fails on undefined `ghostty_*`
-/// symbols rather than on anything that names the real cause.
-fn realign_macos_archive(static_lib: &PathBuf, target: &str) -> PathBuf {
+/// `-arch_only` pins the repack to the target architecture rather than letting
+/// `libtool` infer one on a runner whose host architecture differs — the macOS
+/// builds cross-compile x86_64 from an arm64 runner, so the inferred answer is
+/// not reliably the one we want.
+fn realign_macos_archive(static_lib: &Path, target: &str) -> PathBuf {
     let arch = match target {
         "x86_64-apple-darwin" => "x86_64",
         "aarch64-apple-darwin" => "arm64",
@@ -68,17 +69,23 @@ fn realign_macos_archive(static_lib: &PathBuf, target: &str) -> PathBuf {
         output.status
     );
 
-    // A repack that silently drops every member links fine here and fails much
-    // later on undefined ghostty_* symbols, so check the result carries symbols
-    // for the architecture we asked for rather than trusting the exit code.
+    // A repack that drops every member still exits 0, and the emptiness only
+    // surfaces much later as undefined ghostty_* symbols at link time. Listing
+    // the result keeps that failure here, where the cause has a name.
     let members = Command::new("xcrun")
         .arg("ar")
         .arg("t")
         .arg(&aligned)
         .output()
         .expect("failed to list repacked archive members");
+    assert!(
+        members.status.success(),
+        "listing members of {} failed: {}: {}",
+        aligned.display(),
+        members.status,
+        String::from_utf8_lossy(&members.stderr).trim()
+    );
     let count = String::from_utf8_lossy(&members.stdout).lines().count();
-    println!("cargo:warning=libghostty-vt {arch} archive members after repack: {count}");
     assert!(
         count > 0,
         "libtool repack of {} produced an archive with no {arch} members",
