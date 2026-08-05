@@ -50,15 +50,38 @@ fn realign_macos_archive(static_lib: &PathBuf, target: &str) -> PathBuf {
     };
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let aligned = out_dir.join("libghostty-vt-aligned.a");
-    let status = Command::new("xcrun")
+    let output = Command::new("xcrun")
         .args(["libtool", "-static", "-arch_only", arch, "-o"])
         .arg(&aligned)
         .arg(static_lib)
-        .status()
+        .output()
         .expect("failed to execute libtool for vendored libghostty-vt");
+    for stream in [&output.stdout, &output.stderr] {
+        for line in String::from_utf8_lossy(stream).lines() {
+            println!("cargo:warning=libtool: {line}");
+        }
+    }
     assert!(
-        status.success(),
-        "libtool repack of {} failed: {status}",
+        output.status.success(),
+        "libtool repack of {} failed: {}",
+        static_lib.display(),
+        output.status
+    );
+
+    // A repack that silently drops every member links fine here and fails much
+    // later on undefined ghostty_* symbols, so check the result carries symbols
+    // for the architecture we asked for rather than trusting the exit code.
+    let members = Command::new("xcrun")
+        .arg("ar")
+        .arg("t")
+        .arg(&aligned)
+        .output()
+        .expect("failed to list repacked archive members");
+    let count = String::from_utf8_lossy(&members.stdout).lines().count();
+    println!("cargo:warning=libghostty-vt {arch} archive members after repack: {count}");
+    assert!(
+        count > 0,
+        "libtool repack of {} produced an archive with no {arch} members",
         static_lib.display()
     );
     aligned
