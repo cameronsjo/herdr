@@ -29,6 +29,31 @@ fn env_bool(name: &str) -> Option<bool> {
     }
 }
 
+/// Repack a zig-produced static archive through Apple's `libtool`.
+///
+/// Zig's archiver writes members back to back without padding. Apple's linker
+/// requires every 64-bit mach-o member to start on an 8-byte boundary and fails
+/// the link with "not 8-byte aligned" when it has to read one that does not —
+/// which member it names depends on what dead-stripping keeps, so the same
+/// archive can link one day and fail the next. `libtool -static` rewrites the
+/// member offsets with the padding the linker expects.
+fn realign_macos_archive(static_lib: &PathBuf) -> PathBuf {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let aligned = out_dir.join("libghostty-vt-aligned.a");
+    let status = Command::new("xcrun")
+        .args(["libtool", "-static", "-no_warning_for_no_symbols", "-o"])
+        .arg(&aligned)
+        .arg(static_lib)
+        .status()
+        .expect("failed to execute libtool for vendored libghostty-vt");
+    assert!(
+        status.success(),
+        "libtool repack of {} failed: {status}",
+        static_lib.display()
+    );
+    aligned
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=vendor/libghostty-vt.vendor.json");
@@ -83,7 +108,7 @@ fn main() {
     let lib_dir = vendored_dir.join("zig-out/lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     if target.contains("apple-darwin") {
-        let static_lib = lib_dir.join("libghostty-vt.a");
+        let static_lib = realign_macos_archive(&lib_dir.join("libghostty-vt.a"));
         println!("cargo:rustc-link-arg={}", static_lib.display());
     } else if target.contains("windows-msvc") {
         println!("cargo:rustc-link-lib=static=ghostty-vt-static");
