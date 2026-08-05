@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -27,6 +28,70 @@ fn env_bool(name: &str) -> Option<bool> {
         Err(env::VarError::NotPresent) => None,
         Err(err) => panic!("failed to read {name}: {err}"),
     }
+}
+
+/// Repack a zig-produced static archive through Apple's `libtool`.
+///
+/// Zig's archiver writes members back to back without padding. Apple's linker
+/// requires every 64-bit mach-o member to start on an 8-byte boundary and fails
+/// the link with "not 8-byte aligned" when it has to read one that does not —
+/// which member it names depends on what dead-stripping keeps, so the same
+/// archive can link one day and fail the next. `libtool -static` rewrites the
+/// member offsets with the padding the linker expects.
+///
+/// `-arch_only` pins the repack to the target architecture rather than letting
+/// `libtool` infer one on a runner whose host architecture differs — the macOS
+/// builds cross-compile x86_64 from an arm64 runner, so the inferred answer is
+/// not reliably the one we want.
+fn realign_macos_archive(static_lib: &Path, target: &str) -> PathBuf {
+    let arch = match target {
+        "x86_64-apple-darwin" => "x86_64",
+        "aarch64-apple-darwin" => "arm64",
+        other => panic!("unsupported macOS target for archive realignment: {other}"),
+    };
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let aligned = out_dir.join("libghostty-vt-aligned.a");
+    let output = Command::new("xcrun")
+        .args(["libtool", "-static", "-arch_only", arch, "-o"])
+        .arg(&aligned)
+        .arg(static_lib)
+        .output()
+        .expect("failed to execute libtool for vendored libghostty-vt");
+    for stream in [&output.stdout, &output.stderr] {
+        for line in String::from_utf8_lossy(stream).lines() {
+            println!("cargo:warning=libtool: {line}");
+        }
+    }
+    assert!(
+        output.status.success(),
+        "libtool repack of {} failed: {}",
+        static_lib.display(),
+        output.status
+    );
+
+    // A repack that drops every member still exits 0, and the emptiness only
+    // surfaces much later as undefined ghostty_* symbols at link time. Listing
+    // the result keeps that failure here, where the cause has a name.
+    let members = Command::new("xcrun")
+        .arg("ar")
+        .arg("t")
+        .arg(&aligned)
+        .output()
+        .expect("failed to list repacked archive members");
+    assert!(
+        members.status.success(),
+        "listing members of {} failed: {}: {}",
+        aligned.display(),
+        members.status,
+        String::from_utf8_lossy(&members.stderr).trim()
+    );
+    let count = String::from_utf8_lossy(&members.stdout).lines().count();
+    assert!(
+        count > 0,
+        "libtool repack of {} produced an archive with no {arch} members",
+        static_lib.display()
+    );
+    aligned
 }
 
 fn main() {
@@ -83,7 +148,7 @@ fn main() {
     let lib_dir = vendored_dir.join("zig-out/lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     if target.contains("apple-darwin") {
-        let static_lib = lib_dir.join("libghostty-vt.a");
+        let static_lib = realign_macos_archive(&lib_dir.join("libghostty-vt.a"), &target);
         println!("cargo:rustc-link-arg={}", static_lib.display());
     } else if target.contains("windows-msvc") {
         println!("cargo:rustc-link-lib=static=ghostty-vt-static");
