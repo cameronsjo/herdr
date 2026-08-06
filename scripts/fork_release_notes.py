@@ -13,6 +13,12 @@ from pathlib import Path
 
 SHA256_RE = re.compile(r"^sha256=(?P<digest>[0-9a-f]{64})\s", re.MULTILINE)
 FIELD_RE = re.compile(r"^(?P<key>[a-z_]+)=(?P<value>.*)$", re.MULTILINE)
+# The notes embed the tag in a Ruby snippet meant to be pasted into the Homebrew
+# formula, where it runs at `brew install` time. An unconstrained tag could carry
+# a quote and escape that string literal, so the shape is enforced here rather
+# than trusted — upstream's release workflow checked the tag against Cargo.toml,
+# and this fork's pipeline dropped that step.
+TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-palette\.\d+)?$")
 
 TEMPLATE = """\
 Fork build of herdr carrying the command palette, built from `{commit}`.
@@ -56,6 +62,12 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--artifact", default="herdr-macos-aarch64")
     args = parser.parse_args()
+
+    if not TAG_RE.match(args.tag):
+        raise SystemExit(
+            f"refusing to compose notes for tag {args.tag!r}: "
+            "expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-palette.N"
+        )
 
     fields = parse_build_info(args.build_info.read_text(encoding="utf-8"))
     notes = TEMPLATE.format(

@@ -108,8 +108,15 @@ jobs:
         with:
           name: ${{ env.ARTIFACT }}
 
+      # The tap trusts the sha256 in the notes, so confirm it describes the file
+      # actually being uploaded rather than restating what the build job claimed.
+      - name: Verify the artifact matches its recorded digest
+        run: |
+          grep '^sha256=' BUILD_INFO.txt | sed 's/^sha256=//' > artifact.sha256
+          shasum -a 256 -c artifact.sha256
+
       - name: Compose release notes
-        run: python3 scripts/fork_release_notes.py --build-info BUILD_INFO.txt --tag "$GITHUB_REF_NAME" --output RELEASE_NOTES.md
+        run: python3 scripts/fork_release_notes.py --build-info BUILD_INFO.txt --tag "$GITHUB_REF_NAME" --artifact "$ARTIFACT" --output RELEASE_NOTES.md
 
       - name: Create release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3

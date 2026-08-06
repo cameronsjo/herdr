@@ -47,15 +47,30 @@ echo "==> $behind commit(s) behind upstream (through $upstream_sha)"
 
 git switch --quiet --create "$BRANCH"
 
-# --no-commit so the README rule can apply before the merge commit is written.
-git merge --no-commit --no-ff upstream/master || true
+# --no-commit so the fork-owned rules can apply before the merge commit is
+# written. Only exit 1 means "conflicts"; anything else (unrelated histories, a
+# bad ref, a dirty tree) is a real failure and must not fall through to a commit.
+merge_status=0
+git merge --no-commit --no-ff upstream/master || merge_status=$?
+if [[ $merge_status -gt 1 ]]; then
+  echo "error: git merge failed for a reason other than conflicts (exit $merge_status)" >&2
+  git merge --abort 2>/dev/null || true
+  exit "$merge_status"
+fi
 
+# Restore fork-owned files unconditionally, not just when they conflict. A
+# conflict-only rule leaks: if upstream edits a region the fork left alone, git
+# merges it cleanly and upstream content lands in a file this script claims the
+# fork owns outright. Restoring from HEAD (still the pre-merge fork tip during a
+# --no-commit merge) makes "owned" mean owned.
 for owned in "${FORK_OWNED[@]}"; do
-  if [[ -n $(git ls-files --unmerged -- "$owned") ]]; then
-    echo "==> keeping the fork's $owned over upstream's"
-    git checkout --ours -- "$owned"
-    git add -- "$owned"
+  if ! git cat-file -e "HEAD:$owned" 2>/dev/null; then
+    echo "==> $owned is not in the fork tree; leaving upstream's copy alone"
+    continue
   fi
+  git checkout HEAD -- "$owned"
+  git add -- "$owned"
+  echo "==> kept the fork's $owned"
 done
 
 unresolved=$(git diff --name-only --diff-filter=U)
@@ -69,5 +84,24 @@ fi
 
 git commit --quiet --message "chore(sync): merge upstream through ${upstream_sha}"
 echo "==> merged upstream through $upstream_sha"
+
+# Upstream changes under these paths execute on push to master, and a clean
+# merge gives the reviewer no signal that they moved. Surface them by name so a
+# sync that touches CI never reads like ordinary source churn.
+sensitive=$(git diff --name-only HEAD^1 HEAD -- '.github/**' 'scripts/**' 'build.rs' || true)
+if [[ -n $sensitive ]]; then
+  echo "==> this sync changes CI or build tooling:"
+  echo "${sensitive//$'\n'/$'\n    '}" | sed '1s/^/    /'
+fi
+
 emit "synced=true"
 emit "base=$upstream_sha"
+# Multi-line values need heredoc syntax; a bare key=value would truncate at the
+# first newline and silently drop every path after the first.
+if [[ -n ${GITHUB_OUTPUT:-} && -n $sensitive ]]; then
+  {
+    echo "sensitive<<SYNC_EOF"
+    echo "$sensitive"
+    echo "SYNC_EOF"
+  } >>"$GITHUB_OUTPUT"
+fi
