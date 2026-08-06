@@ -1,0 +1,62 @@
+name: Sync upstream
+
+# Keeps this fork tracking herdrdev/herdr without anyone remembering to. The
+# merge itself lives in scripts/sync-upstream-ci.sh; this workflow only decides
+# when to run it and how to surface the result.
+#
+# The PR is opened with GITHUB_TOKEN, so GitHub will not trigger workflows on
+# it — CI does not run on the sync PR. Close and reopen it (or push a commit)
+# to get a CI run before merging.
+
+on:
+  schedule:
+    # Mondays, 08:23 UTC — off the hour so it is not queued behind everything
+    # else scheduled at :00.
+    - cron: "23 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # persist-credentials: false matters more here than anywhere else in the
+      # repo: this job merges a third-party repository into the tree, and the
+      # default checkout would leave a repo-write token in .git/config while
+      # that content sits there. The push step supplies the token explicitly
+      # instead, so the two never coexist.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Name the sync branch
+        id: name
+        run: echo "branch=chore/sync-upstream-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        env:
+          BRANCH: ${{ steps.name.outputs.branch }}
+        run: scripts/sync-upstream-ci.sh https://github.com/herdrdev/herdr.git "$BRANCH"
+
+      - name: Push and open a pull request
+        if: steps.merge.outputs.synced == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.name.outputs.branch }}
+          BASE: ${{ steps.merge.outputs.base }}
+          SENSITIVE: ${{ steps.merge.outputs.sensitive }}
+        run: scripts/open-sync-pr.sh
