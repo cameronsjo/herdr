@@ -123,3 +123,66 @@ jobs:
         with:
           files: ${{ env.ARTIFACT }}
           body_path: RELEASE_NOTES.md
+
+  # A separate job on purpose. The tap-write token is the highest-value
+  # credential here — it reaches the tap that installs software on real
+  # machines — and this job checks out nothing, so that token never shares a
+  # runner with the fork tree, which carries upstream code merged weekly.
+  # It runs after `release` so a failed publish never points the formula at a
+  # release nobody can download.
+  tap-bump:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # actions: read is what download-artifact needs; nothing here writes to this
+    # repo, so contents stays unset. The tap write travels on the App token.
+    permissions:
+      actions: read
+
+    steps:
+      - name: Download build info
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ env.ARTIFACT }}
+
+      - name: Read the artifact digest
+        id: digest
+        run: |
+          sha=$(grep '^sha256=' BUILD_INFO.txt | sed 's/^sha256=//' | awk '{print $1}')
+          # Guard here rather than letting an empty value travel: the tap would
+          # reject it, but the failure would surface in the tap's run instead of
+          # this one, where it is actually diagnosable.
+          if [[ ! "$sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::BUILD_INFO.txt carries no usable sha256"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a tap-scoped token
+        id: tap-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # client-id, not the deprecated app-id: the numeric App ID in
+          # RELEASE_APP_ID stays valid under this parameter, and the rename
+          # needs v3.1.0+. Same wiring as cameronsjo/cadence-hooks.
+          client-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: homebrew-tap
+          # Scope the token to what a dispatch needs, not to everything the App
+          # installation happens to hold on the tap.
+          permission-contents: write
+
+      - name: Bump the Homebrew formula
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ steps.digest.outputs.sha }}
+        run: |
+          # Only the arm64 macOS sha: the tap's receiver requires the supplied
+          # platforms to match the ones the formula actually builds for, and
+          # this formula carries a single binary.
+          gh api repos/cameronsjo/homebrew-tap/dispatches \
+            -f event_type=update-formula \
+            -f "client_payload[formula]=herdr" \
+            -f "client_payload[version]=${TAG#v}" \
+            -f "client_payload[sha_macos_aarch64]=${SHA}"
