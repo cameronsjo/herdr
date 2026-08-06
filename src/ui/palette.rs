@@ -23,7 +23,7 @@ pub(crate) struct PaletteCommand {
 }
 
 pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
-    super::keybind_help::keybind_help_groups(app)
+    let mut commands: Vec<PaletteCommand> = super::keybind_help::keybind_help_groups(app)
         .into_iter()
         .flat_map(|(_, entries)| entries)
         .filter_map(|entry| {
@@ -33,7 +33,45 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
                 action: entry.action?,
             })
         })
-        .collect()
+        .collect();
+
+    for (index, action) in crate::app::palette_plugin_actions(app)
+        .into_iter()
+        .enumerate()
+    {
+        commands.push(PaletteCommand {
+            name: Cow::Owned(format!(
+                "{} — {}",
+                plugin_display_name(app, &action.plugin_id),
+                action.title
+            )),
+            key: String::new(),
+            action: NavigateAction::InvokePluginAction(index),
+        });
+    }
+    for (index, (plugin_id, pane)) in crate::app::palette_plugin_panes(app)
+        .into_iter()
+        .enumerate()
+    {
+        commands.push(PaletteCommand {
+            name: Cow::Owned(format!(
+                "{} — {}",
+                plugin_display_name(app, &plugin_id),
+                pane.title
+            )),
+            key: String::new(),
+            action: NavigateAction::OpenPluginPane(index),
+        });
+    }
+
+    commands
+}
+
+fn plugin_display_name(app: &AppState, plugin_id: &str) -> String {
+    app.installed_plugins
+        .get(plugin_id)
+        .map(|plugin| plugin.name.clone())
+        .unwrap_or_else(|| plugin_id.to_string())
 }
 
 /// Ranking by match quality rather than list order keeps a query that exactly

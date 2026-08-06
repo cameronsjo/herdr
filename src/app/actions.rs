@@ -376,6 +376,7 @@ impl AppState {
         self.navigator.scroll = 0;
         self.navigator.expanded_workspaces.clear();
         self.navigator.pending_pane_move = None;
+        self.pending_pane_split = None;
 
         for ws in &self.workspaces {
             self.navigator.expanded_workspaces.insert(ws.id.clone());

@@ -6,12 +6,13 @@ mod runtime;
 
 use super::responses::{encode_error, encode_success};
 use crate::api::schema::{
-    InstalledPluginInfo, PluginActionInfo, PluginActionInvokeParams, PluginActionListParams,
-    PluginLinkParams, PluginListParams, PluginLogListParams, PluginManifestAction,
-    PluginManifestLinkHandler, PluginPaneCloseParams, PluginPaneFocusParams, PluginPaneInfo,
-    PluginPaneOpenParams, PluginPanePlacement, PluginSetEnabledParams, PluginUnlinkParams,
-    ResponseResult,
+    InstalledPluginInfo, PluginActionContext, PluginActionInfo, PluginActionInvokeParams,
+    PluginActionListParams, PluginLinkParams, PluginListParams, PluginLogListParams,
+    PluginManifestAction, PluginManifestLinkHandler, PluginManifestPane, PluginPaneCloseParams,
+    PluginPaneFocusParams, PluginPaneInfo, PluginPaneOpenParams, PluginPanePlacement,
+    PluginSetEnabledParams, PluginUnlinkParams, ResponseResult,
 };
+use crate::app::state::AppState;
 use crate::app::App;
 pub(super) use manifest::normalize_plugin_id;
 use manifest::{
@@ -700,6 +701,61 @@ fn manifest_actions(
                 .iter()
                 .map(|action| manifest_action_info(&plugin.plugin_id, &plugin.platforms, action))
         })
+}
+
+/// Enabled plugin actions applicable right now, sorted deterministically so a
+/// palette row and its dispatch resolve the same index within one key press.
+pub(crate) fn palette_plugin_actions(state: &AppState) -> Vec<PluginActionInfo> {
+    let mut actions = manifest_actions(&state.installed_plugins)
+        .filter(|action| {
+            state
+                .installed_plugins
+                .get(&action.plugin_id)
+                .is_some_and(|plugin| plugin.enabled)
+        })
+        .filter(|action| plugin_action_context_applies(&action.contexts, state))
+        .collect::<Vec<_>>();
+    actions.sort_by_key(PluginActionInfo::qualified_id);
+    actions
+}
+
+/// The manifest declares `contexts` but nothing else in herdr enforces it yet
+/// (it is pure metadata on the keybind/API paths) — the palette is the first
+/// consumer, so this is a new, minimal reading: a context applies when the
+/// current focus can satisfy it, and an action with no declared contexts
+/// always applies.
+fn plugin_action_context_applies(contexts: &[PluginActionContext], state: &AppState) -> bool {
+    if contexts.is_empty() {
+        return true;
+    }
+    contexts.iter().any(|context| match context {
+        PluginActionContext::Global => true,
+        PluginActionContext::Workspace | PluginActionContext::Tab => state.active.is_some(),
+        PluginActionContext::Pane => state.focused_public_pane_id().is_some(),
+        // The palette has no text selection of its own to offer.
+        PluginActionContext::Selection => false,
+    })
+}
+
+/// Enabled plugin panes, paired with their owning plugin id, sorted
+/// deterministically for the same reason as `palette_plugin_actions`.
+pub(crate) fn palette_plugin_panes(state: &AppState) -> Vec<(String, PluginManifestPane)> {
+    let mut panes = state
+        .installed_plugins
+        .values()
+        .filter(|plugin| plugin.enabled && plugin_manifest_available(plugin))
+        .flat_map(|plugin| {
+            plugin
+                .panes
+                .iter()
+                .cloned()
+                .map(move |pane| (plugin.plugin_id.clone(), pane))
+        })
+        .collect::<Vec<_>>();
+    panes.sort_by(|(a_plugin, a_pane), (b_plugin, b_pane)| {
+        (a_plugin, &a_pane.id).cmp(&(b_plugin, &b_pane.id))
+    });
+    panes
 }
 
 #[cfg(test)]

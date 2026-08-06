@@ -366,6 +366,57 @@ pub(crate) fn handle_palette_key(state: &mut AppState, key: TerminalKey) -> Opti
     None
 }
 
+fn toggle_pane_split_direction(state: &mut AppState) {
+    use crate::api::schema::SplitDirection;
+    if let Some(pending) = state.pending_pane_split.as_mut() {
+        pending.direction = if pending.direction == SplitDirection::Right {
+            SplitDirection::Down
+        } else {
+            SplitDirection::Right
+        };
+    }
+}
+
+fn pane_split_choice_for(state: &AppState) -> Option<super::navigate::PaneSplitChoice> {
+    use super::navigate::PaneSplitChoice;
+    use crate::api::schema::SplitDirection;
+    let pending = state.pending_pane_split.as_ref()?;
+    Some(if pending.direction == SplitDirection::Right {
+        PaneSplitChoice::Vertical
+    } else {
+        PaneSplitChoice::Horizontal
+    })
+}
+
+#[must_use]
+pub(crate) fn handle_pane_split_direction_key(
+    state: &mut AppState,
+    key: TerminalKey,
+) -> Option<NavigateAction> {
+    use super::navigate::PaneSplitChoice;
+    match key.code {
+        KeyCode::Esc => leave_modal(state),
+        KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+            toggle_pane_split_direction(state)
+        }
+        KeyCode::Char('v') => {
+            return Some(NavigateAction::CompletePaneSplit(PaneSplitChoice::Vertical))
+        }
+        KeyCode::Char('h') => {
+            return Some(NavigateAction::CompletePaneSplit(
+                PaneSplitChoice::Horizontal,
+            ))
+        }
+        KeyCode::Enter => {
+            if let Some(choice) = pane_split_choice_for(state) {
+                return Some(NavigateAction::CompletePaneSplit(choice));
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 pub(crate) fn handle_keybind_help_key(state: &mut AppState, key: TerminalKey) {
     if state.keybind_help.search_focused {
         let text_char = keybind_help_text_char(key.clone());
@@ -509,6 +560,7 @@ pub(super) fn open_new_tab_dialog(state: &mut AppState) {
 
 pub(super) fn leave_modal(state: &mut AppState) {
     state.navigator.pending_pane_move = None;
+    state.pending_pane_split = None;
     if state.active.is_some() {
         state.mode = Mode::Terminal;
     } else {

@@ -9,6 +9,7 @@ mod agent_resume;
 pub(crate) mod agent_view;
 mod agents;
 mod api;
+pub(crate) use api::plugins::{palette_plugin_actions, palette_plugin_panes};
 mod api_helpers;
 pub(crate) use api_helpers::limit_snapshot_lines;
 mod config_io;
@@ -568,6 +569,7 @@ impl App {
             keybind_help: state::KeybindHelpState::default(),
             command_palette: state::PaletteState::default(),
             navigator: state::NavigatorState::default(),
+            pending_pane_split: None,
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
@@ -1836,6 +1838,11 @@ impl App {
             }
             Mode::Palette => {
                 if let Some(action) = input::handle_palette_key(&mut self.state, key) {
+                    self.run_overlay_action(action);
+                }
+            }
+            Mode::MoveSplitDirection => {
+                if let Some(action) = input::handle_pane_split_direction_key(&mut self.state, key) {
                     self.run_overlay_action(action);
                 }
             }
