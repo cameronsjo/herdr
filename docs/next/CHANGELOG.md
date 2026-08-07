@@ -10,6 +10,7 @@
 - Added palette commands to move the focused pane to an existing space, a new space, or a new tab. Choosing an existing space opens the session navigator as a destination picker offering a new space, each space as a new tab there, or each tab to split into, with the selected row's effect shown above the footer.
 - Moving a pane into an existing tab now prompts for which way it splits (vertical or horizontal) against that tab's focused pane, instead of always splitting right.
 - The command palette now lists every enabled plugin's actions and panes, invoking the existing `plugin.action.invoke` / `plugin.pane.open` API paths on selection. Entries are filtered by declared context (pane-scoped actions only show with a focused pane) and by platform support.
+- The command palette now matches "split vertical" and "split horizontal" against the pane context menu's "Split right"/"Split down" wording and "new pane", so a query using either vocabulary finds the same split actions. Keyword matches always rank below a direct name match.
 
 ### Fixed
 - Configs containing the retired Herdr-written `ui.agent_panel_scope` setting no longer report it as an unknown key after upgrades. (#2292)
