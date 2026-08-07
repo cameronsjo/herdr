@@ -52,8 +52,8 @@ pub(crate) use self::{
     lease::{ConsumedInputLease, ForwardedInputLease, InputLeaseKey, InputLeaseTable, RepeatPlan},
     modal::{
         handle_global_menu_key, handle_keybind_help_key, handle_navigator_key, handle_palette_key,
-        insert_keybind_help_query_text, insert_navigator_search_text, insert_rename_input_text,
-        open_new_workspace_dialog,
+        handle_pane_split_direction_key, insert_keybind_help_query_text,
+        insert_navigator_search_text, insert_rename_input_text, open_new_workspace_dialog,
     },
     navigate::{
         terminal_direct_indexed_navigation_action, terminal_direct_non_indexed_navigation_action,
@@ -123,6 +123,11 @@ impl App {
                 Mode::KeybindHelp => handle_keybind_help_key(&mut self.state, key),
                 Mode::Palette => {
                     if let Some(action) = handle_palette_key(&mut self.state, key) {
+                        self.run_overlay_action(action);
+                    }
+                }
+                Mode::MoveSplitDirection => {
+                    if let Some(action) = handle_pane_split_direction_key(&mut self.state, key) {
                         self.run_overlay_action(action);
                     }
                 }
@@ -456,6 +461,9 @@ impl App {
                         self.apply_rename_mouse_action_via_api(action)
                     }
                     MouseAction::ConfirmCloseAccept => self.confirm_close_accept_via_api(),
+                    MouseAction::CompletePaneSplit(choice) => {
+                        self.complete_pending_pane_split(choice)
+                    }
                     MouseAction::ContextMenu { menu, idx } => {
                         self.apply_context_menu_action_via_api(menu, idx)
                     }

@@ -6,12 +6,13 @@ mod runtime;
 
 use super::responses::{encode_error, encode_success};
 use crate::api::schema::{
-    InstalledPluginInfo, PluginActionInfo, PluginActionInvokeParams, PluginActionListParams,
-    PluginLinkParams, PluginListParams, PluginLogListParams, PluginManifestAction,
-    PluginManifestLinkHandler, PluginPaneCloseParams, PluginPaneFocusParams, PluginPaneInfo,
-    PluginPaneOpenParams, PluginPanePlacement, PluginSetEnabledParams, PluginUnlinkParams,
-    ResponseResult,
+    InstalledPluginInfo, PluginActionContext, PluginActionInfo, PluginActionInvokeParams,
+    PluginActionListParams, PluginLinkParams, PluginListParams, PluginLogListParams,
+    PluginManifestAction, PluginManifestLinkHandler, PluginManifestPane, PluginPaneCloseParams,
+    PluginPaneFocusParams, PluginPaneInfo, PluginPaneOpenParams, PluginPanePlacement,
+    PluginSetEnabledParams, PluginUnlinkParams, ResponseResult,
 };
+use crate::app::state::AppState;
 use crate::app::App;
 pub(super) use manifest::normalize_plugin_id;
 use manifest::{
@@ -700,6 +701,72 @@ fn manifest_actions(
                 .iter()
                 .map(|action| manifest_action_info(&plugin.plugin_id, &plugin.platforms, action))
         })
+}
+
+/// Enabled plugin actions applicable right now, sorted deterministically so a
+/// palette row and its dispatch resolve the same index within one key press.
+pub(crate) fn palette_plugin_actions(state: &AppState) -> Vec<PluginActionInfo> {
+    let mut actions = manifest_actions(&state.installed_plugins)
+        .filter(|action| {
+            state
+                .installed_plugins
+                .get(&action.plugin_id)
+                .is_some_and(|plugin| plugin.enabled)
+        })
+        .filter(|action| plugin_action_context_applies(&action.contexts, state))
+        // `action.platforms` already carries the effective (action-or-plugin)
+        // platform list, so invoking a listed row can't hit the same
+        // platform_unsupported error handle_plugin_action_invoke would raise.
+        .filter(|action| ensure_platform_supported(&action.platforms, "palette action").is_ok())
+        .collect::<Vec<_>>();
+    actions.sort_by_key(PluginActionInfo::qualified_id);
+    actions
+}
+
+/// The manifest declares `contexts` but nothing else in herdr enforces it yet
+/// (it is pure metadata on the keybind/API paths) — the palette is the first
+/// consumer, so this is a new, minimal reading: a context applies when the
+/// current focus can satisfy it, and an action with no declared contexts
+/// always applies.
+fn plugin_action_context_applies(contexts: &[PluginActionContext], state: &AppState) -> bool {
+    if contexts.is_empty() {
+        return true;
+    }
+    contexts.iter().any(|context| match context {
+        PluginActionContext::Global => true,
+        PluginActionContext::Workspace | PluginActionContext::Tab => state.active.is_some(),
+        PluginActionContext::Pane => state.focused_public_pane_id().is_some(),
+        // The palette has no text selection of its own to offer.
+        PluginActionContext::Selection => false,
+    })
+}
+
+/// Enabled plugin panes, paired with their owning plugin id, sorted
+/// deterministically for the same reason as `palette_plugin_actions`.
+pub(crate) fn palette_plugin_panes(state: &AppState) -> Vec<(String, PluginManifestPane)> {
+    let mut panes = state
+        .installed_plugins
+        .values()
+        .filter(|plugin| plugin.enabled && plugin_manifest_available(plugin))
+        .flat_map(|plugin| {
+            plugin
+                .panes
+                .iter()
+                .filter(|pane| {
+                    ensure_platform_supported(
+                        effective_platforms(&pane.platforms, &plugin.platforms),
+                        "palette pane",
+                    )
+                    .is_ok()
+                })
+                .cloned()
+                .map(move |pane| (plugin.plugin_id.clone(), pane))
+        })
+        .collect::<Vec<_>>();
+    panes.sort_by(|(a_plugin, a_pane), (b_plugin, b_pane)| {
+        (a_plugin, &a_pane.id).cmp(&(b_plugin, &b_pane.id))
+    });
+    panes
 }
 
 #[cfg(test)]
@@ -3657,5 +3724,184 @@ command = ["act.exe"]
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(registry_dir);
+    }
+
+    fn load_palette_fixture_plugin(name: &str, id: &str) -> InstalledPluginInfo {
+        let root = unique_temp_path(name);
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "{id}"
+name = "{id}"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+
+[[actions]]
+id = "pane-only"
+title = "Pane only"
+contexts = ["pane"]
+command = ["true"]
+
+[[actions]]
+id = "global"
+title = "Global"
+command = ["true"]
+
+[[panes]]
+id = "board"
+title = "Board"
+command = ["true"]
+"#
+            ),
+        );
+        load_plugin_manifest(&root.display().to_string(), true).unwrap()
+    }
+
+    #[test]
+    fn palette_plugin_actions_and_panes_filter_by_enabled_state_and_context_then_sort() {
+        let mut state = AppState::test_new();
+        state
+            .workspaces
+            .push(crate::workspace::Workspace::test_new("main"));
+        state.active = None;
+
+        let mut aaa = load_palette_fixture_plugin("palette-aaa", "example.aaa");
+        aaa.enabled = true;
+        let mut bbb = load_palette_fixture_plugin("palette-bbb", "example.bbb");
+        bbb.enabled = true;
+        state.installed_plugins.insert(aaa.plugin_id.clone(), aaa);
+        state.installed_plugins.insert(bbb.plugin_id.clone(), bbb);
+
+        // No active workspace/pane yet: the pane-scoped action is filtered
+        // out of both plugins, leaving only the two global actions.
+        let actions = super::palette_plugin_actions(&state);
+        assert_eq!(
+            actions
+                .iter()
+                .map(PluginActionInfo::qualified_id)
+                .collect::<Vec<_>>(),
+            vec!["example.aaa.global", "example.bbb.global"]
+        );
+
+        // A focused pane brings the pane-scoped actions back in, sorted
+        // alongside the global ones by qualified id.
+        state.active = Some(0);
+        state.selected = 0;
+        let actions = super::palette_plugin_actions(&state);
+        assert_eq!(
+            actions
+                .iter()
+                .map(PluginActionInfo::qualified_id)
+                .collect::<Vec<_>>(),
+            vec![
+                "example.aaa.global",
+                "example.aaa.pane-only",
+                "example.bbb.global",
+                "example.bbb.pane-only",
+            ]
+        );
+
+        // Panes carry no context filter, so both plugins' panes are listed,
+        // sorted by (plugin_id, pane_id).
+        let panes = super::palette_plugin_panes(&state);
+        assert_eq!(
+            panes
+                .iter()
+                .map(|(plugin_id, pane)| format!("{plugin_id}.{}", pane.id))
+                .collect::<Vec<_>>(),
+            vec!["example.aaa.board", "example.bbb.board"]
+        );
+
+        // Disabling a plugin drops it from both lists.
+        state
+            .installed_plugins
+            .get_mut("example.aaa")
+            .unwrap()
+            .enabled = false;
+        let actions = super::palette_plugin_actions(&state);
+        assert_eq!(
+            actions
+                .iter()
+                .map(PluginActionInfo::qualified_id)
+                .collect::<Vec<_>>(),
+            vec!["example.bbb.global", "example.bbb.pane-only"]
+        );
+        let panes = super::palette_plugin_panes(&state);
+        assert_eq!(
+            panes
+                .iter()
+                .map(|(plugin_id, pane)| format!("{plugin_id}.{}", pane.id))
+                .collect::<Vec<_>>(),
+            vec!["example.bbb.board"]
+        );
+    }
+
+    #[test]
+    fn palette_plugin_actions_and_panes_exclude_platform_unsupported_entries() {
+        let unsupported_platform = if cfg!(target_os = "windows") {
+            "macos"
+        } else {
+            "windows"
+        };
+
+        let mut state = AppState::test_new();
+        let root = unique_temp_path("palette-platform");
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "example.platform"
+name = "example.platform"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+
+[[actions]]
+id = "unsupported"
+title = "Unsupported"
+platforms = ["{unsupported_platform}"]
+command = ["true"]
+
+[[actions]]
+id = "supported"
+title = "Supported"
+command = ["true"]
+
+[[panes]]
+id = "unsupported-pane"
+title = "Unsupported pane"
+platforms = ["{unsupported_platform}"]
+command = ["true"]
+
+[[panes]]
+id = "supported-pane"
+title = "Supported pane"
+command = ["true"]
+"#
+            ),
+        );
+        let mut plugin = load_plugin_manifest(&root.display().to_string(), true).unwrap();
+        plugin.enabled = true;
+        state
+            .installed_plugins
+            .insert(plugin.plugin_id.clone(), plugin);
+
+        let actions = super::palette_plugin_actions(&state);
+        assert_eq!(
+            actions
+                .iter()
+                .map(PluginActionInfo::qualified_id)
+                .collect::<Vec<_>>(),
+            vec!["example.platform.supported"]
+        );
+
+        let panes = super::palette_plugin_panes(&state);
+        assert_eq!(
+            panes
+                .iter()
+                .map(|(_, pane)| pane.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["supported-pane"]
+        );
     }
 }

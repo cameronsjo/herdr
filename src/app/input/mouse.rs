@@ -21,6 +21,7 @@ use super::{
         apply_global_menu_action, confirm_close_cancel, global_menu_actions, leave_modal,
         modal_action_from_buttons, open_global_menu, open_new_tab_dialog, ModalAction,
     },
+    navigate::PaneSplitChoice,
     settings::SettingsAction,
     ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
 };
@@ -57,6 +58,7 @@ pub(super) enum MouseAction {
     },
     RenameModal(ModalAction),
     ConfirmCloseAccept,
+    CompletePaneSplit(PaneSplitChoice),
     ContextMenu {
         menu: ContextMenuState,
         idx: usize,
@@ -214,7 +216,10 @@ impl AppState {
 
         if matches!(
             self.mode,
-            Mode::NewLinkedWorktree | Mode::OpenExistingWorktree | Mode::ConfirmRemoveWorktree
+            Mode::NewLinkedWorktree
+                | Mode::OpenExistingWorktree
+                | Mode::ConfirmRemoveWorktree
+                | Mode::MoveSplitDirection
         ) && !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
             return None;
@@ -383,6 +388,33 @@ impl AppState {
                                 leave_modal(self);
                             }
                             _ => {}
+                        }
+                    }
+                    return None;
+                }
+
+                if self.mode == Mode::MoveSplitDirection {
+                    if let Some(popup) =
+                        crate::ui::pane_split_direction_popup_rect(self.screen_rect())
+                    {
+                        let inner = Rect::new(
+                            popup.x + 1,
+                            popup.y + 1,
+                            popup.width.saturating_sub(2),
+                            popup.height.saturating_sub(2),
+                        );
+                        let (vertical, horizontal) =
+                            crate::ui::pane_split_direction_button_rects(inner);
+                        match modal_action_from_buttons(
+                            mouse.column,
+                            mouse.row,
+                            &[
+                                (vertical, PaneSplitChoice::Vertical),
+                                (horizontal, PaneSplitChoice::Horizontal),
+                            ],
+                        ) {
+                            Some(choice) => return Some(MouseAction::CompletePaneSplit(choice)),
+                            None => leave_modal(self),
                         }
                     }
                     return None;
@@ -1891,7 +1923,10 @@ mod tests {
     use super::*;
     use crate::app::input::modal::handle_context_menu_key;
     use crate::{
-        app::state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+        app::{
+            state::{ContextMenuKind, ContextMenuState, MenuListState, Mode, ViewLayout},
+            App,
+        },
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
@@ -2712,6 +2747,112 @@ mod tests {
 
         assert_eq!(app.state.workspaces.len(), 1);
         assert_eq!(app.state.mode, Mode::Terminal);
+    }
+
+    fn app_with_pending_pane_split() -> App {
+        use crate::api::schema::SplitDirection;
+        use crate::app::state::PendingPaneSplit;
+
+        let mut app = app_for_mouse_test();
+        app.state.workspaces = vec![Workspace::test_new("main")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let target_tab = app.state.workspaces[0].test_add_tab(Some("target"));
+        let source_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let target_pane = app.state.workspaces[0].tabs[target_tab].root_pane;
+        let source_pane_id = app.public_pane_id(0, source_pane).unwrap();
+        let target_pane_id = app.public_pane_id(0, target_pane).unwrap();
+        let target_tab_id = app.public_tab_id(0, target_tab).unwrap();
+
+        app.state.pending_pane_split = Some(PendingPaneSplit {
+            pane_id: source_pane_id,
+            tab_id: target_tab_id,
+            target_pane_id: Some(target_pane_id),
+            direction: SplitDirection::Right,
+        });
+        app.state.mode = Mode::MoveSplitDirection;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
+        app
+    }
+
+    #[test]
+    fn clicking_horizontal_button_completes_the_pane_split() {
+        let mut app = app_with_pending_pane_split();
+        let popup = crate::ui::pane_split_direction_popup_rect(app.state.screen_rect()).unwrap();
+        let inner = Rect::new(
+            popup.x + 1,
+            popup.y + 1,
+            popup.width.saturating_sub(2),
+            popup.height.saturating_sub(2),
+        );
+        let (_, horizontal) = crate::ui::pane_split_direction_button_rects(inner);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            horizontal.x,
+            horizontal.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pending_pane_split.is_none());
+        // The source tab held only the moved pane, so it closed on move.
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[0].tabs[0].panes.len(), 2);
+    }
+
+    #[test]
+    fn clicking_outside_the_split_buttons_cancels_without_moving_the_pane() {
+        let mut app = app_with_pending_pane_split();
+        let popup = crate::ui::pane_split_direction_popup_rect(app.state.screen_rect()).unwrap();
+
+        // The popup's top-left corner (its border), not a button.
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            popup.x,
+            popup.y,
+        ));
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pending_pane_split.is_none());
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+    }
+
+    #[test]
+    fn clicking_outside_the_split_popup_does_not_reach_the_pane_underneath() {
+        let mut app = app_with_pending_pane_split();
+
+        // Somewhere clearly outside the centered popup: the corner of the
+        // screen. Before this mode was wired into mouse handling, this would
+        // fall through to normal pane-focus/click handling underneath.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0));
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert!(app.state.pending_pane_split.is_none());
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+    }
+
+    #[test]
+    fn right_click_while_split_direction_picker_is_open_does_not_open_a_context_menu() {
+        let mut app = app_with_pending_pane_split();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 5, 5));
+
+        assert_eq!(app.state.mode, Mode::MoveSplitDirection);
+        assert!(app.state.pending_pane_split.is_some());
+        assert!(app.state.context_menu.is_none());
+    }
+
+    #[test]
+    fn scroll_while_split_direction_picker_is_open_does_not_reach_the_sidebar() {
+        let mut app = app_with_pending_pane_split();
+        let scroll_before = app.state.workspace_scroll;
+
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 1, 1));
+
+        assert_eq!(app.state.mode, Mode::MoveSplitDirection);
+        assert!(app.state.pending_pane_split.is_some());
+        assert_eq!(app.state.workspace_scroll, scroll_before);
     }
 
     #[test]

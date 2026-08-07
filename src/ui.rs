@@ -25,7 +25,8 @@ mod widgets;
 
 use self::dialogs::{
     render_confirm_close_overlay, render_new_linked_worktree_overlay,
-    render_open_existing_worktree_overlay, render_remove_worktree_overlay, render_rename_overlay,
+    render_open_existing_worktree_overlay, render_pane_split_direction_overlay,
+    render_remove_worktree_overlay, render_rename_overlay,
 };
 use self::keybind_help::render_keybind_help_overlay;
 use self::menus::{
@@ -70,8 +71,9 @@ pub(crate) use self::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
         new_linked_worktree_inner_rect, open_existing_worktree_button_rects,
         open_existing_worktree_inner_rect, open_existing_worktree_max_visible_rows,
-        open_existing_worktree_visible_start, remove_worktree_button_rects,
-        remove_worktree_popup_rect, rename_button_rects,
+        open_existing_worktree_visible_start, pane_split_direction_button_rects,
+        pane_split_direction_popup_rect, remove_worktree_button_rects, remove_worktree_popup_rect,
+        rename_button_rects,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,
@@ -460,6 +462,7 @@ pub fn render_with_runtime_registry(
         Mode::GlobalMenu => render_global_launcher_menu(app, frame),
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Palette => render_palette_overlay(app, frame),
+        Mode::MoveSplitDirection => render_pane_split_direction_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
         Mode::Terminal => {}
     }

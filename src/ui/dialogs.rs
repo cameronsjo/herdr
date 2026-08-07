@@ -764,6 +764,116 @@ pub(crate) fn confirm_close_button_rects(inner: Rect) -> (Rect, Rect) {
     (rects[0], rects[1])
 }
 
+/// The popup rect for `Mode::MoveSplitDirection`, shared between rendering
+/// and mouse hit-testing so the two can never disagree about where the
+/// buttons are.
+pub(crate) fn pane_split_direction_popup_rect(area: Rect) -> Option<Rect> {
+    centered_popup_rect(area, 44, 6)
+}
+
+/// The vertical/horizontal button rects within the panel's inner rect (row 1
+/// of the 3-row title/buttons/footer layout), shared for the same reason as
+/// `pane_split_direction_popup_rect`.
+pub(crate) fn pane_split_direction_button_rects(inner: Rect) -> (Rect, Rect) {
+    let rects = action_button_row_rects(
+        inner,
+        &[
+            ActionButtonSpec {
+                hint: Some("v"),
+                label: "vertical",
+            },
+            ActionButtonSpec {
+                hint: Some("h"),
+                label: "horizontal",
+            },
+        ],
+        2,
+        1,
+    );
+    (rects[0], rects[1])
+}
+
+pub(super) fn render_pane_split_direction_overlay(app: &AppState, frame: &mut Frame) {
+    super::dim_background(frame, frame.area());
+
+    let Some(popup) = pane_split_direction_popup_rect(frame.area()) else {
+        return;
+    };
+    let Some(inner) = render_panel_shell(frame, popup, app.palette.accent, app.palette.panel_bg)
+    else {
+        return;
+    };
+    if inner.height < 3 {
+        return;
+    }
+
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas::<3>(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            " split into tab",
+            Style::default()
+                .fg(app.palette.text)
+                .add_modifier(Modifier::BOLD),
+        )])),
+        rows[0],
+    );
+
+    let selected_vertical = app
+        .pending_pane_split
+        .as_ref()
+        .is_some_and(|pending| pending.direction == crate::api::schema::SplitDirection::Right);
+    let selected_style = Style::default()
+        .fg(panel_contrast_fg(&app.palette))
+        .bg(app.palette.accent)
+        .add_modifier(Modifier::BOLD);
+    let unselected_style = Style::default()
+        .fg(app.palette.text)
+        .bg(app.palette.surface0)
+        .add_modifier(Modifier::BOLD);
+
+    let (vertical_rect, horizontal_rect) = pane_split_direction_button_rects(inner);
+    render_action_button(
+        frame,
+        vertical_rect,
+        Some("v"),
+        "vertical",
+        if selected_vertical {
+            selected_style
+        } else {
+            unselected_style
+        },
+    );
+    render_action_button(
+        frame,
+        horizontal_rect,
+        Some("h"),
+        "horizontal",
+        if selected_vertical {
+            unselected_style
+        } else {
+            selected_style
+        },
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("←→", Style::default().fg(app.palette.text)),
+            Span::styled(" choose  ", Style::default().fg(app.palette.overlay0)),
+            Span::styled("enter", Style::default().fg(app.palette.text)),
+            Span::styled(" confirm  ", Style::default().fg(app.palette.overlay0)),
+            Span::styled("esc", Style::default().fg(app.palette.text)),
+            Span::styled(" cancel", Style::default().fg(app.palette.overlay0)),
+        ])),
+        rows[2],
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{

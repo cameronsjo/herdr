@@ -427,6 +427,17 @@ impl App {
                 });
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::CompletePaneSplit(choice) => {
+                self.complete_pending_pane_split(choice);
+            }
+            NavigateAction::InvokePluginAction(index) => {
+                self.invoke_palette_plugin_action(index);
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::OpenPluginPane(index) => {
+                self.open_palette_plugin_pane(index);
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::AcceptNavigatorRow => {
                 // Returns early: `finish_action_context` would close the picker,
                 // since a failed accept deliberately leaves the mode unchanged.
@@ -700,7 +711,43 @@ impl App {
         let Some(pane_id) = self.state.navigator.pending_pane_move.take() else {
             return;
         };
+        // A tab destination is a split against an existing pane, so ask which
+        // way it splits instead of guessing; every other destination has no
+        // direction to choose.
+        if let crate::api::schema::PaneMoveDestination::Tab {
+            tab_id,
+            target_pane_id,
+            ..
+        } = destination
+        {
+            self.state.pending_pane_split = Some(crate::app::state::PendingPaneSplit {
+                pane_id,
+                tab_id,
+                target_pane_id,
+                direction: crate::api::schema::SplitDirection::Right,
+            });
+            self.state.mode = Mode::MoveSplitDirection;
+            return;
+        }
         self.move_pane_via_api(pane_id, destination);
+        self.state.mode = Mode::Terminal;
+    }
+
+    /// Runs the move a `Mode::MoveSplitDirection` prompt was armed for, once
+    /// the user has picked which way the pane splits into the destination tab.
+    pub(crate) fn complete_pending_pane_split(&mut self, choice: PaneSplitChoice) {
+        let Some(pending) = self.state.pending_pane_split.take() else {
+            return;
+        };
+        self.move_pane_via_api(
+            pending.pane_id,
+            crate::api::schema::PaneMoveDestination::Tab {
+                tab_id: pending.tab_id,
+                target_pane_id: pending.target_pane_id,
+                split: choice.into_split_direction(),
+                ratio: Some(0.5),
+            },
+        );
         self.state.mode = Mode::Terminal;
     }
 
@@ -743,6 +790,58 @@ impl App {
                 ratio: None,
             }),
         }
+    }
+
+    fn invoke_palette_plugin_action(&mut self, index: usize) {
+        let Some(action) = crate::app::palette_plugin_actions(&self.state)
+            .into_iter()
+            .nth(index)
+        else {
+            return;
+        };
+        if let Err(message) = self.invoke_plugin_action_from_keybind(action.qualified_id()) {
+            self.toast_plugin_error("plugin action failed", &message);
+        }
+    }
+
+    fn open_palette_plugin_pane(&mut self, index: usize) {
+        let Some((plugin_id, pane)) = crate::app::palette_plugin_panes(&self.state)
+            .into_iter()
+            .nth(index)
+        else {
+            return;
+        };
+        let response = self.handle_api_request(crate::api::schema::Request {
+            id: "tui.plugin.pane.open".to_string(),
+            method: crate::api::schema::Method::PluginPaneOpen(
+                crate::api::schema::PluginPaneOpenParams {
+                    plugin_id,
+                    entrypoint: pane.id,
+                    placement: None,
+                    width: None,
+                    height: None,
+                    workspace_id: None,
+                    target_pane_id: None,
+                    direction: None,
+                    cwd: None,
+                    focus: true,
+                    env: std::collections::HashMap::new(),
+                },
+            ),
+        });
+        self.toast_api_error("plugin pane failed", &response);
+    }
+
+    fn toast_plugin_error(&mut self, title: &str, message: &str) {
+        let previous_toast = self.state.toast.clone();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: title.to_string(),
+            context: message.to_string(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous_toast);
     }
 
     fn toast_api_error(&mut self, title: &str, response: &str) {
@@ -1517,6 +1616,24 @@ pub(crate) fn handle_navigate_key(state: &mut AppState, key: KeyEvent) {
     }
 }
 
+/// A split direction chosen from the two-option prompt, kept distinct from
+/// `crate::api::schema::SplitDirection` (which is not `Copy`) so `NavigateAction`
+/// can stay `Copy` end to end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneSplitChoice {
+    Vertical,
+    Horizontal,
+}
+
+impl PaneSplitChoice {
+    fn into_split_direction(self) -> crate::api::schema::SplitDirection {
+        match self {
+            Self::Vertical => crate::api::schema::SplitDirection::Right,
+            Self::Horizontal => crate::api::schema::SplitDirection::Down,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavigateAction {
     NewWorkspace,
@@ -1532,6 +1649,11 @@ pub(crate) enum NavigateAction {
     OpenCommandPalette,
     MovePaneToSpace,
     MovePaneToNewSpace,
+    CompletePaneSplit(PaneSplitChoice),
+    /// Index into `crate::app::palette_plugin_actions`.
+    InvokePluginAction(usize),
+    /// Index into `crate::app::palette_plugin_panes`.
+    OpenPluginPane(usize),
     MovePaneToNewTab,
     AcceptNavigatorRow,
     PreviousWorkspace,
@@ -1965,6 +2087,13 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::MovePaneToNewSpace | NavigateAction::MovePaneToNewTab => {
             leave_navigate_mode(state)
         }
+        NavigateAction::CompletePaneSplit(_) => {
+            state.pending_pane_split = None;
+            leave_navigate_mode(state);
+        }
+        NavigateAction::InvokePluginAction(_) | NavigateAction::OpenPluginPane(_) => {
+            leave_navigate_mode(state)
+        }
         NavigateAction::AcceptNavigatorRow => {
             if state.navigator.pending_pane_move.take().is_some() {
                 state.mode = Mode::Terminal;
@@ -2164,6 +2293,164 @@ mod tests {
         app.state.active = (!app.state.workspaces.is_empty()).then_some(0);
         app.state.selected = 0;
         app
+    }
+
+    #[test]
+    fn pane_split_direction_key_toggles_and_confirms_current_choice() {
+        use crate::api::schema::SplitDirection;
+        use crate::app::state::PendingPaneSplit;
+
+        let mut state = state_with_workspaces(&["test"]);
+        state.mode = Mode::MoveSplitDirection;
+        state.pending_pane_split = Some(PendingPaneSplit {
+            pane_id: "pane".into(),
+            tab_id: "tab".into(),
+            target_pane_id: None,
+            direction: SplitDirection::Right,
+        });
+
+        // Arrow/tab keys toggle the pending direction without confirming.
+        let key = |code| TerminalKey::new(code, KeyModifiers::empty());
+        assert_eq!(
+            super::super::modal::handle_pane_split_direction_key(&mut state, key(KeyCode::Right)),
+            None
+        );
+        assert_eq!(
+            state.pending_pane_split.as_ref().unwrap().direction,
+            SplitDirection::Down
+        );
+        assert_eq!(
+            super::super::modal::handle_pane_split_direction_key(&mut state, key(KeyCode::Left)),
+            None
+        );
+        assert_eq!(
+            state.pending_pane_split.as_ref().unwrap().direction,
+            SplitDirection::Right
+        );
+
+        // Enter confirms whatever direction is currently selected.
+        assert_eq!(
+            super::super::modal::handle_pane_split_direction_key(&mut state, key(KeyCode::Enter)),
+            Some(NavigateAction::CompletePaneSplit(PaneSplitChoice::Vertical))
+        );
+
+        // 'h'/'v' confirm a specific direction directly, regardless of the
+        // currently toggled state.
+        assert_eq!(
+            super::super::modal::handle_pane_split_direction_key(
+                &mut state,
+                key(KeyCode::Char('h'))
+            ),
+            Some(NavigateAction::CompletePaneSplit(
+                PaneSplitChoice::Horizontal
+            ))
+        );
+    }
+
+    #[test]
+    fn pane_split_direction_esc_cancels_pending_split() {
+        use crate::api::schema::SplitDirection;
+        use crate::app::state::PendingPaneSplit;
+
+        let mut state = state_with_workspaces(&["test"]);
+        state.mode = Mode::MoveSplitDirection;
+        state.pending_pane_split = Some(PendingPaneSplit {
+            pane_id: "pane".into(),
+            tab_id: "tab".into(),
+            target_pane_id: None,
+            direction: SplitDirection::Right,
+        });
+
+        let action = super::super::modal::handle_pane_split_direction_key(
+            &mut state,
+            TerminalKey::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+
+        assert_eq!(action, None);
+        assert!(state.pending_pane_split.is_none());
+        assert_eq!(state.mode, Mode::Terminal);
+    }
+
+    fn pane_rect(
+        app: &App,
+        ws_idx: usize,
+        tab_idx: usize,
+        pane_id: crate::layout::PaneId,
+    ) -> ratatui::layout::Rect {
+        let area = ratatui::layout::Rect::new(0, 0, 120, 60);
+        app.state.workspaces[ws_idx].tabs[tab_idx]
+            .layout
+            .panes(area)
+            .into_iter()
+            .find(|info| info.id == pane_id)
+            .expect("pane present in layout")
+            .rect
+    }
+
+    #[test]
+    fn complete_pending_pane_split_applies_the_chosen_direction() {
+        use crate::api::schema::SplitDirection;
+        use crate::app::state::PendingPaneSplit;
+
+        for (choice, expect_stacked) in [
+            (PaneSplitChoice::Vertical, false),
+            (PaneSplitChoice::Horizontal, true),
+        ] {
+            let mut app = app_with_test_workspaces(&["main"]);
+            let target_tab = app.state.workspaces[0].test_add_tab(Some("target"));
+            let source_pane = app.state.workspaces[0].tabs[0].root_pane;
+            let target_pane = app.state.workspaces[0].tabs[target_tab].root_pane;
+            let source_pane_id = app.public_pane_id(0, source_pane).unwrap();
+            let target_pane_id = app.public_pane_id(0, target_pane).unwrap();
+            let target_tab_id = app.public_tab_id(0, target_tab).unwrap();
+
+            app.state.pending_pane_split = Some(PendingPaneSplit {
+                pane_id: source_pane_id,
+                tab_id: target_tab_id,
+                target_pane_id: Some(target_pane_id),
+                direction: SplitDirection::Right,
+            });
+            app.state.mode = Mode::MoveSplitDirection;
+
+            app.complete_pending_pane_split(choice);
+
+            assert_eq!(app.state.mode, Mode::Terminal);
+            assert!(app.state.pending_pane_split.is_none());
+            // The source tab held only the moved pane, so it closes and the
+            // target tab (now the only one) shifts down to index 0.
+            assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+
+            let moved_rect = pane_rect(&app, 0, 0, source_pane);
+            let target_rect = pane_rect(&app, 0, 0, target_pane);
+            let stacked = moved_rect.x == target_rect.x && moved_rect.y != target_rect.y;
+            let side_by_side = moved_rect.y == target_rect.y && moved_rect.x != target_rect.x;
+            assert!(
+                stacked ^ side_by_side,
+                "expected exactly one of stacked/side-by-side, moved={moved_rect:?} target={target_rect:?}"
+            );
+            assert_eq!(
+                stacked, expect_stacked,
+                "choice={choice:?} moved={moved_rect:?} target={target_rect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn palette_plugin_action_and_pane_indices_resolve_and_leave_navigate_mode() {
+        let mut app = app_with_test_workspaces(&["main"]);
+
+        // Out-of-range indices must not panic, and still leave navigate mode
+        // like every other palette selection.
+        app.state.mode = Mode::Palette;
+        app.execute_tui_navigate_action(
+            NavigateAction::InvokePluginAction(0),
+            ActionContext::Direct,
+        );
+        assert_eq!(app.state.mode, Mode::Terminal);
+
+        app.state.mode = Mode::Palette;
+        app.execute_tui_navigate_action(NavigateAction::OpenPluginPane(0), ActionContext::Direct);
+        assert_eq!(app.state.mode, Mode::Terminal);
     }
 
     #[test]

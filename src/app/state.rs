@@ -837,6 +837,7 @@ pub enum Mode {
     KeybindHelp,
     Navigator,
     Palette,
+    MoveSplitDirection,
 }
 
 impl Mode {
@@ -867,6 +868,7 @@ impl Mode {
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
+                | Mode::MoveSplitDirection
         )
     }
 }
@@ -1409,6 +1411,16 @@ pub struct PaletteState {
     pub scroll: u16,
 }
 
+/// A pane move that landed on an existing tab, waiting on the user to pick
+/// which way it splits against that tab's focused pane before the move runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingPaneSplit {
+    pub pane_id: String,
+    pub tab_id: String,
+    pub target_pane_id: Option<String>,
+    pub direction: crate::api::schema::SplitDirection,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarWidthSource {
     ConfigDefault,
@@ -1475,6 +1487,7 @@ pub struct AppState {
     pub keybind_help: KeybindHelpState,
     pub command_palette: PaletteState,
     pub navigator: NavigatorState,
+    pub(crate) pending_pane_split: Option<PendingPaneSplit>,
     pub copy_mode: Option<CopyModeState>,
     pub workspace_scroll: usize,
     pub agent_panel_scroll: usize,
@@ -1839,6 +1852,7 @@ impl AppState {
             keybind_help: KeybindHelpState::default(),
             command_palette: PaletteState::default(),
             navigator: NavigatorState::default(),
+            pending_pane_split: None,
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
