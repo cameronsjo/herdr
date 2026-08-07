@@ -714,6 +714,10 @@ pub(crate) fn palette_plugin_actions(state: &AppState) -> Vec<PluginActionInfo> 
                 .is_some_and(|plugin| plugin.enabled)
         })
         .filter(|action| plugin_action_context_applies(&action.contexts, state))
+        // `action.platforms` already carries the effective (action-or-plugin)
+        // platform list, so invoking a listed row can't hit the same
+        // platform_unsupported error handle_plugin_action_invoke would raise.
+        .filter(|action| ensure_platform_supported(&action.platforms, "palette action").is_ok())
         .collect::<Vec<_>>();
     actions.sort_by_key(PluginActionInfo::qualified_id);
     actions
@@ -748,6 +752,13 @@ pub(crate) fn palette_plugin_panes(state: &AppState) -> Vec<(String, PluginManif
             plugin
                 .panes
                 .iter()
+                .filter(|pane| {
+                    ensure_platform_supported(
+                        effective_platforms(&pane.platforms, &plugin.platforms),
+                        "palette pane",
+                    )
+                    .is_ok()
+                })
                 .cloned()
                 .map(move |pane| (plugin.plugin_id.clone(), pane))
         })
@@ -3823,6 +3834,74 @@ command = ["true"]
                 .map(|(plugin_id, pane)| format!("{plugin_id}.{}", pane.id))
                 .collect::<Vec<_>>(),
             vec!["example.bbb.board"]
+        );
+    }
+
+    #[test]
+    fn palette_plugin_actions_and_panes_exclude_platform_unsupported_entries() {
+        let unsupported_platform = if cfg!(target_os = "windows") {
+            "macos"
+        } else {
+            "windows"
+        };
+
+        let mut state = AppState::test_new();
+        let root = unique_temp_path("palette-platform");
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "example.platform"
+name = "example.platform"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+
+[[actions]]
+id = "unsupported"
+title = "Unsupported"
+platforms = ["{unsupported_platform}"]
+command = ["true"]
+
+[[actions]]
+id = "supported"
+title = "Supported"
+command = ["true"]
+
+[[panes]]
+id = "unsupported-pane"
+title = "Unsupported pane"
+platforms = ["{unsupported_platform}"]
+command = ["true"]
+
+[[panes]]
+id = "supported-pane"
+title = "Supported pane"
+command = ["true"]
+"#
+            ),
+        );
+        let mut plugin = load_plugin_manifest(&root.display().to_string(), true).unwrap();
+        plugin.enabled = true;
+        state
+            .installed_plugins
+            .insert(plugin.plugin_id.clone(), plugin);
+
+        let actions = super::palette_plugin_actions(&state);
+        assert_eq!(
+            actions
+                .iter()
+                .map(PluginActionInfo::qualified_id)
+                .collect::<Vec<_>>(),
+            vec!["example.platform.supported"]
+        );
+
+        let panes = super::palette_plugin_panes(&state);
+        assert_eq!(
+            panes
+                .iter()
+                .map(|(_, pane)| pane.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["supported-pane"]
         );
     }
 }

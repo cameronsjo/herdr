@@ -216,7 +216,10 @@ impl AppState {
 
         if matches!(
             self.mode,
-            Mode::NewLinkedWorktree | Mode::OpenExistingWorktree | Mode::ConfirmRemoveWorktree
+            Mode::NewLinkedWorktree
+                | Mode::OpenExistingWorktree
+                | Mode::ConfirmRemoveWorktree
+                | Mode::MoveSplitDirection
         ) && !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
             return None;
@@ -2827,6 +2830,29 @@ mod tests {
         assert_eq!(app.state.mode, Mode::Terminal);
         assert!(app.state.pending_pane_split.is_none());
         assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+    }
+
+    #[test]
+    fn right_click_while_split_direction_picker_is_open_does_not_open_a_context_menu() {
+        let mut app = app_with_pending_pane_split();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 5, 5));
+
+        assert_eq!(app.state.mode, Mode::MoveSplitDirection);
+        assert!(app.state.pending_pane_split.is_some());
+        assert!(app.state.context_menu.is_none());
+    }
+
+    #[test]
+    fn scroll_while_split_direction_picker_is_open_does_not_reach_the_sidebar() {
+        let mut app = app_with_pending_pane_split();
+        let scroll_before = app.state.workspace_scroll;
+
+        app.handle_mouse(mouse(MouseEventKind::ScrollDown, 1, 1));
+
+        assert_eq!(app.state.mode, Mode::MoveSplitDirection);
+        assert!(app.state.pending_pane_split.is_some());
+        assert_eq!(app.state.workspace_scroll, scroll_before);
     }
 
     #[test]
