@@ -7,6 +7,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use tracing::{debug, trace};
 
 use super::release_notes::release_notes_close_button_rect;
 use super::scrollbar::{release_notes_scrollbar_rect, render_scrollbar};
@@ -24,6 +25,7 @@ pub(crate) struct PaletteCommand {
 }
 
 pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
+    debug!("Building palette commands from keybind help groups");
     let mut commands: Vec<PaletteCommand> = super::keybind_help::keybind_help_groups(app)
         .into_iter()
         .flat_map(|(_, entries)| entries)
@@ -36,11 +38,14 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             })
         })
         .collect();
+    trace!(
+        keybind_count = commands.len(),
+        "Loaded keybind help entries"
+    );
 
-    for (index, action) in crate::app::palette_plugin_actions(app)
-        .into_iter()
-        .enumerate()
-    {
+    let plugin_actions = crate::app::palette_plugin_actions(app);
+    let plugin_action_count = plugin_actions.len();
+    for (index, action) in plugin_actions.into_iter().enumerate() {
         commands.push(PaletteCommand {
             name: Cow::Owned(format!(
                 "{} — {}",
@@ -52,10 +57,11 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             keywords: &[],
         });
     }
-    for (index, (plugin_id, pane)) in crate::app::palette_plugin_panes(app)
-        .into_iter()
-        .enumerate()
-    {
+    trace!(plugin_action_count, "Added plugin actions");
+
+    let plugin_panes = crate::app::palette_plugin_panes(app);
+    let plugin_pane_count = plugin_panes.len();
+    for (index, (plugin_id, pane)) in plugin_panes.into_iter().enumerate() {
         commands.push(PaletteCommand {
             name: Cow::Owned(format!(
                 "{} — {}",
@@ -67,7 +73,12 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             keywords: &[],
         });
     }
+    trace!(plugin_pane_count, "Added plugin panes");
 
+    debug!(
+        total_commands = commands.len(),
+        "Successfully built palette commands"
+    );
     commands
 }
 
@@ -80,6 +91,11 @@ fn plugin_display_name(app: &AppState, plugin_id: &str) -> String {
 
 /// Ranking by match quality rather than list order keeps a query that exactly
 /// names one command from being answered by a longer command containing it.
+/// `MAX_NAME_RANK` is the worst (highest) rank this function returns —
+/// `command_match_rank` derives its keyword-tier offset from it so the two
+/// stay coupled structurally instead of by two files agreeing on a number.
+const MAX_NAME_RANK: u8 = 3;
+
 fn match_rank(name: &str, query: &str) -> Option<u8> {
     let name = name.to_lowercase();
     if name == query {
@@ -89,7 +105,7 @@ fn match_rank(name: &str, query: &str) -> Option<u8> {
     } else if name.split_whitespace().any(|word| word.starts_with(query)) {
         Some(2)
     } else if name.contains(query) {
-        Some(3)
+        Some(MAX_NAME_RANK)
     } else {
         None
     }
@@ -107,16 +123,21 @@ fn command_match_rank(command: &PaletteCommand, query: &str) -> Option<u8> {
         .iter()
         .filter_map(|keyword| match_rank(keyword, query))
         .min()
-        .map(|rank| rank + 4)
+        .map(|rank| rank + MAX_NAME_RANK + 1)
 }
 
 pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
     let query = app.command_palette.query.trim().to_lowercase();
     let commands = palette_commands(app);
     if query.is_empty() {
+        trace!(
+            total_commands = commands.len(),
+            "Query empty, returning all commands"
+        );
         return commands;
     }
 
+    debug!(query = %query, available_commands = commands.len(), "Filtering palette commands");
     let mut ranked: Vec<(u8, usize, PaletteCommand)> = commands
         .into_iter()
         .enumerate()
@@ -124,8 +145,15 @@ pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             command_match_rank(&command, &query).map(|rank| (rank, index, command))
         })
         .collect();
+
+    let matched_count = ranked.len();
+    debug!(query = %query, matched_commands = matched_count, "Command matching complete");
+
     ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
-    ranked.into_iter().map(|(_, _, command)| command).collect()
+    let result: Vec<PaletteCommand> = ranked.into_iter().map(|(_, _, command)| command).collect();
+
+    trace!(query = %query, result_count = result.len(), "Returning filtered palette commands");
+    result
 }
 
 fn palette_lines(app: &AppState, width: usize) -> Vec<Line<'static>> {
@@ -393,5 +421,69 @@ mod tests {
             Some("split vertical"),
             "got {matches:?}"
         );
+    }
+
+    fn command(name: &'static str, keywords: &'static [&'static str]) -> PaletteCommand {
+        PaletteCommand {
+            name: Cow::Borrowed(name),
+            key: String::new(),
+            action: NavigateAction::ClosePane,
+            keywords,
+        }
+    }
+
+    #[test]
+    fn a_command_with_no_keywords_only_matches_via_its_name() {
+        let cmd = command("close pane", &[]);
+        assert!(command_match_rank(&cmd, "close").is_some());
+        assert_eq!(command_match_rank(&cmd, "split"), None);
+    }
+
+    #[test]
+    fn keyword_matching_lowercases_the_keyword_like_name_matching() {
+        // `match_rank` lowercases `name` before comparing; keyword matching
+        // reuses `match_rank`, so a mixed-case authored keyword should match
+        // a lowercase query exactly the same way a mixed-case name would.
+        let cmd = command("split vertical", &["Split Right"]);
+        assert_eq!(command_match_rank(&cmd, "split right"), Some(4));
+    }
+
+    #[test]
+    fn the_best_matching_keyword_wins_when_several_keywords_match() {
+        // The command name itself must not match "split" (or the test would
+        // exercise the name branch instead of the keyword branch). First
+        // keyword only word-prefix-matches (rank 2); second is an exact
+        // match (rank 0). The command's overall keyword rank should reflect
+        // the best (lowest) of the two, not list order.
+        let cmd = command("close pane", &["foo split bar", "split"]);
+        assert_eq!(command_match_rank(&cmd, "split"), Some(MAX_NAME_RANK + 1));
+    }
+
+    #[test]
+    fn a_substring_only_name_match_still_outranks_any_keyword_match() {
+        // "xxsplitxx" contains "split" only as a mid-word substring (the
+        // worst name-match tier, MAX_NAME_RANK); an exact keyword match on
+        // a different command is a strictly worse (higher) rank, so the
+        // name match must still sort first.
+        let name_match = command("xxsplitxx", &[]);
+        let keyword_match = command("close pane", &["split"]);
+        let name_rank = command_match_rank(&name_match, "split").expect("name should match");
+        let keyword_rank =
+            command_match_rank(&keyword_match, "split").expect("keyword should match");
+        assert_eq!(name_rank, MAX_NAME_RANK);
+        assert!(
+            name_rank < keyword_rank,
+            "name_rank={name_rank} keyword_rank={keyword_rank}"
+        );
+    }
+
+    #[test]
+    fn empty_query_keyword_lookup_does_not_panic() {
+        let cmd = command("split vertical", &["split right"]);
+        // An empty query makes every name/keyword a "starts_with" match
+        // (rank 1); this only guards against a panic/regression in the
+        // keyword path when `filtered_palette_commands` short-circuits on
+        // an empty query before ever calling `command_match_rank`.
+        assert_eq!(command_match_rank(&cmd, ""), Some(1));
     }
 }
