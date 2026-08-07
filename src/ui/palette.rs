@@ -20,6 +20,7 @@ pub(crate) struct PaletteCommand {
     pub name: Cow<'static, str>,
     pub key: String,
     pub action: NavigateAction,
+    pub keywords: &'static [&'static str],
 }
 
 pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
@@ -31,6 +32,7 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
                 name: entry.label,
                 key: entry.key,
                 action: entry.action?,
+                keywords: entry.keywords,
             })
         })
         .collect();
@@ -47,6 +49,7 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             )),
             key: String::new(),
             action: NavigateAction::InvokePluginAction(index),
+            keywords: &[],
         });
     }
     for (index, (plugin_id, pane)) in crate::app::palette_plugin_panes(app)
@@ -61,6 +64,7 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
             )),
             key: String::new(),
             action: NavigateAction::OpenPluginPane(index),
+            keywords: &[],
         });
     }
 
@@ -91,6 +95,21 @@ fn match_rank(name: &str, query: &str) -> Option<u8> {
     }
 }
 
+/// A keyword match (e.g. "split right" finding the "split vertical" command)
+/// always ranks below every name match, so a command whose own name answers
+/// the query is never outranked by a synonym on a different command.
+fn command_match_rank(command: &PaletteCommand, query: &str) -> Option<u8> {
+    if let Some(rank) = match_rank(&command.name, query) {
+        return Some(rank);
+    }
+    command
+        .keywords
+        .iter()
+        .filter_map(|keyword| match_rank(keyword, query))
+        .min()
+        .map(|rank| rank + 4)
+}
+
 pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
     let query = app.command_palette.query.trim().to_lowercase();
     let commands = palette_commands(app);
@@ -102,7 +121,7 @@ pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
         .into_iter()
         .enumerate()
         .filter_map(|(index, command)| {
-            match_rank(&command.name, &query).map(|rank| (rank, index, command))
+            command_match_rank(&command, &query).map(|rank| (rank, index, command))
         })
         .collect();
     ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
@@ -303,5 +322,50 @@ mod tests {
     fn every_palette_command_is_runnable() {
         let state = AppState::test_new();
         assert!(!palette_commands(&state).is_empty());
+    }
+
+    #[test]
+    fn new_pane_matches_both_split_commands_via_keywords() {
+        let matches = names("new pane");
+        assert!(
+            matches.iter().any(|name| name == "split vertical"),
+            "got {matches:?}"
+        );
+        assert!(
+            matches.iter().any(|name| name == "split horizontal"),
+            "got {matches:?}"
+        );
+    }
+
+    #[test]
+    fn split_right_matches_split_vertical_via_keyword() {
+        let matches = names("split right");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("split vertical"),
+            "got {matches:?}"
+        );
+    }
+
+    #[test]
+    fn split_down_matches_split_horizontal_via_keyword() {
+        let matches = names("split down");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("split horizontal"),
+            "got {matches:?}"
+        );
+    }
+
+    #[test]
+    fn a_name_match_outranks_a_keyword_match_on_another_command() {
+        // "split vertical" is itself a command name; make sure that direct
+        // name match wins over any keyword-based hit from another entry.
+        let matches = names("split vertical");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("split vertical"),
+            "got {matches:?}"
+        );
     }
 }
