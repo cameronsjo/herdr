@@ -71,8 +71,9 @@ pub(crate) use self::{
         confirm_close_button_rects, confirm_close_popup_rect, new_linked_worktree_button_rects,
         new_linked_worktree_inner_rect, open_existing_worktree_button_rects,
         open_existing_worktree_inner_rect, open_existing_worktree_max_visible_rows,
-        open_existing_worktree_visible_start, remove_worktree_button_rects,
-        remove_worktree_popup_rect, rename_button_rects,
+        open_existing_worktree_visible_start, pane_split_direction_button_rects,
+        pane_split_direction_popup_rect, remove_worktree_button_rects, remove_worktree_popup_rect,
+        rename_button_rects,
     },
     settings::{
         settings_button_rects, settings_popup_height, settings_show_primary_action,

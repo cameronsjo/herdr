@@ -764,10 +764,39 @@ pub(crate) fn confirm_close_button_rects(inner: Rect) -> (Rect, Rect) {
     (rects[0], rects[1])
 }
 
+/// The popup rect for `Mode::MoveSplitDirection`, shared between rendering
+/// and mouse hit-testing so the two can never disagree about where the
+/// buttons are.
+pub(crate) fn pane_split_direction_popup_rect(area: Rect) -> Option<Rect> {
+    centered_popup_rect(area, 44, 6)
+}
+
+/// The vertical/horizontal button rects within the panel's inner rect (row 1
+/// of the 3-row title/buttons/footer layout), shared for the same reason as
+/// `pane_split_direction_popup_rect`.
+pub(crate) fn pane_split_direction_button_rects(inner: Rect) -> (Rect, Rect) {
+    let rects = action_button_row_rects(
+        inner,
+        &[
+            ActionButtonSpec {
+                hint: Some("v"),
+                label: "vertical",
+            },
+            ActionButtonSpec {
+                hint: Some("h"),
+                label: "horizontal",
+            },
+        ],
+        2,
+        1,
+    );
+    (rects[0], rects[1])
+}
+
 pub(super) fn render_pane_split_direction_overlay(app: &AppState, frame: &mut Frame) {
     super::dim_background(frame, frame.area());
 
-    let Some(popup) = centered_popup_rect(frame.area(), 44, 6) else {
+    let Some(popup) = pane_split_direction_popup_rect(frame.area()) else {
         return;
     };
     let Some(inner) = render_panel_shell(frame, popup, app.palette.accent, app.palette.panel_bg)
@@ -808,45 +837,29 @@ pub(super) fn render_pane_split_direction_overlay(app: &AppState, frame: &mut Fr
         .bg(app.palette.surface0)
         .add_modifier(Modifier::BOLD);
 
-    let rects = action_button_row_rects(
-        rows[1],
-        &[
-            ActionButtonSpec {
-                hint: Some("v"),
-                label: "vertical",
-            },
-            ActionButtonSpec {
-                hint: Some("h"),
-                label: "horizontal",
-            },
-        ],
-        2,
-        0,
+    let (vertical_rect, horizontal_rect) = pane_split_direction_button_rects(inner);
+    render_action_button(
+        frame,
+        vertical_rect,
+        Some("v"),
+        "vertical",
+        if selected_vertical {
+            selected_style
+        } else {
+            unselected_style
+        },
     );
-    if let [vertical_rect, horizontal_rect] = rects[..] {
-        render_action_button(
-            frame,
-            vertical_rect,
-            Some("v"),
-            "vertical",
-            if selected_vertical {
-                selected_style
-            } else {
-                unselected_style
-            },
-        );
-        render_action_button(
-            frame,
-            horizontal_rect,
-            Some("h"),
-            "horizontal",
-            if selected_vertical {
-                unselected_style
-            } else {
-                selected_style
-            },
-        );
-    }
+    render_action_button(
+        frame,
+        horizontal_rect,
+        Some("h"),
+        "horizontal",
+        if selected_vertical {
+            unselected_style
+        } else {
+            selected_style
+        },
+    );
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
