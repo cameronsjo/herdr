@@ -6,7 +6,10 @@ A fork of [herdrdev/herdr](https://github.com/herdrdev/herdr) that adds a comman
 
 `prefix+/` opens a palette listing every runnable action with its shortcut, filtered as
 you type. Three of its commands move the focused pane to an existing space, a new space,
-or a new tab, none of which had a keyboard path before.
+or a new tab, none of which had a keyboard path before. Moving a pane into an existing
+tab prompts for which way it splits against that tab's focused pane. The palette also
+lists any enabled plugin's actions and panes, so a plugin author's `herdr-plugin.toml`
+commands are reachable by browsing instead of only through a bound key or the CLI/API.
 
 Nothing else changes. The keybind reference on `?` behaves exactly as upstream ships it.
 

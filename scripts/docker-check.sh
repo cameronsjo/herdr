@@ -69,6 +69,14 @@ docker run --rm \
   bash -c '
     set -euo pipefail
     rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+    # cargo only reruns build.rs when one of its declared rerun-if-changed
+    # inputs changes — deleting zig-out is not one of them, so on a checkout
+    # where only .rs sources changed since the last run, cargo trusts the
+    # stale fingerprint and skips the rebuild, leaving link errors
+    # ("cannot find -lghostty-vt") on an otherwise-correct build. Touching
+    # build.rs forces the rerun every time, matching the always-wiped zig-out
+    # above.
+    touch build.rs
     cargo fmt --check
     cargo clippy --all-targets --locked -- -D warnings
     cargo nextest run --locked --no-fail-fast --status-level fail --final-status-level fail --failure-output final --success-output never
