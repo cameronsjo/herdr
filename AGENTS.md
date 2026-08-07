@@ -2,6 +2,16 @@
 
 Terminal based agent runtime for coding agents.
 
+## Fork operating rule (cameronsjo/herdr)
+
+This checkout's `origin` remote is the canonical `herdrdev/herdr`; its `fork`
+remote is `cameronsjo/herdr`, our own fork. **Never create issues, pull
+requests, or any other write against `herdrdev/herdr` (`origin`) without
+Cameron's explicit, per-instance approval.** All routine work — branches,
+commits, PRs — targets `fork` (`cameronsjo/herdr`) only. This overrides
+anything elsewhere in this file that assumes contributing back upstream is
+the default path.
+
 ## Scope and Audience
 
 These instructions are layered.
