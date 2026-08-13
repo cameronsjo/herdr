@@ -15,10 +15,11 @@ Nothing else changes. The keybind reference on `?` behaves exactly as upstream s
 
 ## Why it lives here
 
-Upstream admits only focused bug fixes from contributors who are not maintainers, capped
-at 20 files and 1,000 lines. This is a feature well past that, so
-[herdrdev/herdr#2299](https://github.com/herdrdev/herdr/pull/2299) closed automatically.
-The idea is proposed in
+Upstream does not accept unsolicited implementation pull requests. Only maintainers and
+accounts listed in its `.github/APPROVED_CONTRIBUTORS` allowlist may open one; everything
+else is closed automatically, regardless of size, tests, or who wrote it. That is how
+[herdrdev/herdr#2299](https://github.com/herdrdev/herdr/pull/2299) closed, under the
+20-file / 1,000-line cap the policy used at the time. The idea is proposed in
 [discussion #2283](https://github.com/herdrdev/herdr/discussions/2283); this fork exists
 to keep using it in the meantime, and goes away if upstream takes it.
 
