@@ -21,6 +21,10 @@ pub(super) struct HelpEntry {
     pub key: String,
     pub label: Cow<'static, str>,
     pub action: Option<NavigateAction>,
+    /// Extra search terms the command palette matches this entry against
+    /// (e.g. "split right" for the "split vertical" action) — a surfaced-
+    /// elsewhere synonym, not a full alias system.
+    pub keywords: &'static [&'static str],
 }
 
 pub(super) type HelpGroup = (&'static str, Vec<HelpEntry>);
@@ -30,6 +34,7 @@ fn help_entry(key: impl Into<String>, label: &'static str) -> HelpEntry {
         key: key.into(),
         label: Cow::Borrowed(label),
         action: None,
+        keywords: &[],
     }
 }
 
@@ -38,6 +43,21 @@ fn help_action(key: impl Into<String>, label: &'static str, action: NavigateActi
         key: key.into(),
         label: Cow::Borrowed(label),
         action: Some(action),
+        keywords: &[],
+    }
+}
+
+fn help_action_kw(
+    key: impl Into<String>,
+    label: &'static str,
+    action: NavigateAction,
+    keywords: &'static [&'static str],
+) -> HelpEntry {
+    HelpEntry {
+        key: key.into(),
+        label: Cow::Borrowed(label),
+        action: Some(action),
+        keywords,
     }
 }
 
@@ -244,15 +264,17 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
     groups.push(("workspaces / tabs", workspace_tab));
 
     let panes = vec![
-        help_action(
+        help_action_kw(
             keybind_label(&kb.split_vertical),
             "split vertical",
             NavigateAction::SplitVertical,
+            &["new pane", "split right", "split left"],
         ),
-        help_action(
+        help_action_kw(
             keybind_label(&kb.split_horizontal),
             "split horizontal",
             NavigateAction::SplitHorizontal,
+            &["new pane", "split down", "split up"],
         ),
         help_action(
             keybind_label(&kb.close_pane),
@@ -355,6 +377,7 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
                         .map(Cow::Owned)
                         .unwrap_or(Cow::Borrowed("custom command")),
                     action: None,
+                    keywords: &[],
                 })
                 .collect(),
         ));
@@ -377,6 +400,10 @@ fn filter_keybind_help_groups(groups: Vec<HelpGroup>, query: &str) -> Vec<HelpGr
                 .filter(|entry| {
                     entry.key.to_lowercase().contains(&query)
                         || entry.label.to_lowercase().contains(&query)
+                        || entry
+                            .keywords
+                            .iter()
+                            .any(|keyword| keyword.to_lowercase().contains(&query))
                 })
                 .collect::<Vec<_>>();
             (!entries.is_empty()).then_some((group, entries))
@@ -599,5 +626,25 @@ mod tests {
         assert_eq!(filtered[0].1[0].label, "close pane");
 
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    #[test]
+    fn help_entry_and_help_action_carry_no_keywords_by_default() {
+        assert!(help_entry("k", "some entry").keywords.is_empty());
+        assert!(help_action("k", "some action", NavigateAction::ClosePane)
+            .keywords
+            .is_empty());
+    }
+
+    #[test]
+    fn help_action_kw_carries_the_given_keywords() {
+        let entry = help_action_kw(
+            "v",
+            "split vertical",
+            NavigateAction::SplitVertical,
+            &["new pane", "split right", "split left"],
+        );
+        assert_eq!(entry.keywords, &["new pane", "split right", "split left"]);
+        assert_eq!(entry.action, Some(NavigateAction::SplitVertical));
     }
 }
