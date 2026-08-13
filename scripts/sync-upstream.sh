@@ -8,11 +8,13 @@
 # Env overrides: ORIGIN_REMOTE (default: origin), FORK_REMOTE (default: fork)
 set -euo pipefail
 
-ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# -P everywhere: `git worktree list` reports physical paths, so a logical one
+# here would fail the reuse check below and try to re-create the worktree.
+ROOT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 ORIGIN_REMOTE=${ORIGIN_REMOTE:-origin}
 FORK_REMOTE=${FORK_REMOTE:-fork}
 BRANCH="sync-upstream-$(date +%Y%m%d)"
-WORKTREE_DIR="$(cd -- "$ROOT_DIR/.." && pwd)/herdr-worktrees/$BRANCH"
+WORKTREE_DIR="$(cd -P -- "$ROOT_DIR/.." && pwd -P)/herdr-worktrees/$BRANCH"
 
 cd "$ROOT_DIR"
 
@@ -36,22 +38,41 @@ fi
 
 cd "$WORKTREE_DIR"
 
-if [[ -n "$(git status --porcelain)" ]] && ! git status --porcelain | command grep -q '^UU\|^AA\|^DD'; then
+# A resumed run is the normal path: the first run stops on conflicts, you fix
+# them, and re-run to land the merge commit. By then the tree is dirty with
+# *staged resolutions* and no `UU` entries left, so unmerged-path detection
+# can't tell that state apart from unrelated dirt — MERGE_HEAD can.
+if [[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]]; then
+  merge_in_progress=true
+else
+  merge_in_progress=false
+fi
+
+if [[ -n "$(git status --porcelain)" ]] && ! "$merge_in_progress"; then
   echo "error: worktree has unrelated uncommitted changes — resolve or clean it first" >&2
   exit 1
 fi
 
-echo "==> merging $ORIGIN_REMOTE/master"
-if git merge "$ORIGIN_REMOTE/master" --no-edit; then
+merge_rc=0
+if "$merge_in_progress"; then
+  echo "==> resuming the in-progress merge of $ORIGIN_REMOTE/master"
+  merge_rc=1
+else
+  echo "==> merging $ORIGIN_REMOTE/master"
+  git merge "$ORIGIN_REMOTE/master" --no-edit || merge_rc=$?
+fi
+
+if [[ "$merge_rc" -eq 0 ]]; then
   echo "==> merge landed with no conflicts"
 else
-  if git status --porcelain | command grep -q '^UU README.md$'; then
+  status=$(git status --porcelain)
+  if command grep -q '^UU README.md$' <<<"$status"; then
     echo "==> auto-resolving README.md conflict (keeping the fork's own notice)"
     git checkout --ours README.md
     git add README.md
   fi
 
-  remaining=$(git status --porcelain | command grep '^UU\|^AA\|^DD' || true)
+  remaining=$(command grep '^UU\|^AA\|^DD' <<<"$(git status --porcelain)" || true)
   if [[ -n "$remaining" ]]; then
     echo
     echo "Conflicts remain — resolve these by hand, then re-run this script to finish:"
