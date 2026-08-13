@@ -17,6 +17,7 @@
 - Added palette commands to move the focused pane to an existing space, a new space, or a new tab. Choosing an existing space opens the session navigator as a destination picker offering a new space, each space as a new tab there, or each tab to split into, with the selected row's effect shown above the footer.
 - Moving a pane into an existing tab now prompts for which way it splits (vertical or horizontal) against that tab's focused pane, instead of always splitting right.
 - The command palette now lists every enabled plugin's actions and panes, invoking the existing `plugin.action.invoke` / `plugin.pane.open` API paths on selection. Entries are filtered by declared context (pane-scoped actions only show with a focused pane) and by platform support.
+- The command palette now also runs the tab-reorder and one-keystroke pane-resize commands, so they are reachable without binding `keys.move_tab_previous`, `keys.move_tab_next`, or the four `keys.resize_pane_*` keys.
 
 ### Changed
 - Desktop tab labels are now centered in their tabs, so the active-tab highlight has symmetric padding.

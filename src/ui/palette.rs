@@ -304,4 +304,30 @@ mod tests {
         let state = AppState::test_new();
         assert!(!palette_commands(&state).is_empty());
     }
+
+    // A help row reaches the palette only when it carries a NavigateAction, so
+    // a row added upstream as a plain entry is silently palette-invisible. These
+    // six arrived that way in an upstream sync.
+    #[test]
+    fn tab_reorder_and_pane_resize_rows_reach_the_palette() {
+        let state = AppState::test_new();
+        let actions: Vec<NavigateAction> = palette_commands(&state)
+            .into_iter()
+            .map(|command| command.action)
+            .collect();
+
+        for expected in [
+            NavigateAction::MoveTabPrevious,
+            NavigateAction::MoveTabNext,
+            NavigateAction::ResizePaneLeft,
+            NavigateAction::ResizePaneDown,
+            NavigateAction::ResizePaneUp,
+            NavigateAction::ResizePaneRight,
+        ] {
+            assert!(
+                actions.contains(&expected),
+                "{expected:?} is missing from the palette"
+            );
+        }
+    }
 }

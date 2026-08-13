@@ -224,8 +224,16 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             "next tab",
             NavigateAction::NextTab,
         ),
-        help_entry(keybind_label(&kb.move_tab_previous), "move tab left"),
-        help_entry(keybind_label(&kb.move_tab_next), "move tab right"),
+        help_action(
+            keybind_label(&kb.move_tab_previous),
+            "move tab left",
+            NavigateAction::MoveTabPrevious,
+        ),
+        help_action(
+            keybind_label(&kb.move_tab_next),
+            "move tab right",
+            NavigateAction::MoveTabNext,
+        ),
         help_entry(indexed_label(&kb.switch_tab), "switch tab 1-9"),
         help_action(
             keybind_label(&kb.close_tab),
@@ -271,10 +279,26 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             "resize mode",
             NavigateAction::EnterResizeMode,
         ),
-        help_entry(keybind_label(&kb.resize_pane_left), "resize pane left"),
-        help_entry(keybind_label(&kb.resize_pane_down), "resize pane down"),
-        help_entry(keybind_label(&kb.resize_pane_up), "resize pane up"),
-        help_entry(keybind_label(&kb.resize_pane_right), "resize pane right"),
+        help_action(
+            keybind_label(&kb.resize_pane_left),
+            "resize pane left",
+            NavigateAction::ResizePaneLeft,
+        ),
+        help_action(
+            keybind_label(&kb.resize_pane_down),
+            "resize pane down",
+            NavigateAction::ResizePaneDown,
+        ),
+        help_action(
+            keybind_label(&kb.resize_pane_up),
+            "resize pane up",
+            NavigateAction::ResizePaneUp,
+        ),
+        help_action(
+            keybind_label(&kb.resize_pane_right),
+            "resize pane right",
+            NavigateAction::ResizePaneRight,
+        ),
         help_action(
             keybind_label(&kb.toggle_sidebar),
             "toggle sidebar",
