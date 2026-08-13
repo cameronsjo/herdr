@@ -46,6 +46,31 @@ These instructions are layered.
 - **UI patterns should be reused.** Herdr is a mouse-first TUI. New dialogs, onboarding, settings, and post-update flows should follow the existing UI/UX language and interaction patterns instead of inventing one-off screens. Prefer reusing existing modal/screen structure, affordances, and close actions so the app feels consistent.
 - **A new modal `Mode` needs an explicit mouse-capture branch, or clicks leak through to the pane/sidebar underneath it.** Rendering an overlay does not stop `AppState::handle_mouse` (or, for full-screen overlays like `Palette`/`Navigator`, `App::handle_overlay_mouse`) from routing an unhandled mode's clicks and scrolls into generic pane-focus and terminal-click logic. Adding a mode means also adding it to the mouse dispatch: mirror an existing sibling with the same shape (`ConfirmClose` for a two-button confirm, `NewLinkedWorktree`/`OpenExistingWorktree`/`ConfirmRemoveWorktree` for the "swallow every non-left-click event" guard) rather than assuming rendering the popup is enough. Share the popup/button rect functions between the renderer and the mouse hit-test (one function each, called from both) so they can't silently disagree about where the buttons are.
 
+### Multiplicative performance paths
+
+Treat work reachable from view computation, rendering, background-pane resizing,
+PTY parsing, detection, and client frame fanout as multiplicative. Before adding
+work, identify its frequency and cardinality: per byte, event, or render × panes,
+tabs, or workspaces × attached clients.
+
+Inside pane-scaled render and layout loops:
+
+- Use narrow terminal-state accessors. Do not collect aggregate input state,
+  format terminal snapshots, inspect process trees, perform filesystem I/O, or
+  allocate when one scalar fact is enough.
+- Keep terminal-core lock duration minimal.
+- Preserve hidden-source and retained-render early exits. Hidden panes still
+  parse output, but their output must not trigger presentation work merely to
+  keep terminal or detection state current.
+- When a change adds or widens work in one of these loops, profile fixed geometry
+  with 1 and at least 15 populated panes and report the scaling delta. Use
+  `just bench-render-scale` to exercise both background-workspace and active-pane
+  cardinality when applicable.
+
+Prefer deterministic operation or architecture tests to wall-clock CI limits.
+Performance benchmarks are supporting evidence, not substitutes for behavioral
+coverage.
+
 ### Runtime/client boundary guardrail
 
 Herdr is migrating toward a server-owned runtime protocol with the TUI as one client. New work should not deepen the current server/TUI coupling.
@@ -238,7 +263,7 @@ just check
 just release 0.x.y
 ```
 
-Before stable release, run `/pre-release-audit`, finalize `docs/next`, and let `just release-docs-check` validate the staged docs and website build. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `website/latest.json`.
+Before stable release, run `/pre-release-audit`, finalize `docs/next`, and run `just pre-release-check` to validate the staged docs, website build, and render scaling. `just release` prepares the changelog and release commit, tags it, and pushes the tag. GitHub Actions builds binaries, creates the GitHub release, closes released issues, snapshots and promotes the tagged docs, and updates `website/latest.json`.
 
 The release workflows must publish these four assets:
 
