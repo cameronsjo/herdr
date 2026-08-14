@@ -23,6 +23,8 @@ With the skill installed, an agent can:
 
 The skill is a Markdown instruction file for agents. If Herdr is already installed, run `herdr --skill` to print the release-matched copy bundled with that binary.
 
+`SKILL.md` is self-sufficient on its own. It is also accompanied by `references/` files covering CLI semantics, agent lifecycle states, and reading pane output, which agents that support progressive disclosure load only when they need that detail.
+
 ## Install it
 
 Install the skill with `npx skills`:
@@ -34,6 +36,14 @@ npx skills add herdrdev/herdr --skill herdr -g
 If you installed the skill while it lived at the repository root, rerun this add command once instead of using `skills update`. The add command replaces the oversized copy and records the new location.
 
 The `-g` flag installs it globally for supported agents. Omit `-g` to install it into the current project.
+
+To install the release-matched copy straight from the binary — `SKILL.md` and its `references/` together — point Herdr at a skill directory:
+
+```bash
+herdr --skill --install ~/.claude/skills/herdr
+```
+
+This writes the whole directory, so the installed skill always matches the running Herdr build.
 
 Use the repository copy as the manual fallback and source of truth:
 
