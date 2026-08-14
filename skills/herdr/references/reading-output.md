@@ -29,6 +29,8 @@ herdr pane read <returned-pane-id> --source recent-unwrapped --lines 120
 
 Use `--format ansi` when colors and terminal styling are evidence. Otherwise use text.
 
+`recent` and `recent-unwrapped` return **nothing** on a pane whose output has not yet exceeded its viewport — a freshly split pane running one short command reads empty from both, while `visible` has the output. An empty read there is not a failed command. Reach for `visible` on a short-output pane, and keep `recent-unwrapped` for the logs and transcripts it is meant for.
+
 ## The alternate-screen ceiling
 
 `--lines` asks Herdr for more rows from the pane's available screen and host scrollback.
