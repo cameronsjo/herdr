@@ -467,6 +467,83 @@ pane_history = false
 // Bundled at build time so the printed skill always matches this binary's release.
 const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
+// The skill's progressive-disclosure references, emitted by `--skill --install <dir>`.
+// Every file under skills/herdr/references/ must appear here; `skill_directory_is_fully_bundled`
+// fails the build's test run when one is added without a matching entry.
+const SKILL_REFERENCES: &[(&str, &str)] = &[
+    (
+        "agent-lifecycle.md",
+        include_str!("../skills/herdr/references/agent-lifecycle.md"),
+    ),
+    (
+        "cli-semantics.md",
+        include_str!("../skills/herdr/references/cli-semantics.md"),
+    ),
+    (
+        "reading-output.md",
+        include_str!("../skills/herdr/references/reading-output.md"),
+    ),
+];
+
+/// Parse the optional `--install <dir>` / `--install=<dir>` argument that modifies `--skill`.
+///
+/// Returns `Ok(None)` when `--install` is absent (bare `--skill` prints to stdout),
+/// and `Err` when it is present without a directory operand.
+fn skill_install_dir(args: &[String]) -> Result<Option<std::path::PathBuf>, String> {
+    // One predicate for both spellings: an operand that is empty or flag-shaped is a
+    // missing directory, not a directory. Splitting it per spelling let `--install=-x`
+    // through while `--install -x` was rejected.
+    fn require_dir(value: Option<&str>) -> Result<Option<std::path::PathBuf>, String> {
+        match value {
+            Some(value) if !value.is_empty() && !value.starts_with('-') => {
+                Ok(Some(std::path::PathBuf::from(value)))
+            }
+            _ => Err("--install requires a directory".to_string()),
+        }
+    }
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if let Some(value) = arg.strip_prefix("--install=") {
+            return require_dir(Some(value));
+        }
+        if arg == "--install" {
+            return require_dir(iter.next().map(String::as_str));
+        }
+    }
+    Ok(None)
+}
+
+/// Write the bundled skill directory — `SKILL.md` plus `references/` — into `dir`.
+///
+/// Installing over an existing directory prunes reference files this build does not
+/// carry. Without that, a reference dropped between releases lingers as guidance
+/// `SKILL.md` no longer vouches for, and an agent with progressive disclosure still
+/// loads it. Only `references/*.md` is pruned — nothing else under `dir` is touched.
+fn install_skill(dir: &std::path::Path) -> io::Result<()> {
+    let references = dir.join("references");
+    std::fs::create_dir_all(&references)?;
+
+    if let Ok(entries) = std::fs::read_dir(&references) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let is_ours = SKILL_REFERENCES.iter().any(|(known, _)| name == **known);
+            let is_markdown = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|e| e == "md");
+            if !is_ours && is_markdown {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+    }
+
+    std::fs::write(dir.join("SKILL.md"), SKILL)?;
+    for (name, body) in SKILL_REFERENCES {
+        std::fs::write(references.join(name), body)?;
+    }
+    Ok(())
+}
+
 fn should_block_nested(config: &config::Config) -> bool {
     should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
 }
@@ -709,6 +786,8 @@ fn main() -> io::Result<()> {
         println!("  --handoff           Opt into live handoff for update or remote attach");
         println!("  --default-config    Print default configuration and exit");
         println!("  --skill             Print the agent skill file and exit");
+        println!("  --skill --install <dir>");
+        println!("                      Write the agent skill directory to <dir> and exit");
         println!("  --version, -V       Print version and exit");
         println!("  --help, -h          Show this help");
         println!();
@@ -717,6 +796,7 @@ fn main() -> io::Result<()> {
         println!("Env:    HERDR_CONFIG_PATH overrides config file path");
         println!("Home:   https://herdr.dev");
         println!("Skill:  herdr --skill prints agent instructions for driving herdr from a pane");
+        println!("        herdr --skill --install <dir> writes the full skill directory instead");
         return Ok(());
     }
 
@@ -731,7 +811,21 @@ fn main() -> io::Result<()> {
     }
 
     if args.iter().any(|a| a == "--skill") {
-        print!("{SKILL}");
+        match skill_install_dir(&args) {
+            Ok(None) => print!("{SKILL}"),
+            Ok(Some(dir)) => {
+                if let Err(err) = install_skill(&dir) {
+                    eprintln!("error: could not install skill to {}: {err}", dir.display());
+                    std::process::exit(1);
+                }
+                println!("installed herdr skill to {}", dir.display());
+            }
+            Err(err) => {
+                eprintln!("error: {err}");
+                eprintln!("run 'herdr --help' for usage");
+                std::process::exit(2);
+            }
+        }
         return Ok(());
     }
 
@@ -748,6 +842,11 @@ fn main() -> io::Result<()> {
         "--help",
         "-h",
     ];
+    // `--install` is deliberately absent: it is a modifier on `--skill`, and the
+    // `--skill` branch above returns before this loop ever runs. Listing it here
+    // would only ever be reached with `--skill` ABSENT, where it would wave through
+    // a bare `herdr --install` into the normal launch path with the flag silently
+    // ignored. Left out, that case gets the correct "unknown option: --install".
     for arg in &args[1..] {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
@@ -956,6 +1055,131 @@ mod tests {
         assert!(NESTED_HERDR_MESSAGES
             .iter()
             .all(|message| !message.starts_with("herdr:")));
+    }
+
+    fn repo_skill_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/herdr")
+    }
+
+    /// Guards against a reference file being added to skills/herdr/references/ without a
+    /// matching `include_str!` entry — which would ship a skill directory missing a file
+    /// that SKILL.md's References section points at.
+    #[test]
+    fn skill_directory_is_fully_bundled() {
+        let mut on_disk: Vec<String> = std::fs::read_dir(repo_skill_dir().join("references"))
+            .expect("skills/herdr/references must exist")
+            .map(|entry| {
+                entry
+                    .expect("readable directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        on_disk.sort();
+
+        let mut bundled: Vec<String> = SKILL_REFERENCES
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect();
+        bundled.sort();
+
+        assert_eq!(
+            on_disk, bundled,
+            "SKILL_REFERENCES must list every file in skills/herdr/references/"
+        );
+    }
+
+    /// A fresh, non-guessable temp directory that must not already exist.
+    ///
+    /// `temp_dir()` is world-writable `/tmp` whenever `TMPDIR` is unset (most CI
+    /// containers), and a PID alone is enumerable — a pre-planted symlink at a
+    /// predictable path would be followed by the writes below, turning this test into
+    /// an arbitrary-file overwrite. `create_dir` (not `create_dir_all`) fails rather
+    /// than adopting a path someone else created.
+    fn fresh_temp_dir(label: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("herdr-{label}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir(&dir).expect("fresh temp dir must not already exist");
+        dir
+    }
+
+    #[test]
+    fn install_skill_emits_a_byte_identical_copy_of_the_repo_skill() {
+        let dir = fresh_temp_dir("skill-install");
+        install_skill(&dir).expect("skill install writes to a fresh temp dir");
+
+        let source = repo_skill_dir();
+        let mut expected: Vec<std::path::PathBuf> = vec![std::path::PathBuf::from("SKILL.md")];
+        expected.extend(
+            SKILL_REFERENCES
+                .iter()
+                .map(|(name, _)| std::path::Path::new("references").join(name)),
+        );
+        for relative in &expected {
+            assert_eq!(
+                std::fs::read(dir.join(relative)).expect("installed file"),
+                std::fs::read(source.join(relative)).expect("repo file"),
+                "{} differs from the repo copy",
+                relative.display(),
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The docs tell operators to install straight over `~/.claude/skills/herdr`, so a
+    /// reference retired between releases must not survive as guidance SKILL.md no
+    /// longer points at.
+    #[test]
+    fn install_skill_prunes_a_reference_this_build_does_not_carry() {
+        let dir = fresh_temp_dir("skill-prune");
+        std::fs::create_dir_all(dir.join("references")).expect("references dir");
+        std::fs::write(dir.join("references/retired-topic.md"), "# retired").expect("stale file");
+        std::fs::write(dir.join("references/keep.txt"), "not markdown").expect("sibling file");
+
+        install_skill(&dir).expect("install over an existing directory");
+
+        assert!(
+            !dir.join("references/retired-topic.md").exists(),
+            "a reference this build does not carry must be pruned",
+        );
+        assert!(
+            dir.join("references/keep.txt").exists(),
+            "pruning must be confined to references/*.md",
+        );
+        for (name, _) in SKILL_REFERENCES {
+            assert!(dir.join("references").join(name).exists(), "{name} missing");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn skill_install_dir_parses_both_operand_forms() {
+        let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+
+        assert_eq!(skill_install_dir(&args(&["herdr", "--skill"])), Ok(None));
+        assert_eq!(
+            skill_install_dir(&args(&["herdr", "--skill", "--install", "/tmp/s"])),
+            Ok(Some(std::path::PathBuf::from("/tmp/s"))),
+        );
+        assert_eq!(
+            skill_install_dir(&args(&["herdr", "--skill", "--install=/tmp/s"])),
+            Ok(Some(std::path::PathBuf::from("/tmp/s"))),
+        );
+        assert!(skill_install_dir(&args(&["herdr", "--skill", "--install"])).is_err());
+        assert!(skill_install_dir(&args(&["herdr", "--skill", "--install", "--help"])).is_err());
+        assert!(skill_install_dir(&args(&["herdr", "--skill", "--install="])).is_err());
+        // Both spellings share one predicate, so a flag-shaped operand is rejected
+        // through `=` too — it was accepted before the predicates were unified.
+        assert!(skill_install_dir(&args(&["herdr", "--skill", "--install=-x"])).is_err());
     }
 
     #[cfg(unix)]
