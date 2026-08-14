@@ -48,7 +48,10 @@ rustPlatform.buildRustPackage {
         ../build.rs
         ../Cargo.lock
         ../Cargo.toml
-        ../skills/herdr/SKILL.md
+        # The whole skill directory, not just SKILL.md: main.rs include_str!s every
+        # file under references/ too, and naming them individually would silently
+        # break the Nix build each time one is added.
+        ../skills/herdr
       ]
     );
   };
