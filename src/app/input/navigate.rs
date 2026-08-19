@@ -876,24 +876,35 @@ impl App {
         self.toast_unchanged_tab_move(&response);
     }
 
-    /// Surfaces a refused tab move, which otherwise looks like nothing happened.
+    /// Surfaces a refused *or* failed tab move, either of which otherwise looks
+    /// like nothing happened.
     fn toast_unchanged_tab_move(&mut self, response: &str) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
             return;
         };
-        if value
-            .pointer("/result/move_result/changed")
-            .and_then(serde_json::Value::as_bool)
-            != Some(false)
-        {
-            return;
-        }
-        let context = match value
-            .pointer("/result/move_result/reason")
+        // An error response carries no `move_result` at all, so testing only for
+        // `changed == false` would return early and leave a hard failure
+        // completely silent. Treat error and refusal as two toast-worthy cases.
+        let context = if let Some(message) = value
+            .pointer("/error/message")
             .and_then(serde_json::Value::as_str)
         {
-            Some("last_tab_in_workspace") => "a space must keep one tab",
-            _ => "it is already in that space",
+            message
+        } else {
+            if value
+                .pointer("/result/move_result/changed")
+                .and_then(serde_json::Value::as_bool)
+                != Some(false)
+            {
+                return;
+            }
+            match value
+                .pointer("/result/move_result/reason")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("last_tab_in_workspace") => "a space must keep one tab",
+                _ => "it is already in that space",
+            }
         };
         let previous_toast = self.state.toast.clone();
         self.state.toast = Some(crate::app::state::ToastNotification {

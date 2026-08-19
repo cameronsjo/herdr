@@ -194,12 +194,19 @@ impl App {
                 workspace_id,
                 insert_index,
             } => {
-                let Some(target_ws_idx) = self.parse_workspace_id(&workspace_id) else {
-                    return encode_error(
-                        id,
-                        "workspace_not_found",
-                        format!("workspace {workspace_id} not found"),
-                    );
+                // `parse_workspace_id` falls back to positional parsing and does
+                // NOT bounds-check, so a bare numeric id yields an index past the
+                // end. Re-check before anything indexes it, matching
+                // `handle_workspace_rename` and `handle_workspace_move`.
+                let target_ws_idx = match self.parse_workspace_id(&workspace_id) {
+                    Some(idx) if idx < self.state.workspaces.len() => idx,
+                    _ => {
+                        return encode_error(
+                            id,
+                            "workspace_not_found",
+                            format!("workspace {workspace_id} not found"),
+                        );
+                    }
                 };
                 self.tab_move_to_workspace(id, ws_idx, tab_idx, target_ws_idx, insert_index)
             }
@@ -295,13 +302,39 @@ impl App {
         }
         // A workspace derefs through its active tab, so it must keep one.
         // Refusing beats silently closing the workspace out from under the user.
-        if self.state.workspaces[ws_idx].tabs.len() <= 1 {
+        let source_tabs_len = match self.state.workspaces.get(ws_idx) {
+            Some(ws) => ws.tabs.len(),
+            None => return encode_error(id, "tab_move_failed", "source workspace is unavailable"),
+        };
+        if source_tabs_len <= 1 {
             return self.encode_unchanged_tab_move(
                 id,
                 TabMoveReason::LastTabInWorkspace,
                 previous_tab_id,
                 source_workspace_id,
                 ws_idx,
+            );
+        }
+
+        // Resolve the destination FULLY before detaching anything. Between the
+        // take and the insert the tab belongs to no workspace, so a failure in
+        // that window loses it and its live panes — `pane.move` carries a
+        // recovery context for the same reason; validating first removes the
+        // need for one.
+        let Some(target_tabs_len) = self
+            .state
+            .workspaces
+            .get(target_ws_idx)
+            .map(|ws| ws.tabs.len())
+        else {
+            return encode_error(id, "workspace_not_found", "destination workspace not found");
+        };
+        let insert_index = insert_index.unwrap_or(target_tabs_len);
+        if insert_index > target_tabs_len {
+            return encode_error(
+                id,
+                "tab_move_failed",
+                format!("insert_index {insert_index} is out of bounds"),
             );
         }
 
@@ -318,8 +351,6 @@ impl App {
         // Old public pane ids keep resolving until something reuses the number.
         self.alias_moved_pane_ids(previous_pane_ids);
 
-        let insert_index =
-            insert_index.unwrap_or_else(|| self.state.workspaces[target_ws_idx].tabs.len());
         let target_tab_idx =
             self.state.workspaces[target_ws_idx].insert_moved_tab(taken, insert_index);
 
@@ -345,7 +376,11 @@ impl App {
             None => return encode_error(id, "tab_move_failed", "source tab is unavailable"),
         };
         let source_workspace_id = self.public_workspace_id(ws_idx);
-        if self.state.workspaces[ws_idx].tabs.len() <= 1 {
+        let source_tabs_len = match self.state.workspaces.get(ws_idx) {
+            Some(ws) => ws.tabs.len(),
+            None => return encode_error(id, "tab_move_failed", "source workspace is unavailable"),
+        };
+        if source_tabs_len <= 1 {
             return self.encode_unchanged_tab_move(
                 id,
                 TabMoveReason::LastTabInWorkspace,
@@ -357,7 +392,14 @@ impl App {
 
         // Inherit the source workspace's identity cwd: the tab's panes are
         // already running there, so anything else mislabels the new workspace.
-        let identity_cwd = self.state.workspaces[ws_idx].identity_cwd.clone();
+        let Some(identity_cwd) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .map(|ws| ws.identity_cwd.clone())
+        else {
+            return encode_error(id, "tab_move_failed", "source workspace is unavailable");
+        };
         let previous_pane_ids = self.public_pane_ids_in_tab(ws_idx, tab_idx);
         let Some(taken) = self
             .state
@@ -793,6 +835,71 @@ mod tests {
                 .len(),
             "moved tab must not reuse a public number already live in the target"
         );
+        app.state.workspaces[1].assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_tab_move_rejects_an_out_of_range_workspace_id_without_panicking() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        seed_two_workspaces(&mut app);
+        let tab_id = app.public_tab_id(0, 1).unwrap();
+
+        // `parse_workspace_id` falls back to positional parsing with no bounds
+        // check, so a bare numeric id resolves to an index far past the end.
+        // Unchecked, this indexed a Vec and panicked the whole server from one
+        // socket request.
+        let response = app.handle_tab_move(
+            "req".into(),
+            TabMoveParams {
+                tab_id,
+                insert_index: None,
+                destination: Some(TabMoveDestination::Workspace {
+                    workspace_id: "999999".into(),
+                    insert_index: None,
+                }),
+            },
+        );
+
+        assert!(
+            response.contains("workspace_not_found"),
+            "expected a workspace_not_found error, got: {response}"
+        );
+        // The source tab must still be attached — nothing may be detached before
+        // the destination is known good.
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+        app.state.workspaces[0].assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_tab_move_rejects_an_out_of_bounds_insert_index_without_detaching() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        seed_two_workspaces(&mut app);
+        let tab_id = app.public_tab_id(0, 1).unwrap();
+        let target_workspace_id = app.public_workspace_id(1);
+
+        let response = app.handle_tab_move(
+            "req".into(),
+            TabMoveParams {
+                tab_id,
+                insert_index: None,
+                destination: Some(TabMoveDestination::Workspace {
+                    workspace_id: target_workspace_id,
+                    insert_index: Some(99),
+                }),
+            },
+        );
+
+        assert!(
+            response.contains("out of bounds"),
+            "expected an out-of-bounds error, got: {response}"
+        );
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+        assert_eq!(app.state.workspaces[1].tabs.len(), 1);
+        app.state.workspaces[0].assert_invariants_for_test();
         app.state.workspaces[1].assert_invariants_for_test();
     }
 
