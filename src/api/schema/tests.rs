@@ -1090,7 +1090,8 @@ fn authority_mutation_requests_round_trip() {
         id: "move_tab".into(),
         method: Method::TabMove(TabMoveParams {
             tab_id: "w1:1".into(),
-            insert_index: 1,
+            insert_index: Some(1),
+            destination: None,
         }),
     };
     let json = serde_json::to_value(&tab_move).unwrap();

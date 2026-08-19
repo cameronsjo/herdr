@@ -274,6 +274,48 @@ impl Workspace {
         }
     }
 
+    /// Builds a workspace around a tab detached by `take_tab_for_move`,
+    /// reissuing the tab number and every pane number in the new id space.
+    pub(crate) fn from_existing_tab(
+        label: Option<String>,
+        identity_cwd: PathBuf,
+        taken: TakenTab,
+    ) -> Self {
+        let id = generate_workspace_id();
+        let TakenTab { mut tab, pane_ids } = taken;
+        tab.number = 1;
+        let mut public_pane_numbers = HashMap::new();
+        // Number the panes in layout order so the ids read predictably rather
+        // than following HashMap iteration.
+        for (offset, pane_id) in pane_ids.iter().enumerate() {
+            public_pane_numbers.insert(*pane_id, offset + 1);
+        }
+        let next_public_pane_number = pane_ids.len() + 1;
+        let (cached_git_space, cached_auto_label, cached_git_status_key) =
+            discover_workspace_git_identity(&identity_cwd);
+        Self {
+            id,
+            custom_name: label,
+            identity_cwd: identity_cwd.clone(),
+            cached_identity_cwd: identity_cwd.clone(),
+            cached_auto_label,
+            cached_git_status_key,
+            cached_git_branch: git_branch(&identity_cwd),
+            cached_git_ahead_behind: None,
+            cached_git_space,
+            worktree_space: None,
+            metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
+            metadata_token_sequences: HashMap::new(),
+            public_pane_numbers,
+            next_public_pane_number,
+            next_public_tab_number: 2,
+            tabs: vec![tab],
+            active_tab: 0,
+            #[cfg(test)]
+            test_runtimes: HashMap::new(),
+        }
+    }
+
     // Test modules construct workspaces through the default constructor; production paths
     // use the env-aware variant so pane identity env is always explicit.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -1004,6 +1046,50 @@ impl Workspace {
         })
     }
 
+    /// Detaches a tab so another workspace can adopt it whole, preserving its
+    /// pane tree and layout.
+    ///
+    /// Refuses the workspace's last tab: `Workspace` derefs through its active
+    /// tab, so an empty one panics on next access. Callers surface that as a
+    /// refusal rather than closing the workspace behind the user's back.
+    pub(crate) fn take_tab_for_move(&mut self, tab_idx: usize) -> Option<TakenTab> {
+        if tab_idx >= self.tabs.len() || self.tabs.len() <= 1 {
+            return None;
+        }
+        let tab = self.tabs.remove(tab_idx);
+        // Public pane numbers are per-workspace, so the panes stop existing as
+        // far as this workspace's id space is concerned.
+        let pane_ids = tab.layout.pane_ids();
+        for pane_id in &pane_ids {
+            self.unregister_pane(*pane_id);
+        }
+        self.adjust_active_tab_after_removal(tab_idx);
+        Some(TakenTab { tab, pane_ids })
+    }
+
+    /// Adopts a tab detached by `take_tab_for_move`, reissuing its public tab
+    /// number and every contained pane number from this workspace's id space.
+    pub(crate) fn insert_moved_tab(&mut self, taken: TakenTab, insert_idx: usize) -> usize {
+        let TakenTab { mut tab, pane_ids } = taken;
+        // Allocate above the live maximum as well as the counter. A public
+        // number that collides with a sitting tab makes `parse_tab_id` resolve
+        // the wrong one, so this must not depend on the counter being current.
+        tab.number = self.next_free_public_tab_number();
+        self.next_public_tab_number = tab.number + 1;
+        for pane_id in &pane_ids {
+            let number = self.next_free_public_pane_number();
+            self.register_new_pane_with_number(*pane_id, number);
+        }
+        let idx = insert_idx.min(self.tabs.len());
+        let active_root_pane = self.tabs.get(self.active_tab).map(|tab| tab.root_pane);
+        self.tabs.insert(idx, tab);
+        // Keep focus on whatever tab was active before the insert shifted indices.
+        self.active_tab = active_root_pane
+            .and_then(|root_pane| self.tabs.iter().position(|tab| tab.root_pane == root_pane))
+            .unwrap_or(idx);
+        idx
+    }
+
     pub(crate) fn insert_moved_pane_into_tab(
         &mut self,
         tab_idx: usize,
@@ -1238,6 +1324,24 @@ impl Workspace {
         self.register_new_pane_with_number(pane_id, self.next_public_pane_number);
     }
 
+    /// First public tab number free in this workspace — above both the counter
+    /// and every live tab, so a stale counter cannot produce a duplicate.
+    fn next_free_public_tab_number(&self) -> usize {
+        let live_max = self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0);
+        self.next_public_tab_number.max(live_max + 1)
+    }
+
+    /// Pane-number counterpart of `next_free_public_tab_number`.
+    fn next_free_public_pane_number(&self) -> usize {
+        let live_max = self
+            .public_pane_numbers
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        self.next_public_pane_number.max(live_max + 1)
+    }
+
     fn register_new_pane_with_number(&mut self, pane_id: PaneId, number: usize) {
         self.public_pane_numbers.insert(pane_id, number);
         self.next_public_pane_number = self.next_public_pane_number.max(number + 1);
@@ -1261,6 +1365,14 @@ pub(crate) struct TakenPane {
     pub moved: MovedPane,
     pub removed_tab_idx: Option<usize>,
     pub workspace_empty: bool,
+}
+
+/// A tab detached from one workspace and not yet adopted by another. Carries
+/// its pane ids because the receiving workspace has to reissue a public number
+/// for each of them.
+pub(crate) struct TakenTab {
+    pub tab: Tab,
+    pub pane_ids: Vec<PaneId>,
 }
 
 #[cfg(test)]

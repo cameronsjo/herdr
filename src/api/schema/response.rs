@@ -17,7 +17,7 @@ use super::plugins::{
 };
 use super::server::ServerCapabilities;
 use super::session::SessionSnapshot;
-use super::tabs::TabInfo;
+use super::tabs::{TabInfo, TabMoveResult};
 use super::workspaces::WorkspaceInfo;
 use super::worktrees::{WorktreeInfo, WorktreeSourceInfo};
 
@@ -92,6 +92,12 @@ pub enum ResponseResult {
         root_pane: PaneInfo,
     },
     TabList {
+        tabs: Vec<TabInfo>,
+    },
+    /// `tab.move`'s result. Carries `tabs` for the workspace the tab now lives
+    /// in, so a reorder reads the same as a cross-workspace move.
+    TabMove {
+        move_result: TabMoveResult,
         tabs: Vec<TabInfo>,
     },
     AgentInfo {

@@ -570,7 +570,8 @@ impl App {
             "tui.tab.move",
             crate::api::schema::TabMoveParams {
                 tab_id,
-                insert_index: insert_idx,
+                insert_index: Some(insert_idx),
+                destination: None,
             },
         );
     }
