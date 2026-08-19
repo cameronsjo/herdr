@@ -330,9 +330,13 @@ status_indicators = "symbols"
 ```toml
 [ui.sidebar.agents]
 row_gap = 0
+group_by = "none"
 rows = [
   ["state_icon", "workspace", "tab"],
   ["agent"],
+]
+grouped_rows = [
+  ["state_icon", "tab", "agent"],
 ]
 
 [ui.sidebar.spaces]
@@ -379,6 +383,30 @@ rows = [
 `fg` 只接受严格的 `#RGB` 或 `#RRGGBB`，`bold` 和 `dim` 接受布尔值。省略字段会保留上下文样式；显式 `false` 会移除对应修饰。样式只作用于当前出现位置。为 `git_status` 设置 `fg` 后，ahead 和 behind 会使用同一种颜色，而不是默认的绿色和红色。token 样式不会改变分隔符或行背景。
 
 `row_gap` 分别控制 Agent 和 Space 面板中条目之间的空白终端行数。默认值为 `0`，会紧密排列条目；设为 `1` 可恢复之前的间距。它不会在 `rows` 声明的内容行之间添加间距。连续缩进的 worktree 子项仍会作为一个 Space 组紧密排列。
+
+#### 按工作区分组 Agent 行
+
+设置 `group_by = "workspace"` 后，Herdr 会在每一组相邻的同工作区智能体上方绘制一个工作区标题，而不是在每个 Agent 条目上重复工作区名称：
+
+```toml
+[ui.sidebar.agents]
+group_by = "workspace"
+grouped_rows = [
+  ["state_icon", "tab", "agent"],
+]
+```
+
+```text
+cadence-ecosystem
+  ○ land-forgectl-campaign
+  ● cameron-batch-deployment
+smart-home
+  ○ hermes-egress-proxy-rules
+```
+
+分组只是用 `grouped_rows` 替换 `rows`，它不会修改你配置的行。由于标题已经展示了工作区名称，`grouped_rows` 通常不包含 `workspace` token。`rows_by_agent` 覆盖在两种模式下仍然优先。
+
+只有当 Agent 面板处于 **grouped**（空间）顺序时才会分组。在 **priority** 顺序以及任何会排序的智能体视图下，分组会关闭，因为两者都可能交错不同工作区，使标题标注到其他工作区的智能体。关闭时的渲染与 `group_by = "none"` 完全一致。滚动到一组的中间时，该组的标题也会随之滚出视图；Herdr 不会固定标题。
 
 在 `rows_by_agent` 下为已知智能体覆盖完整的 Agent 布局：
 

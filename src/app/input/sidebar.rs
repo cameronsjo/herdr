@@ -505,16 +505,23 @@ impl AppState {
         let entries = crate::ui::agent_panel_entries(self);
         let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
         for (index, detail) in entries.iter().enumerate().skip(scroll) {
-            let height = crate::ui::agent_entry_height_in_body(self, detail, body.height);
+            let height = crate::ui::agent_entry_height_in_body(
+                self,
+                detail,
+                body.height,
+                crate::ui::agent_entry_prev_ws_idx(&entries, index),
+            );
             if row_y.saturating_add(height) > body_bottom {
                 break;
             }
+            // A workspace header belongs to the entry that draws it, so clicking
+            // one focuses the first agent in the run.
             if row >= row_y && row < row_y.saturating_add(height) {
                 return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
             }
             row_y = row_y
                 .saturating_add(height)
-                .saturating_add(crate::ui::agent_entry_gap(self, index, entries.len()))
+                .saturating_add(crate::ui::agent_entry_gap(self, &entries, index))
                 .min(body_bottom);
         }
         None

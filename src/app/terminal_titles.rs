@@ -13,6 +13,7 @@ impl App {
     pub(crate) fn terminal_title_sidebar_changed(&self, changes: &TerminalTitleChanges) -> bool {
         let config = &self.state.sidebar_agents;
         std::iter::once(&config.rows)
+            .chain(std::iter::once(&config.grouped_rows))
             .chain(config.rows_by_agent.values())
             .flatten()
             .flatten()

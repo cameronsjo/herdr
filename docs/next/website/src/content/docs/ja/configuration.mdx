@@ -330,9 +330,13 @@ status_indicators = "symbols"
 ```toml
 [ui.sidebar.agents]
 row_gap = 0
+group_by = "none"
 rows = [
   ["state_icon", "workspace", "tab"],
   ["agent"],
+]
+grouped_rows = [
+  ["state_icon", "tab", "agent"],
 ]
 
 [ui.sidebar.spaces]
@@ -379,6 +383,30 @@ rows = [
 `fg` は厳密な `#RGB` または `#RRGGBB`、`bold` と `dim` は真偽値です。省略したフィールドはコンテキストのスタイルを保持し、明示的な `false` はその修飾を解除します。スタイルは 1 つの出現箇所だけに適用されます。`fg` を指定した `git_status` では、既定の緑/赤ではなく ahead と behind の両方が同じ色になります。区切りと行の背景は変更されません。
 
 `row_gap` は、Agent パネルと Space パネルごとに、エントリ間の空白行数を指定します。デフォルトは `0` で、エントリを詰めて表示します。以前の間隔に戻すには `1` に設定します。`rows` で定義したコンテンツ行の間隔には影響しません。連続するインデントされた worktree の子は、1 つの Space グループとして詰めて表示されます。
+
+#### Agent の行をワークスペースでグループ化する
+
+`group_by = "workspace"` を設定すると、すべての Agent エントリでワークスペース名を繰り返す代わりに、同じワークスペースの隣接するエージェントのまとまりごとに 1 つのワークスペース見出しを描画します:
+
+```toml
+[ui.sidebar.agents]
+group_by = "workspace"
+grouped_rows = [
+  ["state_icon", "tab", "agent"],
+]
+```
+
+```text
+cadence-ecosystem
+  ○ land-forgectl-campaign
+  ● cameron-batch-deployment
+smart-home
+  ○ hermes-egress-proxy-rules
+```
+
+グループ化は `rows` の代わりに `grouped_rows` を選択するだけで、設定した行を書き換えることはありません。見出しがすでにワークスペース名を示すため、`grouped_rows` には通常 `workspace` トークンを含めないレイアウトを指定します。`rows_by_agent` の上書きは、どちらのモードでも優先されます。
+
+グループ化が有効になるのは、Agent パネルが **grouped**（スペース）順のときだけです。**priority** 順や、並べ替えを行うエージェントビューでは無効になります。どちらもワークスペースを混在させ、見出しが別のワークスペースのエージェントを指してしまうためです。無効なときの描画は `group_by = "none"` とまったく同じです。まとまりの途中までスクロールすると、そのまとまりの見出しも画面外へスクロールします。Herdr は見出しを固定しません。
 
 既知のエージェントについて Agent の完全なレイアウトを上書きするには、`rows_by_agent` を使います:
 
