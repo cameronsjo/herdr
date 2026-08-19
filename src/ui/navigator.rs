@@ -376,6 +376,14 @@ fn selected_detail(app: &AppState, terminal_runtimes: &TerminalRuntimeRegistry) 
     };
     // While armed the row's own identity matters less than what accepting it
     // does, and nothing else on screen says which destination a depth implies.
+    if app.navigator.pending_tab_move.is_some() {
+        return match row.target {
+            NavigatorTarget::NewWorkspace => "moves this tab to a new space".to_string(),
+            NavigatorTarget::Workspace { .. }
+            | NavigatorTarget::Tab { .. }
+            | NavigatorTarget::Pane { .. } => "moves this tab here".to_string(),
+        };
+    }
     if app.navigator.pending_pane_move.is_some() {
         return match row.target {
             NavigatorTarget::NewWorkspace => "moves this pane to a new space".to_string(),
@@ -553,7 +561,7 @@ fn render_footer(app: &AppState, frame: &mut Frame, area: Rect) {
     let dim = Style::default().fg(p.overlay0);
     // While a move is armed, enter relocates the pane instead of switching to the
     // row, so the footer has to say which one it is.
-    let armed = app.navigator.pending_pane_move.is_some();
+    let armed = app.navigator.move_armed();
     let accept = if armed { " move here  " } else { " switch  " };
     let line = if app.navigator.search_focused {
         Line::from(vec![

@@ -29,7 +29,11 @@ echo "==> fetching $ORIGIN_REMOTE and $FORK_REMOTE"
 git fetch "$ORIGIN_REMOTE" --prune
 git fetch "$FORK_REMOTE" --prune
 
-if git worktree list --porcelain | command grep -qx "worktree $WORKTREE_DIR"; then
+# Capture first: under `set -o pipefail` a `grep -q` exits at the first match
+# and can SIGPIPE the producer (141), inverting this test and sending the
+# resume path into `git worktree add` on a directory that already exists.
+worktree_list=$(git worktree list --porcelain)
+if command grep -qx "worktree $WORKTREE_DIR" <<<"$worktree_list"; then
   echo "==> reusing existing worktree at $WORKTREE_DIR"
 else
   echo "==> creating worktree at $WORKTREE_DIR (branch $BRANCH, from $FORK_REMOTE/master)"
@@ -72,7 +76,9 @@ else
     git add README.md
   fi
 
-  remaining=$(command grep '^UU\|^AA\|^DD' <<<"$(git status --porcelain)" || true)
+  # Every unmerged porcelain state, not just the three symmetric ones —
+  # a rename/delete conflict is DU/UD/AU/UA and was silently omitted.
+  remaining=$(command grep -E '^(DD|AU|UD|UA|DU|AA|UU)' <<<"$(git status --porcelain)" || true)
   if [[ -n "$remaining" ]]; then
     echo
     echo "Conflicts remain — resolve these by hand, then re-run this script to finish:"
@@ -88,6 +94,12 @@ fi
 
 echo
 echo "Next steps:"
-echo "  1. scripts/docker-check.sh   (verify the merge in $WORKTREE_DIR)"
-echo "  2. git -C $WORKTREE_DIR push $FORK_REMOTE $BRANCH:master"
-echo "  3. git worktree remove $WORKTREE_DIR && git branch -d $BRANCH"
+echo "  1. (cd $WORKTREE_DIR && ./scripts/docker-check.sh)"
+echo "     Run it from the worktree: the script mounts the tree it lives in, so the"
+echo "     primary checkout's copy would test the PRE-merge tree and still print PASS."
+echo "  2. git -C $WORKTREE_DIR push --no-follow-tags $FORK_REMOTE $BRANCH:master"
+echo "     --no-follow-tags is required: push.followTags is set globally and the fetch"
+echo "     above imports upstream's new annotated tags."
+echo "  3. git merge --ff-only $BRANCH   (fast-forward master BEFORE deleting the branch,"
+echo "     or git branch -d compares against HEAD and refuses)"
+echo "  4. git worktree remove $WORKTREE_DIR && git branch -d $BRANCH"

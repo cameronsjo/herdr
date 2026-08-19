@@ -560,6 +560,7 @@ pub(super) fn open_new_tab_dialog(state: &mut AppState) {
 
 pub(super) fn leave_modal(state: &mut AppState) {
     state.navigator.pending_pane_move = None;
+    state.navigator.pending_tab_move = None;
     state.pending_pane_split = None;
     if state.active.is_some() {
         state.mode = Mode::Terminal;

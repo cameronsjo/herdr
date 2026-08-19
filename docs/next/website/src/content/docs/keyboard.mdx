@@ -23,7 +23,11 @@ Matches are ranked by how well they answer what you typed, so a query naming one
 
 Three commands move the focused pane and have no shortcut of their own, so the palette is where you reach them: `move pane to space`, `move pane to new space`, and `move pane to new tab`.
 
+Two more move the focused tab the same way: `move tab to space` and `move tab to new space`. The tab moves whole, keeping its panes and their layout.
+
 `move pane to space` opens the session navigator to pick a destination. Filter it the same way, then press `enter`. Pick `+ new space` to give the pane a space of its own, a space to put it in a new tab there, or a tab to split it into that tab. The line above the footer says what the selected row will do, and `esc` cancels without moving anything.
+
+`move tab to space` opens the same picker, but a tab lands in a space rather than inside another tab, so only spaces and `+ new space` are offered. A space must keep at least one tab, so moving its last one is refused and a toast says so.
 
 ## Learn these five first
 

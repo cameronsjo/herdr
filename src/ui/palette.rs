@@ -379,6 +379,36 @@ mod tests {
     }
 
     #[test]
+    fn move_tab_to_space_commands_reach_the_palette() {
+        let state = AppState::test_new();
+        let commands = palette_commands(&state);
+        let actions: Vec<NavigateAction> = commands.iter().map(|command| command.action).collect();
+
+        for expected in [
+            NavigateAction::MoveTabToSpace,
+            NavigateAction::MoveTabToNewSpace,
+        ] {
+            assert!(
+                actions.contains(&expected),
+                "{expected:?} is missing from the palette"
+            );
+        }
+
+        // The keywords are the only way "workspace" wording finds these.
+        let by_keyword = commands
+            .iter()
+            .find(|command| command.action == NavigateAction::MoveTabToSpace)
+            .expect("move tab to space command");
+        assert!(
+            by_keyword
+                .keywords
+                .iter()
+                .any(|keyword| keyword.contains("workspace")),
+            "move tab to space should be findable by workspace vocabulary"
+        );
+    }
+
+    #[test]
     fn new_pane_matches_both_split_commands_via_keywords() {
         let matches = names("new pane");
         assert!(

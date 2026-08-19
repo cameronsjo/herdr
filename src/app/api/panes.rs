@@ -904,9 +904,19 @@ impl App {
                 workspace_id,
                 label,
             } => {
-                let Some(target_ws_idx) = self.parse_workspace_id(&workspace_id) else {
-                    self.recover_failed_pane_move(recovery_context, moved);
-                    return encode_error(id, "pane_move_failed", "target workspace disappeared");
+                // `parse_workspace_id` falls back to positional parsing without a
+                // bounds check, so a bare numeric id yields an index past the end
+                // — indexing it below would panic the whole server.
+                let target_ws_idx = match self.parse_workspace_id(&workspace_id) {
+                    Some(idx) if idx < self.state.workspaces.len() => idx,
+                    _ => {
+                        self.recover_failed_pane_move(recovery_context, moved);
+                        return encode_error(
+                            id,
+                            "pane_move_failed",
+                            "target workspace disappeared",
+                        );
+                    }
                 };
                 let moved_pane_id = moved.pane_id;
                 let target_tab_idx = self.state.workspaces[target_ws_idx]

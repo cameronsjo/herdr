@@ -439,6 +439,23 @@ impl App {
                         .reseat_navigator_selection_from(&self.terminal_runtimes);
                 }
             }
+            NavigateAction::MoveTabToSpace => {
+                if let Some(tab_id) = self.state.focused_public_tab_id() {
+                    self.state.open_navigator_from(&self.terminal_runtimes);
+                    self.state.navigator.pending_tab_move = Some(tab_id);
+                    self.state
+                        .reseat_navigator_selection_from(&self.terminal_runtimes);
+                }
+            }
+            NavigateAction::MoveTabToNewSpace => {
+                if let Some(tab_id) = self.state.focused_public_tab_id() {
+                    self.move_tab_to_destination_via_api(
+                        tab_id,
+                        crate::api::schema::TabMoveDestination::NewWorkspace { label: None },
+                    );
+                }
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::MovePaneToNewSpace => {
                 self.move_focused_pane_via_api(
                     crate::api::schema::PaneMoveDestination::NewWorkspace {
@@ -570,7 +587,8 @@ impl App {
             "tui.tab.move",
             crate::api::schema::TabMoveParams {
                 tab_id,
-                insert_index: insert_idx,
+                insert_index: Some(insert_idx),
+                destination: None,
             },
         );
     }
@@ -726,7 +744,9 @@ impl App {
     }
 
     pub(super) fn accept_navigator_row(&mut self) {
-        if self.state.navigator.pending_pane_move.is_some() {
+        if self.state.navigator.pending_tab_move.is_some() {
+            self.complete_pending_tab_move();
+        } else if self.state.navigator.pending_pane_move.is_some() {
             self.complete_pending_pane_move();
         } else {
             self.state
@@ -789,6 +809,112 @@ impl App {
             },
         );
         self.state.mode = Mode::Terminal;
+    }
+
+    pub(crate) fn complete_pending_tab_move(&mut self) {
+        if self.state.navigator.pending_tab_move.is_none() {
+            return;
+        }
+        let destination = self
+            .state
+            .navigator_rows_from(&self.terminal_runtimes)
+            .get(self.state.navigator.selected)
+            .map(|row| row.target.clone())
+            .and_then(|target| self.tab_move_destination_for(target));
+        // Leave the move armed when nothing resolved, so the tab id survives.
+        let Some(destination) = destination else {
+            return;
+        };
+        let Some(tab_id) = self.state.navigator.pending_tab_move.take() else {
+            return;
+        };
+        // Unlike a pane, a tab has no split direction to ask about — it lands
+        // in the destination workspace whole.
+        self.move_tab_to_destination_via_api(tab_id, destination);
+        self.state.mode = Mode::Terminal;
+    }
+
+    fn tab_move_destination_for(
+        &self,
+        target: crate::app::state::NavigatorTarget,
+    ) -> Option<crate::api::schema::TabMoveDestination> {
+        use crate::app::state::NavigatorTarget;
+        match target {
+            NavigatorTarget::Workspace { ws_idx } => {
+                Some(crate::api::schema::TabMoveDestination::Workspace {
+                    workspace_id: self.state.workspaces.get(ws_idx)?.id.clone(),
+                    insert_index: None,
+                })
+            }
+            NavigatorTarget::NewWorkspace => {
+                Some(crate::api::schema::TabMoveDestination::NewWorkspace { label: None })
+            }
+            // Unreachable while armed — the picker drops tab and pane rows —
+            // but a tab or pane still names the workspace it lives in.
+            NavigatorTarget::Tab { ws_idx, .. } | NavigatorTarget::Pane { ws_idx, .. } => {
+                Some(crate::api::schema::TabMoveDestination::Workspace {
+                    workspace_id: self.state.workspaces.get(ws_idx)?.id.clone(),
+                    insert_index: None,
+                })
+            }
+        }
+    }
+
+    fn move_tab_to_destination_via_api(
+        &mut self,
+        tab_id: String,
+        destination: crate::api::schema::TabMoveDestination,
+    ) {
+        let response = self.runtime_tab_move(
+            "tui.tab.move",
+            crate::api::schema::TabMoveParams {
+                tab_id,
+                insert_index: None,
+                destination: Some(destination),
+            },
+        );
+        self.toast_unchanged_tab_move(&response);
+    }
+
+    /// Surfaces a refused *or* failed tab move, either of which otherwise looks
+    /// like nothing happened.
+    fn toast_unchanged_tab_move(&mut self, response: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
+            return;
+        };
+        // An error response carries no `move_result` at all, so testing only for
+        // `changed == false` would return early and leave a hard failure
+        // completely silent. Treat error and refusal as two toast-worthy cases.
+        let context = if let Some(message) = value
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+        {
+            message
+        } else {
+            if value
+                .pointer("/result/move_result/changed")
+                .and_then(serde_json::Value::as_bool)
+                != Some(false)
+            {
+                return;
+            }
+            match value
+                .pointer("/result/move_result/reason")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("last_tab_in_workspace") => "a space must keep one tab",
+                _ => "it is already in that space",
+            }
+        };
+        let previous_toast = self.state.toast.clone();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "tab not moved".to_string(),
+            context: context.to_string(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous_toast);
     }
 
     pub(super) fn pane_move_destination_for(
@@ -1698,6 +1824,8 @@ pub(crate) enum NavigateAction {
     OpenCommandPalette,
     MovePaneToSpace,
     MovePaneToNewSpace,
+    MoveTabToSpace,
+    MoveTabToNewSpace,
     CompletePaneSplit(PaneSplitChoice),
     /// Index into `crate::app::palette_plugin_actions`.
     InvokePluginAction(usize),
@@ -2172,6 +2300,14 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::MovePaneToNewSpace | NavigateAction::MovePaneToNewTab => {
             leave_navigate_mode(state)
         }
+        NavigateAction::MoveTabToSpace => {
+            if let Some(tab_id) = state.focused_public_tab_id() {
+                state.open_navigator_from(terminal_runtimes);
+                state.navigator.pending_tab_move = Some(tab_id);
+                state.reseat_navigator_selection_from(terminal_runtimes);
+            }
+        }
+        NavigateAction::MoveTabToNewSpace => leave_navigate_mode(state),
         NavigateAction::CompletePaneSplit(_) => {
             state.pending_pane_split = None;
             leave_navigate_mode(state);

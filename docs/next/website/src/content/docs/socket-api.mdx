@@ -808,9 +808,13 @@ The first response acknowledges the subscription. Later lines are pushed events.
 
 Workspace event subscriptions include `workspace.created`, `workspace.updated`, `workspace.metadata_updated`, `workspace.renamed`, `workspace.moved`, `workspace.reordered`, `workspace.closed`, and `workspace.focused`. `workspace.metadata_updated` reports token changes and TTL expiry without invoking plugin event hooks. Other workspace events describe Herdr UI/runtime lifecycle. `workspace.created` includes optional `workspace.worktree` provenance when the workspace belongs to a worktree group. `workspace.moved` includes the moved `workspace_id`, requested `insert_index`, and updated ordered `workspaces` list. `workspace.reordered` includes the atomically moved `workspace_ids`, optional `before_workspace_id`, and authoritative ordered `workspaces` list. `workspace.closed` includes a final `workspace` snapshot when Herdr can still identify it before removal.
 Tab event subscriptions include `tab.created`, `tab.closed`, `tab.focused`,
-`tab.renamed`, and `tab.moved`. `tab.moved` includes the moved `tab_id`,
-`workspace_id`, requested `insert_index`, and updated ordered `tabs` list for
-that workspace.
+`tab.renamed`, `tab.moved`, and `tab.moved_across_workspaces`. `tab.moved`
+includes the moved `tab_id`, `workspace_id`, requested `insert_index`, and
+updated ordered `tabs` list for that workspace. `tab.moved_across_workspaces`
+fires instead when a tab changes workspace, and includes the reissued `tab_id`,
+the `previous_tab_id` it had in the source workspace, `workspace_id`,
+`source_workspace_id`, `insert_index`, and ordered `tabs` and `source_tabs`
+lists for both workspaces.
 Pane event subscriptions include `pane.created`, `pane.updated`, `pane.closed`, `pane.focused`,
 `pane.moved`, `pane.exited`, `pane.agent_detected`,
 `pane.output_matched`, `pane.agent_status_changed`, and `pane.scroll_changed`.

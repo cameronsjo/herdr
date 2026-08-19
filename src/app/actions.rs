@@ -285,6 +285,12 @@ impl AppState {
         self.public_pane_id(ws_idx, pane_id)
     }
 
+    pub(crate) fn focused_public_tab_id(&self) -> Option<String> {
+        let ws_idx = self.active?;
+        let ws = self.workspaces.get(ws_idx)?;
+        public_tab_id_for_index(ws, ws.active_tab)
+    }
+
     pub(crate) fn pane_focus_target_indices(
         &self,
         target: &PaneFocusTarget,
@@ -380,6 +386,7 @@ impl AppState {
         self.navigator.scroll = 0;
         self.navigator.expanded_workspaces.clear();
         self.navigator.pending_pane_move = None;
+        self.navigator.pending_tab_move = None;
         self.pending_pane_split = None;
 
         for ws in &self.workspaces {
@@ -404,7 +411,7 @@ impl AppState {
         let query = self.navigator.query.trim().to_lowercase();
         let query_kind = navigator_query_kind(&query, self.navigator.state_filter);
         let mut rows = Vec::new();
-        if self.navigator.pending_pane_move.is_some() {
+        if self.navigator.move_armed() {
             let row = NavigatorRow {
                 target: NavigatorTarget::NewWorkspace,
                 depth: 0,
@@ -522,7 +529,13 @@ impl AppState {
                     .collect::<Vec<_>>(),
             };
 
-            if show_tab_row && (tab_matches || !filtered_panes.is_empty()) {
+            // A tab move lands on a workspace, never inside another tab, so the
+            // tab rows are not destinations and only add noise to the picker.
+            let tab_row_is_a_destination = self.navigator.pending_tab_move.is_none();
+            if tab_row_is_a_destination
+                && show_tab_row
+                && (tab_matches || !filtered_panes.is_empty())
+            {
                 rows.push(tab_row);
             }
             rows.extend(filtered_panes);
@@ -572,7 +585,7 @@ impl AppState {
         tab_idx: usize,
         show_tab_row: bool,
     ) -> Vec<NavigatorRow> {
-        if self.navigator.pending_pane_move.is_some() {
+        if self.navigator.move_armed() {
             Vec::new()
         } else {
             self.navigator_pane_rows_for_tab(ws_idx, tab_idx, show_tab_row)
@@ -3498,6 +3511,68 @@ mod tests {
             state.mode = Mode::Terminal;
         }
         state
+    }
+
+    #[test]
+    fn armed_tab_move_offers_only_workspace_destinations() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        state.workspaces[0].test_add_tab(Some("second"));
+        state.ensure_test_terminals();
+        // Child rows only exist for expanded workspaces, so arming alone would
+        // make every "no tab rows" assertion below vacuously true.
+        for ws in &state.workspaces {
+            state.navigator.expanded_workspaces.insert(ws.id.clone());
+        }
+        state.navigator.pending_tab_move = Some("t_w1_1".to_string());
+
+        let rows = state.navigator_rows();
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, NavigatorTarget::Workspace { .. })),
+            "guard: the picker must be populated for the assertions below to mean anything"
+        );
+
+        assert!(
+            rows.iter()
+                .all(|row| !matches!(row.target, NavigatorTarget::Tab { .. })),
+            "a tab move lands on a workspace, so tab rows are not destinations"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| !matches!(row.target, NavigatorTarget::Pane { .. })),
+            "pane rows are never tab-move destinations"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, NavigatorTarget::NewWorkspace)),
+            "the new-space row must be offered"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, NavigatorTarget::Workspace { .. })),
+            "workspace rows must be offered"
+        );
+    }
+
+    #[test]
+    fn armed_pane_move_still_offers_tab_destinations() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        state.workspaces[0].test_add_tab(Some("second"));
+        state.ensure_test_terminals();
+        for ws in &state.workspaces {
+            state.navigator.expanded_workspaces.insert(ws.id.clone());
+        }
+        state.navigator.pending_pane_move = Some("w1-1".to_string());
+
+        let rows = state.navigator_rows();
+
+        // A pane splits into a tab, so the tab rows stay — this is the
+        // difference between the two armed modes.
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row.target, NavigatorTarget::Tab { .. })),
+            "pane moves target tabs, so tab rows must survive"
+        );
     }
 
     fn mark_linked_worktree(state: &mut AppState, ws_idx: usize) {

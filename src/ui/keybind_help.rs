@@ -255,6 +255,18 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             NavigateAction::MoveTabNext,
         ),
         help_entry(indexed_label(&kb.switch_tab), "switch tab 1-9"),
+        help_action_kw(
+            "",
+            "move tab to space",
+            NavigateAction::MoveTabToSpace,
+            &["send tab to workspace", "move tab to another space"],
+        ),
+        help_action_kw(
+            "",
+            "move tab to new space",
+            NavigateAction::MoveTabToNewSpace,
+            &["split tab into workspace", "new space from tab"],
+        ),
         help_action(
             keybind_label(&kb.close_tab),
             "close tab",
@@ -286,13 +298,24 @@ pub(super) fn keybind_help_groups(app: &AppState) -> Vec<HelpGroup> {
             "rename pane",
             NavigateAction::RenamePane,
         ),
-        help_action("", "move pane to space", NavigateAction::MovePaneToSpace),
-        help_action(
+        help_action_kw(
+            "",
+            "move pane to space",
+            NavigateAction::MovePaneToSpace,
+            &["send pane to workspace", "move pane to another space"],
+        ),
+        help_action_kw(
             "",
             "move pane to new space",
             NavigateAction::MovePaneToNewSpace,
+            &["split pane into workspace", "new space from pane"],
         ),
-        help_action("", "move pane to new tab", NavigateAction::MovePaneToNewTab),
+        help_action_kw(
+            "",
+            "move pane to new tab",
+            NavigateAction::MovePaneToNewTab,
+            &["send pane to new tab"],
+        ),
         help_entry(keybind_label(&kb.edit_scrollback), "edit scrollback"),
         help_entry(keybind_label(&kb.copy_mode), "copy mode"),
         help_action(keybind_label(&kb.zoom), "zoom pane", NavigateAction::Zoom),

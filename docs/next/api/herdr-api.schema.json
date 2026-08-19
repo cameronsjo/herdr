@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 20,
+  "protocol": 21,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -424,6 +424,55 @@
               "type": "object"
             },
             {
+              "description": "A whole tab changed workspace. Its public id is reissued in the target\nworkspace's id space, so `tab_id` differs from `previous_tab_id`.",
+              "properties": {
+                "insert_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "previous_tab_id": {
+                  "type": "string"
+                },
+                "source_tabs": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/TabInfo"
+                  },
+                  "type": "array"
+                },
+                "source_workspace_id": {
+                  "type": "string"
+                },
+                "tab_id": {
+                  "type": "string"
+                },
+                "tabs": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/TabInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "tab_moved_across_workspaces",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id",
+                "previous_tab_id",
+                "workspace_id",
+                "source_workspace_id",
+                "insert_index",
+                "tabs",
+                "source_tabs"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab_id": {
                   "type": "string"
@@ -743,6 +792,7 @@
             "tab_closed",
             "tab_renamed",
             "tab_moved",
+            "tab_moved_across_workspaces",
             "tab_focused",
             "pane_created",
             "pane_closed",
@@ -1875,6 +1925,22 @@
               "properties": {
                 "event": {
                   "const": "tab_moved",
+                  "type": "string"
+                },
+                "tab_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "tab_id"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "event": {
+                  "const": "tab_moved_across_workspaces",
                   "type": "string"
                 },
                 "tab_id": {
@@ -3876,6 +3942,18 @@
             {
               "properties": {
                 "type": {
+                  "const": "tab.moved_across_workspaces",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
                   "const": "pane.created",
                   "type": "string"
                 }
@@ -4093,20 +4171,100 @@
           },
           "type": "object"
         },
+        "TabMoveDestination": {
+          "oneOf": [
+            {
+              "description": "Reorder within the tab's current workspace.",
+              "properties": {
+                "insert_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "index",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "insert_index"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Move to another workspace, optionally at a given position.",
+              "properties": {
+                "insert_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "workspace",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "workspace_id"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Move into a workspace created for it.",
+              "properties": {
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "new_workspace",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            }
+          ]
+        },
         "TabMoveParams": {
           "properties": {
+            "destination": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/TabMoveDestination"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "insert_index": {
+              "description": "Reorder position within the tab's own workspace. Kept for callers\npredating `destination`; ignored when `destination` is present.",
               "format": "uint",
               "minimum": 0,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "tab_id": {
               "type": "string"
             }
           },
           "required": [
-            "tab_id",
-            "insert_index"
+            "tab_id"
           ],
           "type": "object"
         },
@@ -6698,6 +6856,55 @@
               "type": "object"
             },
             {
+              "description": "A whole tab changed workspace. Its public id is reissued in the target\nworkspace's id space, so `tab_id` differs from `previous_tab_id`.",
+              "properties": {
+                "insert_index": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "previous_tab_id": {
+                  "type": "string"
+                },
+                "source_tabs": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/TabInfo"
+                  },
+                  "type": "array"
+                },
+                "source_workspace_id": {
+                  "type": "string"
+                },
+                "tab_id": {
+                  "type": "string"
+                },
+                "tabs": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/TabInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "tab_moved_across_workspaces",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "tab_id",
+                "previous_tab_id",
+                "workspace_id",
+                "source_workspace_id",
+                "insert_index",
+                "tabs",
+                "source_tabs"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "tab_id": {
                   "type": "string"
@@ -7032,6 +7239,7 @@
             "tab_closed",
             "tab_renamed",
             "tab_moved",
+            "tab_moved_across_workspaces",
             "tab_focused",
             "pane_created",
             "pane_closed",
@@ -8894,6 +9102,30 @@
               "type": "object"
             },
             {
+              "description": "`tab.move`'s result. Carries `tabs` for the workspace the tab now lives\nin, so a reorder reads the same as a cross-workspace move.",
+              "properties": {
+                "move_result": {
+                  "$ref": "#/schemas/success_response/$defs/TabMoveResult"
+                },
+                "tabs": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/TabInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "tab_move",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "move_result",
+                "tabs"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
@@ -9924,6 +10156,50 @@
             "focused",
             "pane_count",
             "agent_status"
+          ],
+          "type": "object"
+        },
+        "TabMoveReason": {
+          "oneOf": [
+            {
+              "const": "same_workspace",
+              "description": "The destination workspace already owns this tab.",
+              "type": "string"
+            },
+            {
+              "const": "last_tab_in_workspace",
+              "description": "The tab is its workspace's last, and a workspace must keep one.",
+              "type": "string"
+            }
+          ]
+        },
+        "TabMoveResult": {
+          "properties": {
+            "changed": {
+              "type": "boolean"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/TabMoveReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tab_id": {
+              "description": "The tab's id after the move — reissued when it changed workspace.",
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "changed",
+            "tab_id",
+            "workspace_id"
           ],
           "type": "object"
         },

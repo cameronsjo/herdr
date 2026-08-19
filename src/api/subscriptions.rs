@@ -176,6 +176,10 @@ impl ActiveSubscription {
                 event_kind: crate::api::schema::EventKind::TabMoved,
                 last_sequence: 0,
             })),
+            Subscription::TabMovedAcrossWorkspaces {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: crate::api::schema::EventKind::TabMovedAcrossWorkspaces,
+                last_sequence: 0,
+            })),
             Subscription::PaneCreated {} => Ok(Self::Event(ActiveEventSubscription {
                 event_kind: crate::api::schema::EventKind::PaneCreated,
                 last_sequence: 0,
