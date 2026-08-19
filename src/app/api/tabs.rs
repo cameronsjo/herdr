@@ -6,7 +6,8 @@ use crate::api::schema::{
 };
 use crate::app::{App, Mode};
 
-use super::responses::{encode_error, encode_success, sanitize_label};
+use super::responses::{encode_error, encode_success};
+use crate::label::sanitize_label;
 
 impl App {
     pub(super) fn handle_tab_list(&mut self, id: String, params: TabListParams) -> String {
@@ -109,7 +110,7 @@ impl App {
                         .get_mut(ws_idx)
                         .and_then(|ws| ws.tabs.get_mut(tab_idx))
                     {
-                        tab.set_custom_name(sanitize_label(label));
+                        tab.set_custom_name(label);
                         crate::logging::tab_renamed(&workspace_id, &tab_id);
                     }
                 }
@@ -422,11 +423,7 @@ impl App {
         };
         self.alias_moved_pane_ids(previous_pane_ids);
 
-        let workspace = crate::workspace::Workspace::from_existing_tab(
-            label.map(sanitize_label),
-            identity_cwd,
-            taken,
-        );
+        let workspace = crate::workspace::Workspace::from_existing_tab(label, identity_cwd, taken);
         self.state.workspaces.push(workspace);
         let target_ws_idx = self.state.workspaces.len() - 1;
 

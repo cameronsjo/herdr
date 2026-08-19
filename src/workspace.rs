@@ -253,7 +253,7 @@ impl Workspace {
             discover_workspace_git_identity(&identity_cwd);
         Self {
             id,
-            custom_name: label,
+            custom_name: label.map(crate::label::sanitize_label),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
             cached_auto_label,
@@ -295,7 +295,7 @@ impl Workspace {
             discover_workspace_git_identity(&identity_cwd);
         Self {
             id,
-            custom_name: label,
+            custom_name: label.map(crate::label::sanitize_label),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
             cached_auto_label,
@@ -1176,7 +1176,10 @@ impl Workspace {
     }
 
     pub fn set_custom_name(&mut self, name: String) {
-        self.custom_name = Some(name);
+        // Sanitize here rather than at each API handler: labels reach this from
+        // tab/workspace create+rename, worktree open, layout apply, and session
+        // restore, and per-call-site filtering already missed several.
+        self.custom_name = Some(crate::label::sanitize_label(name));
     }
 
     #[cfg(test)]

@@ -202,7 +202,7 @@ impl Tab {
     }
 
     pub fn set_custom_name(&mut self, name: String) {
-        self.custom_name = Some(name);
+        self.custom_name = Some(crate::label::sanitize_label(name));
     }
 
     #[cfg(test)]

@@ -8,7 +8,8 @@ use crate::api::schema::{
 use crate::app::App;
 
 use super::super::api_helpers::{normalize_metadata_source, normalize_metadata_ttl};
-use super::responses::{encode_error, encode_success, sanitize_label};
+use super::responses::{encode_error, encode_success};
+use crate::label::sanitize_label;
 
 impl App {
     pub(super) fn handle_workspace_list(&mut self, id: String) -> String {
@@ -56,7 +57,7 @@ impl App {
             Ok(index) => {
                 if let Some(label) = params.label {
                     if let Some(workspace) = self.state.workspaces.get_mut(index) {
-                        workspace.set_custom_name(sanitize_label(label));
+                        workspace.set_custom_name(label);
                         crate::logging::workspace_renamed(&workspace.id);
                     }
                 }
