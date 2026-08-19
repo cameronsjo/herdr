@@ -320,7 +320,8 @@ impl App {
 
         let insert_index =
             insert_index.unwrap_or_else(|| self.state.workspaces[target_ws_idx].tabs.len());
-        let target_tab_idx = self.state.workspaces[target_ws_idx].insert_moved_tab(taken, insert_index);
+        let target_tab_idx =
+            self.state.workspaces[target_ws_idx].insert_moved_tab(taken, insert_index);
 
         self.finish_cross_workspace_tab_move(
             id,
@@ -786,7 +787,10 @@ mod tests {
             .collect();
         assert_eq!(
             numbers.len(),
-            numbers.iter().collect::<std::collections::HashSet<_>>().len(),
+            numbers
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
             "moved tab must not reuse a public number already live in the target"
         );
         app.state.workspaces[1].assert_invariants_for_test();

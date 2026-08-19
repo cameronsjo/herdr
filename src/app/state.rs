@@ -974,6 +974,17 @@ pub(crate) struct NavigatorState {
     pub expanded_workspaces: std::collections::HashSet<String>,
     /// While set, accepting a navigator row moves that pane instead of focusing it.
     pub pending_pane_move: Option<String>,
+    /// While set, accepting a navigator row moves that whole tab instead of
+    /// focusing it. Mutually exclusive with `pending_pane_move`.
+    pub pending_tab_move: Option<String>,
+}
+
+impl NavigatorState {
+    /// True while the navigator is picking a destination rather than a thing to
+    /// focus. Both move kinds hide the rows they cannot land on.
+    pub(crate) fn move_armed(&self) -> bool {
+        self.pending_pane_move.is_some() || self.pending_tab_move.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
