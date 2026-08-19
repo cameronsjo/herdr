@@ -836,8 +836,7 @@ impl App {
                 ws.unregister_moved_pane(source_pane_id);
             }
             self.state
-                .public_pane_id_aliases
-                .insert(previous_pane_id.clone(), source_pane_id);
+                .record_moved_pane_alias(previous_pane_id.clone(), source_pane_id);
         }
 
         let mut closed_workspace_id = None;

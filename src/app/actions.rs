@@ -285,6 +285,21 @@ impl AppState {
         self.public_pane_id(ws_idx, pane_id)
     }
 
+    /// Records a moved pane's previous public id so clients holding it keep
+    /// resolving.
+    ///
+    /// Only the most recent previous id per pane is kept. Aliases are otherwise
+    /// evicted only when the pane closes, so a long-lived pane moved repeatedly
+    /// would accumulate one entry per move with nothing to bound it. A client
+    /// that has missed several moves is working from state too stale to rescue
+    /// with an alias anyway.
+    pub(crate) fn record_moved_pane_alias(&mut self, previous_public_id: String, pane_id: PaneId) {
+        self.public_pane_id_aliases
+            .retain(|existing, alias| *alias != pane_id || *existing == previous_public_id);
+        self.public_pane_id_aliases
+            .insert(previous_public_id, pane_id);
+    }
+
     pub(crate) fn focused_public_tab_id(&self) -> Option<String> {
         let ws_idx = self.active?;
         let ws = self.workspaces.get(ws_idx)?;
