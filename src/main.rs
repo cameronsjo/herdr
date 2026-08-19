@@ -70,6 +70,7 @@ mod input;
 mod integration;
 mod ipc;
 mod kitty_graphics;
+mod label;
 mod layout;
 mod logging;
 mod metadata_tokens;

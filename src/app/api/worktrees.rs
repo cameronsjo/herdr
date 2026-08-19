@@ -132,6 +132,10 @@ impl App {
             !created_workspace,
         );
         if let Some(label) = params.label {
+            // Sanitize up front so the event echoes what was stored; the setter
+            // would otherwise filter storage while the event carried the raw
+            // string.
+            let label = crate::label::sanitize_label(label);
             let workspace_id = self.public_workspace_id(ws_idx);
             if let Some(ws) = self.state.workspaces.get_mut(ws_idx) {
                 ws.set_custom_name(label.clone());

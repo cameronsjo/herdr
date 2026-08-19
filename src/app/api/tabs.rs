@@ -7,6 +7,7 @@ use crate::api::schema::{
 use crate::app::{App, Mode};
 
 use super::responses::{encode_error, encode_success};
+use crate::label::sanitize_label;
 
 impl App {
     pub(super) fn handle_tab_list(&mut self, id: String, params: TabListParams) -> String {
@@ -155,7 +156,10 @@ impl App {
         else {
             return tab_not_found(id, &params.tab_id);
         };
-        tab.set_custom_name(params.label.clone());
+        // Sanitize once and reuse: the event must carry what was actually
+        // stored, or subscribers receive the unfiltered string.
+        let label = sanitize_label(params.label.clone());
+        tab.set_custom_name(label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         if self.state.active == Some(ws_idx) {
             // Reflow the tab bar so the new label width takes effect immediately.
@@ -170,7 +174,7 @@ impl App {
             data: EventData::TabRenamed {
                 tab_id: self.public_tab_id(ws_idx, tab_idx).unwrap(),
                 workspace_id: self.public_workspace_id(ws_idx),
-                label: params.label,
+                label,
             },
         });
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
@@ -186,7 +190,15 @@ impl App {
             return tab_not_found(id, &params.tab_id);
         }
 
-        match params.resolved_destination() {
+        let Some(destination) = params.resolved_destination() else {
+            return encode_error(
+                id,
+                "tab_move_failed",
+                "one of insert_index or destination is required",
+            );
+        };
+
+        match destination {
             TabMoveDestination::Index { insert_index } => {
                 self.tab_move_within_workspace(id, ws_idx, tab_idx, insert_index)
             }
@@ -455,8 +467,7 @@ impl App {
     fn alias_moved_pane_ids(&mut self, previous: Vec<(String, crate::layout::PaneId)>) {
         for (previous_public_id, pane_id) in previous {
             self.state
-                .public_pane_id_aliases
-                .insert(previous_public_id, pane_id);
+                .record_moved_pane_alias(previous_public_id, pane_id);
         }
     }
 
@@ -901,6 +912,58 @@ mod tests {
         assert_eq!(app.state.workspaces[1].tabs.len(), 1);
         app.state.workspaces[0].assert_invariants_for_test();
         app.state.workspaces[1].assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_tab_move_requires_a_destination_or_an_insert_index() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        seed_two_workspaces(&mut app);
+        let tab_id = app.public_tab_id(0, 1).unwrap();
+        let moved_root = app.state.workspaces[0].tabs[1].root_pane;
+
+        let response = app.handle_tab_move(
+            "req".into(),
+            TabMoveParams {
+                tab_id,
+                insert_index: None,
+                destination: None,
+            },
+        );
+
+        assert!(
+            response.contains("tab_move_failed"),
+            "expected an error, got: {response}"
+        );
+        // Previously this silently reordered the tab to the front.
+        assert_eq!(app.state.workspaces[0].tabs[1].root_pane, moved_root);
+    }
+
+    #[test]
+    fn a_moved_pane_keeps_only_its_most_recent_alias() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        seed_two_workspaces(&mut app);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.state.record_moved_pane_alias("old:p1".into(), pane);
+        app.state.record_moved_pane_alias("older:p1".into(), pane);
+        app.state.record_moved_pane_alias("newest:p1".into(), pane);
+
+        let for_pane: Vec<&String> = app
+            .state
+            .public_pane_id_aliases
+            .iter()
+            .filter(|(_, alias)| **alias == pane)
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(
+            for_pane,
+            vec![&"newest:p1".to_string()],
+            "repeated moves must not accumulate one alias each"
+        );
     }
 
     #[test]

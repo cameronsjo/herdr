@@ -1858,7 +1858,7 @@ impl TerminalState {
     }
 
     pub fn set_manual_label(&mut self, label: String) {
-        let label = label.trim().to_string();
+        let label = crate::label::sanitize_label(label).trim().to_string();
         self.manual_label = (!label.is_empty()).then_some(label);
     }
 

@@ -409,7 +409,7 @@ fn restore_workspace(
     (
         Some(Workspace {
             id: workspace_id,
-            custom_name: snap.custom_name.clone(),
+            custom_name: snap.custom_name.clone().map(crate::label::sanitize_label),
             identity_cwd: snap.identity_cwd.clone(),
             cached_identity_cwd: snap.identity_cwd.clone(),
             cached_auto_label,
@@ -716,7 +716,7 @@ fn restore_tab(
     (
         Some((
             crate::workspace::Tab {
-                custom_name: snap.custom_name.clone(),
+                custom_name: snap.custom_name.clone().map(crate::label::sanitize_label),
                 number,
                 root_pane,
                 layout,

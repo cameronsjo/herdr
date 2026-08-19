@@ -45,14 +45,16 @@ impl TabMoveParams {
     /// Resolves the two accepted request shapes into one destination.
     ///
     /// `destination` wins when present; a bare `insert_index` is the legacy
-    /// in-workspace reorder. Neither field is an error — it reorders to the
-    /// front, matching what `insert_index: 0` always meant.
-    pub fn resolved_destination(&self) -> TabMoveDestination {
-        self.destination
-            .clone()
-            .unwrap_or(TabMoveDestination::Index {
-                insert_index: self.insert_index.unwrap_or(0),
-            })
+    /// in-workspace reorder. Supplying neither is an error rather than a
+    /// default: `insert_index` used to be required, so a request missing both
+    /// was rejected at deserialization, and silently reordering it to the front
+    /// would turn a previously-refused request into a state mutation.
+    pub fn resolved_destination(&self) -> Option<TabMoveDestination> {
+        if let Some(destination) = self.destination.clone() {
+            return Some(destination);
+        }
+        self.insert_index
+            .map(|insert_index| TabMoveDestination::Index { insert_index })
     }
 }
 

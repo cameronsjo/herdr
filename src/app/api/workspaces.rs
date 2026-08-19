@@ -9,6 +9,7 @@ use crate::app::App;
 
 use super::super::api_helpers::{normalize_metadata_source, normalize_metadata_ttl};
 use super::responses::{encode_error, encode_success};
+use crate::label::sanitize_label;
 
 impl App {
     pub(super) fn handle_workspace_list(&mut self, id: String) -> String {
@@ -99,14 +100,16 @@ impl App {
         let Some(ws) = self.state.workspaces.get_mut(index) else {
             return workspace_not_found(id, &params.workspace_id);
         };
-        ws.set_custom_name(params.label.clone());
+        // Sanitize once and reuse, so the event carries what was stored.
+        let label = sanitize_label(params.label.clone());
+        ws.set_custom_name(label.clone());
         crate::logging::workspace_renamed(&ws.id);
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::WorkspaceRenamed,
             data: EventData::WorkspaceRenamed {
                 workspace_id: self.public_workspace_id(index),
-                label: params.label,
+                label,
             },
         });
 
