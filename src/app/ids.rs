@@ -99,10 +99,20 @@ impl App {
     }
 
     pub(crate) fn parse_pane_id(&self, id: &str) -> Option<(usize, crate::layout::PaneId)> {
+        // Aliases are a fallback, never a precedence. They keep a moved pane's
+        // OLD public id resolving, but the moment a new pane legitimately takes
+        // that number the live pane must win — otherwise input aimed at the
+        // current `w1:p2` would land in a pane that moved to another workspace.
+        if let Some(resolved) = self.parse_live_pane_id(id) {
+            return Some(resolved);
+        }
         if let Some(alias) = self.state.public_pane_id_aliases.get(id).copied() {
             return self.find_pane(alias).map(|(ws_idx, _)| (ws_idx, alias));
         }
+        None
+    }
 
+    fn parse_live_pane_id(&self, id: &str) -> Option<(usize, crate::layout::PaneId)> {
         if let Some(rest) = id.strip_prefix("p_") {
             if let Some((ws_raw, pane_raw)) = rest.rsplit_once('_') {
                 let ws_idx = self.parse_workspace_id(ws_raw)?;

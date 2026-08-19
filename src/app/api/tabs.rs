@@ -904,6 +904,33 @@ mod tests {
     }
 
     #[test]
+    fn a_live_pane_id_outranks_a_stale_alias_for_the_same_string() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        seed_two_workspaces(&mut app);
+
+        // Take a real pane id, then forge an alias under that exact string
+        // pointing at a pane in the *other* workspace — the shape a
+        // cross-workspace move leaves behind once the number gets reused.
+        let live_id = app
+            .public_pane_id(0, app.state.workspaces[0].tabs[0].root_pane)
+            .expect("workspace 0 root pane has a public id");
+        let other_pane = app.state.workspaces[1].tabs[0].root_pane;
+        app.state
+            .public_pane_id_aliases
+            .insert(live_id.clone(), other_pane);
+
+        let (ws_idx, pane_id) = app.parse_pane_id(&live_id).expect("id should resolve");
+
+        assert_eq!(
+            (ws_idx, pane_id),
+            (0, app.state.workspaces[0].tabs[0].root_pane),
+            "a live public id must win over a stale alias wearing the same string"
+        );
+    }
+
+    #[test]
     fn api_tab_move_refuses_the_last_tab_in_a_workspace() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::api::schema::{TabCreateParams, TabListParams, TabRenameParams};
+use crate::api::schema::{
+    TabCreateParams, TabListParams, TabMoveDestination, TabMoveParams, TabRenameParams,
+};
 
 pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(|arg| arg.as_str()) else {
@@ -14,6 +16,7 @@ pub(super) fn run_tab_command(args: &[String]) -> std::io::Result<i32> {
         "get" => tab_get(&args[1..]),
         "focus" => tab_focus(&args[1..]),
         "rename" => tab_rename(&args[1..]),
+        "move" => tab_move(&args[1..]),
         "close" => tab_close(&args[1..]),
         "help" | "--help" | "-h" => {
             print_tab_help();
@@ -161,6 +164,101 @@ fn tab_rename(args: &[String]) -> std::io::Result<i32> {
     })
 }
 
+fn tab_move(args: &[String]) -> std::io::Result<i32> {
+    let Some(raw_tab_id) = args.first() else {
+        eprintln!("{}", tab_move_usage());
+        return Ok(2);
+    };
+
+    let mut workspace_id = None;
+    let mut insert_index = None;
+    let mut label = None;
+    let mut new_workspace = false;
+
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--workspace" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --workspace");
+                    return Ok(2);
+                };
+                workspace_id = Some(value.clone());
+                index += 2;
+            }
+            "--index" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --index");
+                    return Ok(2);
+                };
+                let Ok(parsed) = value.parse::<usize>() else {
+                    eprintln!("--index must be a non-negative integer");
+                    return Ok(2);
+                };
+                insert_index = Some(parsed);
+                index += 2;
+            }
+            "--new-workspace" => {
+                new_workspace = true;
+                index += 1;
+            }
+            "--label" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --label");
+                    return Ok(2);
+                };
+                label = Some(value.clone());
+                index += 2;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("{}", tab_move_usage());
+                return Ok(2);
+            }
+        }
+    }
+
+    // The three destinations are mutually exclusive; say so rather than
+    // silently preferring one, which would move the tab somewhere unasked.
+    let destination = if new_workspace {
+        if workspace_id.is_some() || insert_index.is_some() {
+            eprintln!("{}", tab_move_usage());
+            return Ok(2);
+        }
+        TabMoveDestination::NewWorkspace { label }
+    } else if let Some(workspace_id) = workspace_id {
+        if label.is_some() {
+            eprintln!("--label applies only to --new-workspace");
+            return Ok(2);
+        }
+        TabMoveDestination::Workspace {
+            workspace_id,
+            insert_index,
+        }
+    } else {
+        if label.is_some() {
+            eprintln!("--label applies only to --new-workspace");
+            return Ok(2);
+        }
+        let Some(insert_index) = insert_index else {
+            eprintln!("{}", tab_move_usage());
+            return Ok(2);
+        };
+        TabMoveDestination::Index { insert_index }
+    };
+
+    super::runtime::tab_move(TabMoveParams {
+        tab_id: super::normalize_tab_id(raw_tab_id),
+        insert_index: None,
+        destination: Some(destination),
+    })
+}
+
+fn tab_move_usage() -> String {
+    "usage: herdr tab move <tab_id> --index N\n       herdr tab move <tab_id> --workspace <workspace_id> [--index N]\n       herdr tab move <tab_id> --new-workspace [--label TEXT]"
+        .into()
+}
+
 fn tab_close(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_tab_id) = args.first() else {
         eprintln!("usage: herdr tab close <tab_id>");
@@ -183,5 +281,8 @@ fn print_tab_help() {
     eprintln!("  herdr tab get <tab_id>");
     eprintln!("  herdr tab focus <tab_id>");
     eprintln!("  herdr tab rename <tab_id> <label>");
+    eprintln!("  herdr tab move <tab_id> --index N");
+    eprintln!("  herdr tab move <tab_id> --workspace <workspace_id> [--index N]");
+    eprintln!("  herdr tab move <tab_id> --new-workspace [--label TEXT]");
     eprintln!("  herdr tab close <tab_id>");
 }
