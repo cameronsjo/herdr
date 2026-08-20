@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::label::sanitize_label;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSpaceMetadata {
     pub key: String,
@@ -24,6 +26,12 @@ pub fn derive_label_from_cwd(cwd: &Path) -> String {
         .unwrap_or_else(|| fallback_label_from_cwd(cwd))
 }
 
+/// Automatic label for a non-repository directory.
+///
+/// The path component is attacker-influenced — a checked-out repository names
+/// its own directory — so it goes through [`sanitize_label`] like every label a
+/// setter accepts. Without it, an auto-named workspace would be the one label
+/// path that reaches the sidebar unfiltered and uncapped.
 pub fn fallback_label_from_cwd(cwd: &Path) -> String {
     if let Ok(home) = std::env::var("HOME") {
         let home = Path::new(&home);
@@ -32,11 +40,13 @@ pub fn fallback_label_from_cwd(cwd: &Path) -> String {
         }
     }
 
-    cwd.file_name()
-        .and_then(|n| n.to_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| cwd.display().to_string())
+    sanitize_label(
+        cwd.file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| cwd.display().to_string()),
+    )
 }
 
 pub fn git_worktree_info(cwd: &Path) -> Option<GitWorktreeInfo> {
@@ -60,11 +70,16 @@ pub fn git_space_metadata(cwd: &Path) -> Option<GitSpaceMetadata> {
     Some(git_space_metadata_from_info(&info))
 }
 
+/// Automatic label for a repository checkout — the branch that runs for any
+/// Git workspace, so the common one.
+///
+/// Sanitized for the same reason as [`fallback_label_from_cwd`]; the fallback
+/// arm sanitizes itself, so only the repo-name arm needs it here.
 pub(crate) fn automatic_workspace_label(cwd: &Path, repo_root: &Path) -> String {
     repo_root
         .file_name()
         .and_then(|name| name.to_str())
-        .map(str::to_string)
+        .map(sanitize_label)
         .unwrap_or_else(|| fallback_label_from_cwd(cwd))
 }
 
@@ -411,6 +426,42 @@ mod tests {
         assert!(!metadata.is_linked_worktree);
 
         std::fs::remove_dir_all(bare).unwrap();
+    }
+
+    #[test]
+    fn cwd_derived_labels_go_through_the_same_sanitizer_as_the_setters() {
+        // A checked-out repository names its own directory, so both derivation
+        // arms take an attacker-influenced path component. Before this was
+        // filtered, an auto-named workspace was the one label path reaching the
+        // sidebar unfiltered — the bidi override below is zero-width, so it
+        // survives display-width truncation intact.
+        let base = temp_test_dir("cwd-label-sanitize");
+        let hostile = base.join("safe\u{202e}gnp.exe");
+        std::fs::create_dir_all(&hostile).unwrap();
+
+        assert_eq!(fallback_label_from_cwd(&hostile), "safegnp.exe");
+        assert_eq!(automatic_workspace_label(&hostile, &hostile), "safegnp.exe");
+
+        // The repo-name arm and the fallback arm are separate code paths, so
+        // pin the fallback reached through automatic_workspace_label too.
+        let rootless = Path::new("/");
+        assert_eq!(automatic_workspace_label(&hostile, rootless), "safegnp.exe");
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn cwd_derived_labels_are_length_capped() {
+        let base = temp_test_dir("cwd-label-cap");
+        // Well under any filesystem name limit, well over MAX_LABEL_CHARS.
+        let long = base.join("z".repeat(200));
+        std::fs::create_dir_all(&long).unwrap();
+
+        let cap = crate::label::MAX_LABEL_CHARS;
+        assert_eq!(fallback_label_from_cwd(&long).chars().count(), cap);
+        assert_eq!(automatic_workspace_label(&long, &long).chars().count(), cap);
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

@@ -15,7 +15,7 @@
 /// columns can still carry unbounded codepoints (combining marks stack inside
 /// a single grapheme) into storage, the session file, and every event echo.
 /// This bounds what gets stored, not what gets drawn.
-const MAX_LABEL_CHARS: usize = 128;
+pub(crate) const MAX_LABEL_CHARS: usize = 128;
 
 /// Strips control and format characters from a label and bounds its length.
 ///
