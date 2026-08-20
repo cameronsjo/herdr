@@ -585,9 +585,26 @@ pub(crate) fn agent_entry_height_in_body(
     body_height: u16,
     prev_ws_idx: Option<usize>,
 ) -> u16 {
-    let rows = resolved_agent_rows(app, entry).len().max(1);
-    let header = usize::from(agent_entry_header_rows(app, entry, prev_ws_idx) == 1);
-    (rows.saturating_add(header).min(u16::MAX as usize) as u16).min(body_height)
+    agent_entry_height_from_rows(
+        resolved_agent_rows(app, entry).len(),
+        agent_entry_header_rows(app, entry, prev_ws_idx),
+        body_height,
+    )
+}
+
+/// The one definition of the height arithmetic.
+///
+/// `render_agent_detail` already holds the resolved rows, so it calls this
+/// directly rather than `agent_entry_height_in_body` — resolving them a second
+/// time would double the per-entry allocation inside the render loop, which is
+/// pane-scaled. Both paths still share this formula, which is the drift the
+/// architecture test in `scripts/test_ui_hot_path_architecture.py` guards.
+fn agent_entry_height_from_rows(rows_len: usize, header_rows: u16, body_height: u16) -> u16 {
+    (rows_len
+        .max(1)
+        .saturating_add(usize::from(header_rows))
+        .min(u16::MAX as usize) as u16)
+        .min(body_height)
 }
 
 /// Header rows this entry contributes before its own agent rows: 1 when
@@ -611,6 +628,9 @@ pub(crate) fn agent_entry_prev_ws_idx(
         .map(|prev| prev.ws_idx)
 }
 
+/// Blank rows after this entry. Suppressed within a workspace run while
+/// grouping, so a run reads as one group rather than header / agent / gap /
+/// agent.
 pub(crate) fn agent_entry_gap(
     app: &AppState,
     entries: &[AgentPanelEntry],
@@ -1557,13 +1577,13 @@ fn render_agent_detail(
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
         let prev_ws_idx = agent_entry_prev_ws_idx(&details, index);
-        let height = agent_entry_height_in_body(app, detail, body.height, prev_ws_idx);
+        let header_rows = agent_entry_header_rows(app, detail, prev_ws_idx);
+        let height = agent_entry_height_from_rows(rows.len(), header_rows, body.height);
         if row_y.saturating_add(height) > body_bottom {
             break;
         }
         // The clamp can leave room for the header but not the agent rows it
         // labels; the agent row wins that tie.
-        let header_rows = agent_entry_header_rows(app, detail, prev_ws_idx);
         let header_rows = if height > header_rows { header_rows } else { 0 };
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
@@ -2388,6 +2408,125 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             row.contains("claude"),
             "the agent row wins the last row, not the header: {row:?}"
         );
+    }
+
+    #[test]
+    fn agent_entry_prev_ws_idx_at_the_head_and_past_the_end() {
+        let app = app_with_two_grouped_workspaces();
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 4);
+
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 0), None);
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 1), Some(0));
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 2), Some(0));
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 3), Some(1));
+        // One past the last valid index still resolves against the last
+        // entry rather than falling back to None; no caller in this module
+        // passes an index this far out of range, but the geometry loops all
+        // resolve `prev_ws_idx` before checking whether `index` is in bounds,
+        // so this is the value they would see if one ever did.
+        assert_eq!(
+            agent_entry_prev_ws_idx(&entries, entries.len()),
+            Some(entries[entries.len() - 1].ws_idx)
+        );
+    }
+
+    #[test]
+    fn grouping_survives_a_filter_that_drops_a_runs_first_entry() {
+        let mut app = app_with_two_grouped_workspaces();
+        // Give alpha's first pane a different agent so a filter can drop it
+        // without touching the rest of the alpha run.
+        let first_pane = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Codex);
+        app.agent_view_override = Some(crate::api::schema::AgentViewSetParams {
+            source: "test.views".to_string(),
+            label: None,
+            filter: Some(crate::api::schema::AgentViewFilter::Eq {
+                field: crate::api::schema::AgentViewField::Builtin(
+                    crate::api::schema::AgentViewBuiltinField::Agent,
+                ),
+                value: crate::api::schema::AgentViewValue::String("claude".to_string()),
+            }),
+            sort: Vec::new(),
+        });
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 3, "the codex pane is filtered out");
+        assert!(
+            effective_agent_grouping(&app),
+            "a filter-only view keeps space order, so grouping stays on"
+        );
+
+        let headers: Vec<u16> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                agent_entry_header_rows(&app, entry, agent_entry_prev_ws_idx(&entries, index))
+            })
+            .collect();
+
+        // alpha's surviving pane is now first in the filtered list and still
+        // starts (and now ends) its own run; beta is unaffected.
+        assert_eq!(headers, [1, 1, 0]);
+    }
+
+    #[test]
+    fn grouped_rows_whose_tokens_all_resolve_to_none_still_reserve_one_row() {
+        let mut app = app_with_two_grouped_workspaces();
+        app.sidebar_agents.grouped_rows = vec![vec![crate::config::AgentSidebarToken::Custom(
+            "missing".into(),
+        )]];
+        let entries = agent_panel_entries(&app);
+
+        // The row is dropped entirely (no token in it resolved), but the
+        // entry still reserves its minimum one row of body height plus its
+        // header, matching the `.max(1)` in `agent_entry_height_in_body`.
+        assert_eq!(
+            agent_entry_height_in_body(&app, &entries[0], 40, None),
+            2,
+            "header row plus the reserved-but-blank agent row"
+        );
+
+        let area = Rect::new(0, 0, 24, 12);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(24, 12)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(row_text(buffer, body.y, body.width), " alpha");
+        assert_eq!(
+            row_text(buffer, body.y + 1, body.width).trim(),
+            "",
+            "the reserved agent row draws nothing when every token is unresolved"
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_numbering_is_unaffected_by_agent_grouping() {
+        let mut app = app_with_two_grouped_workspaces();
+        // Collapsed mode has no header affordance, so this must render
+        // identically to `collapsed_sidebar_numbers_grouped_agents_by_list_position`
+        // even with grouping configured on.
+        app.sidebar_collapsed = true;
+
+        let area = Rect::new(0, 0, 4, 12);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .expect("collapsed sidebar should render");
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(detail_area.x, detail_area.y)].symbol(), "1");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 1)].symbol(), "2");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 2)].symbol(), "3");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 3)].symbol(), "4");
     }
 
     #[test]

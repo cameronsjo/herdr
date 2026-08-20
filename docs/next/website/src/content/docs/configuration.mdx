@@ -386,7 +386,7 @@ rows = [
 
 `fg` accepts strict `#RGB` or `#RRGGBB`. `bold` and `dim` accept booleans. Omitted fields preserve the token's contextual style; explicit `false` removes that modifier. Styling applies to one occurrence, so the same token may look different in another row or agent override. A foreground override replaces all semantic foregrounds inside that occurrence: for example, styled `git_status` ahead and behind counts use one color instead of their default green and red. Token styles never change separators or row backgrounds.
 
-`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
+`row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group. While `group_by` groups the Agent panel, `row_gap` applies only between workspace runs; agents within one run stay packed under their shared header.
 
 #### Grouping Agent rows by workspace
 
@@ -439,7 +439,7 @@ claude = [
 ]
 ```
 
-An override replaces `rows`; it does not extend it. Override keys are case-sensitive canonical agent IDs such as `claude`, `codex`, and `pi`. Detection aliases such as `claude-code` are not accepted. Agents without an override, including custom reported agents, use `rows`.
+An override replaces `rows`; it does not extend it. Override keys are case-sensitive canonical agent IDs such as `claude`, `codex`, and `pi`. Detection aliases such as `claude-code` are not accepted. Agents without an override, including custom reported agents, use `rows` — or `grouped_rows` while `group_by` is grouping entries.
 
 Custom `$name` tokens are dynamic values, not literal text. Add the token to a layout, then report its value from a script or plugin:
 

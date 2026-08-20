@@ -851,6 +851,53 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_workspace_header_focuses_the_runs_first_agent() {
+        let mut app = app_for_mouse_test();
+        let mut alpha = Workspace::test_new("alpha");
+        let alpha_tab = alpha.test_add_tab(Some("a2"));
+        let alpha_second_pane = alpha.tabs[alpha_tab].root_pane;
+        let beta = Workspace::test_new("beta");
+        let beta_pane = beta.tabs[0].root_pane;
+        app.state.workspaces = vec![alpha, beta];
+        app.state.ensure_test_terminals();
+        for (ws_idx, tab_idx) in [(0, 0), (0, 1), (1, 0)] {
+            let pane_id = app.state.workspaces[ws_idx].tabs[tab_idx].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[tab_idx].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(Agent::Claude);
+        }
+        app.state.sidebar_agents.group_by = crate::config::AgentGroupBy::Workspace;
+
+        let first_alpha_pane = app.state.workspaces[0].tabs[0].root_pane;
+        let detail_area = app.state.agent_panel_rect();
+        let body = crate::ui::agent_panel_body_rect(detail_area, false);
+
+        // Row 0 is alpha's header; clicking it lands on alpha's first agent,
+        // not the second row (its own agent row) or beta at all.
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y),
+            Some((0, 0, first_alpha_pane))
+        );
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y + 1),
+            Some((0, 0, first_alpha_pane))
+        );
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y + 2),
+            Some((0, alpha_tab, alpha_second_pane))
+        );
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y + 3),
+            Some((1, 0, beta_pane))
+        );
+    }
+
+    #[test]
     fn clicking_agent_panel_toggle_switches_sort() {
         let mut app = app_for_mouse_test();
         app.state.workspaces = vec![Workspace::test_new("test")];
