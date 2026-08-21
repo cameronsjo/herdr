@@ -35,6 +35,7 @@
 - Experimental pane graphics now support bounded named layers, acknowledged full-RGBA primary-layer direct file frames on audited local terminals, owned BGRA fallback, exact pixel mouse input, and placement-only resize replay.
 
 ### Fixed
+- Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
 - Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
 - High-rate output from many hidden panes no longer floods the server loop with redundant wakeups, and terminal input-mode synchronization no longer formats pane scrollback to read one keyboard flag.
 - Chinese IME commits now reach panes on macOS when the focused application requests printable key-release events. (#2924)

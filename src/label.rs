@@ -28,6 +28,10 @@ pub(crate) const MAX_LABEL_CHARS: usize = 128;
 ///   so they survive width-based truncation and let one label visually reorder
 ///   adjacent text or render identically to another.
 ///
+/// Characters that render blank but sit outside `Cc`/`Cf` — Hangul filler
+/// (`U+3164`), blank braille (`U+2800`) — pass on purpose: this filter targets
+/// control and format characters, and the 128-char cap bounds the rest.
+///
 /// Multibyte text is deliberately untouched: labels are routinely CJK, so this
 /// must never become an ASCII filter.
 pub(crate) fn sanitize_label(label: impl Into<String>) -> String {
@@ -37,6 +41,22 @@ pub(crate) fn sanitize_label(label: impl Into<String>) -> String {
         .filter(|ch| !ch.is_control() && !is_format_char(*ch))
         .take(MAX_LABEL_CHARS)
         .collect()
+}
+
+/// [`sanitize_label`] for render paths: borrows when the input is already
+/// clean and within the cap, so the common case costs one scan and no
+/// allocation. Pane-scaled render loops call this per row per frame.
+pub(crate) fn sanitize_label_borrowed(label: &str) -> std::borrow::Cow<'_, str> {
+    let mut chars = 0usize;
+    let clean = label.chars().all(|ch| {
+        chars += 1;
+        chars <= MAX_LABEL_CHARS && !ch.is_control() && !is_format_char(ch)
+    });
+    if clean {
+        std::borrow::Cow::Borrowed(label)
+    } else {
+        std::borrow::Cow::Owned(sanitize_label(label))
+    }
 }
 
 /// Unicode general category `Cf`.
@@ -50,6 +70,7 @@ fn is_format_char(ch: char) -> bool {
         | '\u{061C}'                    // arabic letter mark
         | '\u{06DD}'
         | '\u{070F}'
+        | '\u{0890}'..='\u{0891}'
         | '\u{08E2}'
         | '\u{180E}'
         | '\u{200B}'..='\u{200F}'       // zero-width space/joiner, LRM/RLM
@@ -59,6 +80,9 @@ fn is_format_char(ch: char) -> bool {
         | '\u{FEFF}'                    // zero-width no-break space
         | '\u{FFF9}'..='\u{FFFB}'
         | '\u{110BD}'
+        | '\u{110CD}'
+        | '\u{13430}'..='\u{1343F}'     // egyptian hieroglyph format controls
+        | '\u{1BCA0}'..='\u{1BCA3}'     // shorthand format controls
         | '\u{1D173}'..='\u{1D17A}'
         | '\u{E0001}'
         | '\u{E0020}'..='\u{E007F}'     // tag characters
@@ -67,7 +91,7 @@ fn is_format_char(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_label, MAX_LABEL_CHARS};
+    use super::{sanitize_label, sanitize_label_borrowed, MAX_LABEL_CHARS};
 
     #[test]
     fn strips_control_characters() {
@@ -83,6 +107,29 @@ mod tests {
         assert_eq!(sanitize_label("de\u{200b}ploy"), "deploy");
         assert_eq!(sanitize_label("de\u{200d}ploy"), "deploy");
         assert_eq!(sanitize_label("\u{feff}lead"), "lead");
+    }
+
+    #[test]
+    fn strips_format_characters_missing_from_the_original_table() {
+        // One character from each range the original table missed.
+        assert_eq!(sanitize_label("a\u{0890}b"), "ab");
+        assert_eq!(sanitize_label("a\u{110CD}b"), "ab");
+        assert_eq!(sanitize_label("a\u{13430}b"), "ab");
+        assert_eq!(sanitize_label("a\u{1BCA0}b"), "ab");
+    }
+
+    #[test]
+    fn borrowed_sanitizer_only_allocates_when_it_has_to() {
+        assert!(matches!(
+            sanitize_label_borrowed("feat/中文"),
+            std::borrow::Cow::Borrowed("feat/中文")
+        ));
+        assert_eq!(sanitize_label_borrowed("a\u{202e}b").as_ref(), "ab");
+        let long = "z".repeat(MAX_LABEL_CHARS + 1);
+        assert_eq!(
+            sanitize_label_borrowed(&long).chars().count(),
+            MAX_LABEL_CHARS
+        );
     }
 
     #[test]

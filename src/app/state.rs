@@ -688,7 +688,15 @@ pub struct WorktreeOpenEntry {
 
 impl WorktreeOpenEntry {
     pub(crate) fn display_name(&self) -> String {
-        self.branch.clone().unwrap_or_else(|| {
+        // Display only: `branch` itself stays raw because `status_label` reads
+        // its presence as detached-vs-attached identity.
+        let branch = self
+            .branch
+            .as_deref()
+            .map(crate::label::sanitize_label)
+            .map(|branch| branch.trim().to_string())
+            .filter(|branch| !branch.is_empty());
+        branch.unwrap_or_else(|| {
             self.path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -2327,6 +2335,24 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn worktree_open_entry_display_name_is_sanitized_but_branch_stays_raw() {
+        let entry = super::WorktreeOpenEntry {
+            path: std::path::PathBuf::from("/tmp/repo-worktrees/visible"),
+            branch: Some("feat/\u{202e}exe".into()),
+            is_linked_worktree: true,
+            already_open_ws_idx: None,
+        };
+        assert_eq!(entry.display_name(), "feat/exe");
+        assert_eq!(entry.branch.as_deref(), Some("feat/\u{202e}exe"));
+
+        let blank = super::WorktreeOpenEntry {
+            branch: Some("\u{200b}".into()),
+            ..entry
+        };
+        assert_eq!(blank.display_name(), "visible");
+    }
+
     use super::*;
     use crossterm::event::KeyEvent;
 

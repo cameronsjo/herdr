@@ -265,10 +265,8 @@ pub(super) fn normalize_metadata_tokens(
                 return Err(format!("invalid metadata token key: {key}"));
             }
             let value = value.and_then(|value| {
-                let normalized = value
-                    .trim()
+                let normalized = crate::label::sanitize_label(value.trim())
                     .chars()
-                    .filter(|ch| !ch.is_control())
                     .take(MAX_METADATA_TOKEN_VALUE_LEN)
                     .collect::<String>();
                 (!normalized.trim().is_empty()).then(|| normalized.trim().to_string())
@@ -286,12 +284,15 @@ mod metadata_token_tests {
     fn token_normalization_sanitizes_values_and_turns_empty_into_clear() {
         let tokens = normalize_metadata_tokens(std::collections::HashMap::from([
             ("summary".into(), Some("  review\nready  ".into())),
+            ("bidi".into(), Some("safe\u{202e}gnp".into())),
             ("empty".into(), Some(" \n ".into())),
             ("clear".into(), None),
         ]))
         .unwrap();
 
         assert_eq!(tokens["summary"].as_deref(), Some("reviewready"));
+        // Format characters go too, not only `Cc`: token values draw in the sidebar.
+        assert_eq!(tokens["bidi"].as_deref(), Some("safegnp"));
         assert_eq!(tokens["empty"], None);
         assert_eq!(tokens["clear"], None);
     }

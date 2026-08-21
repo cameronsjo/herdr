@@ -1247,8 +1247,31 @@ impl Workspace {
         }
     }
 
-    pub fn branch(&self) -> Option<String> {
-        self.cached_git_branch.clone()
+    /// The raw branch name. Identity, not presentation: see [`Workspace::branch_label`].
+    pub fn branch(&self) -> Option<&str> {
+        self.cached_git_branch.as_deref()
+    }
+
+    /// The branch name as it should be drawn, never as it should be compared.
+    ///
+    /// Branch names come from `git`, which permits control and format
+    /// characters, and the sidebar writes them straight to the host terminal.
+    /// [`Workspace::branch`] stays raw because it feeds API identity — a
+    /// worktree's `branch` field, whose absence means detached HEAD — so the
+    /// filter lives here, at the display layer, instead.
+    ///
+    /// Runs per workspace row per frame, so it borrows the cached branch when
+    /// it is already clean and only allocates when something has to go.
+    pub fn branch_label(&self) -> Option<std::borrow::Cow<'_, str>> {
+        let branch = crate::label::sanitize_label_borrowed(self.branch()?);
+        let trimmed = branch.trim();
+        if trimmed.is_empty() {
+            None
+        } else if trimmed.len() == branch.len() {
+            Some(branch)
+        } else {
+            Some(std::borrow::Cow::Owned(trimmed.to_string()))
+        }
     }
 
     pub fn git_ahead_behind(&self) -> Option<(usize, usize)> {
@@ -1640,6 +1663,41 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_label_strips_format_characters_but_branch_stays_raw() {
+        let mut ws = Workspace::test_new("space");
+        ws.cached_git_branch = Some("feat/\u{202e}exe".into());
+
+        assert_eq!(ws.branch_label().as_deref(), Some("feat/exe"));
+        // The raw accessor feeds API identity and must not be filtered.
+        assert_eq!(ws.branch(), Some("feat/\u{202e}exe"));
+    }
+
+    #[test]
+    fn branch_label_drops_a_branch_that_sanitizes_away() {
+        let mut ws = Workspace::test_new("space");
+        ws.cached_git_branch = Some("\u{200b}\u{feff}".into());
+
+        assert_eq!(ws.branch_label(), None);
+        assert!(ws.branch().is_some());
+    }
+
+    #[test]
+    fn branch_label_is_length_capped_and_borrows_when_clean() {
+        let mut ws = Workspace::test_new("space");
+        ws.cached_git_branch = Some("z".repeat(200));
+        assert_eq!(
+            ws.branch_label().map(|label| label.chars().count()),
+            Some(crate::label::MAX_LABEL_CHARS)
+        );
+
+        ws.cached_git_branch = Some("main".into());
+        assert!(matches!(
+            ws.branch_label(),
+            Some(std::borrow::Cow::Borrowed("main"))
+        ));
+    }
 
     #[test]
     fn generated_workspace_ids_are_short_base32_handles() {

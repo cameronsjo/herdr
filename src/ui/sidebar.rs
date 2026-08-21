@@ -199,7 +199,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
     let label = if indented {
         grouped_child_display_label(
             &ws.display_name_from_terminals(&app.terminals),
-            ws.branch().as_deref(),
+            ws.branch_label().as_deref(),
             ws.custom_name.is_some(),
         )
     } else {
@@ -210,7 +210,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
         &app.sidebar_spaces,
         SpaceTokenContext {
             workspace: &label,
-            branch: ws.branch().as_deref(),
+            branch: ws.branch_label().as_deref(),
             state_text: state_label(state, seen),
             ahead_behind: ws.git_ahead_behind(),
             tokens: &token_values,
@@ -1362,7 +1362,11 @@ fn render_workspace_list(
 
         let label = ws.display_name_from(&app.terminals, terminal_runtimes);
         let display_label = if card.indented {
-            grouped_child_display_label(&label, ws.branch().as_deref(), ws.custom_name.is_some())
+            grouped_child_display_label(
+                &label,
+                ws.branch_label().as_deref(),
+                ws.custom_name.is_some(),
+            )
         } else {
             label
         };
@@ -1398,7 +1402,7 @@ fn render_workspace_list(
             &app.sidebar_spaces,
             SpaceTokenContext {
                 workspace: &display_label,
-                branch: ws.branch().as_deref(),
+                branch: ws.branch_label().as_deref(),
                 state_text: state_label(display_state, display_seen),
                 ahead_behind: ws.git_ahead_behind(),
                 tokens: &token_values,

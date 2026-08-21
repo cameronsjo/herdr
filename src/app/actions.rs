@@ -4244,7 +4244,7 @@ mod tests {
         );
 
         assert!(changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("main"));
+        assert_eq!(state.workspaces[0].branch(), Some("main"));
         assert_eq!(state.workspaces[0].git_ahead_behind(), Some((2, 1)));
         assert_eq!(state.workspaces[1].id, second_id);
         assert_eq!(state.workspaces[1].git_ahead_behind(), None);
@@ -4273,7 +4273,7 @@ mod tests {
         );
 
         assert!(!changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
+        assert_eq!(state.workspaces[0].branch(), Some("old"));
         assert_eq!(state.workspaces[0].git_ahead_behind(), Some((1, 0)));
     }
 
@@ -4304,7 +4304,7 @@ mod tests {
         );
 
         assert!(!changed);
-        assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
+        assert_eq!(state.workspaces[0].branch(), Some("old"));
     }
 
     #[test]
