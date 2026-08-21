@@ -1650,9 +1650,8 @@ impl App {
 
 fn normalize_presentation_text(value: Option<String>) -> Option<String> {
     let trimmed = value?.trim().to_string();
-    let normalized: String = trimmed
+    let normalized: String = crate::label::sanitize_label(trimmed)
         .chars()
-        .filter(|ch| !ch.is_control())
         .take(80)
         .collect();
     (!normalized.trim().is_empty()).then(|| normalized.trim().to_string())
@@ -1931,6 +1930,29 @@ mod tests {
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
         (app, public_pane_id)
+    }
+
+    #[test]
+    fn presentation_text_strips_format_characters() {
+        assert_eq!(
+            normalize_presentation_text(Some("de\u{200b}ploy".into())).as_deref(),
+            Some("deploy")
+        );
+    }
+
+    #[test]
+    fn presentation_text_caps_at_eighty_characters() {
+        let long = "a".repeat(200);
+        let normalized = normalize_presentation_text(Some(long)).unwrap();
+        assert_eq!(normalized.chars().count(), 80);
+    }
+
+    #[test]
+    fn presentation_text_drops_an_all_format_string() {
+        assert_eq!(
+            normalize_presentation_text(Some("\u{200b}\u{202e}\u{feff}".into())),
+            None
+        );
     }
 
     #[test]

@@ -624,7 +624,7 @@ fn render_mobile_switcher_content(
         let name = if *indented {
             grouped_child_display_label(
                 &raw_label,
-                ws.branch().as_deref(),
+                ws.branch_label().as_deref(),
                 ws.custom_name.is_some(),
             )
         } else {
@@ -641,7 +641,7 @@ fn render_mobile_switcher_content(
 
         let detail = format!(
             "{detail_prefix}{} · {}",
-            ws.branch().unwrap_or_else(|| "shell".into()),
+            ws.branch_label().unwrap_or_else(|| "shell".into()),
             mobile_tab_status(ws)
         );
         render_two_line_item(

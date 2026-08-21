@@ -1867,6 +1867,7 @@ impl TerminalState {
     }
 
     pub fn set_agent_name(&mut self, name: String) {
+        let name = crate::label::sanitize_label(name).trim().to_string();
         self.agent_name = (!name.is_empty()).then_some(name);
         self.agent_name_owner = self.agent_name.as_ref().and_then(|_| {
             self.hook_authority
@@ -1902,7 +1903,9 @@ impl TerminalState {
         timeout: Duration,
     ) {
         self.set_agent_name(name);
-        self.agent_name_owner = Some(AgentNameOwner {
+        // A name that sanitizes away leaves no name to own; keep the pair
+        // consistent rather than recording an owner for nothing.
+        self.agent_name_owner = self.agent_name.as_ref().map(|_| AgentNameOwner {
             agent_label: crate::detect::agent_label(kind).to_string(),
             session_ref: None,
         });
@@ -2030,7 +2033,9 @@ impl TerminalState {
 
     pub fn restore_managed_agent(&mut self, name: String, kind: Agent) {
         self.set_agent_name(name);
-        self.agent_name_owner = Some(AgentNameOwner {
+        // Restored names come from the session file, so an all-format name is
+        // reachable here; do not record an owner for a name that vanished.
+        self.agent_name_owner = self.agent_name.as_ref().map(|_| AgentNameOwner {
             agent_label: crate::detect::agent_label(kind).to_string(),
             session_ref: None,
         });
@@ -2200,6 +2205,39 @@ mod tests {
             agent: agent_label.into(),
             session_ref,
         });
+    }
+
+    #[test]
+    fn set_agent_name_strips_control_characters() {
+        let mut terminal = test_terminal();
+        terminal.set_agent_name("rev\u{1b}[31miewer".into());
+
+        assert_eq!(terminal.agent_name.as_deref(), Some("rev[31miewer"));
+    }
+
+    #[test]
+    fn beginning_an_all_format_agent_name_records_no_owner() {
+        let mut terminal = test_terminal();
+        terminal.begin_managed_agent(
+            "\u{200b}\u{202e}".into(),
+            Agent::Claude,
+            Instant::now(),
+            Duration::from_secs(3),
+            Duration::from_secs(30),
+        );
+
+        assert_eq!(terminal.agent_name, None);
+        assert!(terminal.agent_name_owner.is_none());
+    }
+
+    #[test]
+    fn restoring_an_all_format_agent_name_records_no_owner() {
+        // The restore path replays names straight out of the session file.
+        let mut terminal = test_terminal();
+        terminal.restore_managed_agent("\u{200b}\u{202e}".into(), Agent::Claude);
+
+        assert_eq!(terminal.agent_name, None);
+        assert!(terminal.agent_name_owner.is_none());
     }
 
     #[test]
