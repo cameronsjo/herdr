@@ -28,6 +28,11 @@ concurrency:
 
 jobs:
   build:
+    # Upstream-only: the fork never pushes upstream's release tags (pushing one
+    # would fire release.yml and the tap bump), so docs-versions.mjs cannot
+    # resolve them here and the job reads red on every sync that follows an
+    # upstream release cut. Same gate pr-gate.yml uses.
+    if: github.repository == 'herdrdev/herdr'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
