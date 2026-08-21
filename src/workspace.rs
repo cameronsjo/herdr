@@ -1256,9 +1256,10 @@ impl Workspace {
     ///
     /// Branch names come from `git`, which permits control and format
     /// characters, and the sidebar writes them straight to the host terminal.
-    /// [`Workspace::branch`] stays raw because it feeds API identity — a
-    /// worktree's `branch` field, whose absence means detached HEAD — so the
-    /// filter lives here, at the display layer, instead.
+    /// [`Workspace::branch`] stays raw for comparison and identity use — a
+    /// branch is compared, not drawn, everywhere outside the UI — so the
+    /// filter lives here, at the display layer, instead. No display path may
+    /// call `branch()` directly.
     ///
     /// Runs per workspace row per frame, so it borrows the cached branch when
     /// it is already clean and only allocates when something has to go.

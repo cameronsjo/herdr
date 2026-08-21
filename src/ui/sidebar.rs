@@ -196,10 +196,11 @@ pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static 
 
 fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indented: bool) -> u16 {
     let (state, seen) = ws.aggregate_state(&app.terminals);
+    let branch = ws.branch_label();
     let label = if indented {
         grouped_child_display_label(
             &ws.display_name_from_terminals(&app.terminals),
-            ws.branch_label().as_deref(),
+            branch.as_deref(),
             ws.custom_name.is_some(),
         )
     } else {
@@ -210,7 +211,7 @@ fn workspace_row_height(app: &AppState, ws: &crate::workspace::Workspace, indent
         &app.sidebar_spaces,
         SpaceTokenContext {
             workspace: &label,
-            branch: ws.branch_label().as_deref(),
+            branch: branch.as_deref(),
             state_text: state_label(state, seen),
             ahead_behind: ws.git_ahead_behind(),
             tokens: &token_values,
@@ -1361,12 +1362,9 @@ fn render_workspace_list(
         };
 
         let label = ws.display_name_from(&app.terminals, terminal_runtimes);
+        let branch = ws.branch_label();
         let display_label = if card.indented {
-            grouped_child_display_label(
-                &label,
-                ws.branch_label().as_deref(),
-                ws.custom_name.is_some(),
-            )
+            grouped_child_display_label(&label, branch.as_deref(), ws.custom_name.is_some())
         } else {
             label
         };
@@ -1402,7 +1400,7 @@ fn render_workspace_list(
             &app.sidebar_spaces,
             SpaceTokenContext {
                 workspace: &display_label,
-                branch: ws.branch_label().as_deref(),
+                branch: branch.as_deref(),
                 state_text: state_label(display_state, display_seen),
                 ahead_behind: ws.git_ahead_behind(),
                 tokens: &token_values,

@@ -689,20 +689,23 @@ pub struct WorktreeOpenEntry {
 impl WorktreeOpenEntry {
     pub(crate) fn display_name(&self) -> String {
         // Display only: `branch` itself stays raw because `status_label` reads
-        // its presence as detached-vs-attached identity.
-        let branch = self
-            .branch
+        // its presence as detached-vs-attached identity. Both the branch and
+        // the directory-name fallback come out of `git worktree list`, so the
+        // whole result is filtered, not just the branch arm.
+        let shown = |text: &str| {
+            let text = crate::label::sanitize_label(text).trim().to_string();
+            (!text.is_empty()).then_some(text)
+        };
+        self.branch
             .as_deref()
-            .map(crate::label::sanitize_label)
-            .map(|branch| branch.trim().to_string())
-            .filter(|branch| !branch.is_empty());
-        branch.unwrap_or_else(|| {
-            self.path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| self.path.display().to_string())
-        })
+            .and_then(shown)
+            .or_else(|| {
+                self.path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .and_then(shown)
+            })
+            .unwrap_or_else(|| crate::label::sanitize_label(self.path.display().to_string()))
     }
 
     pub(crate) fn status_label(&self) -> &'static str {
@@ -2335,9 +2338,12 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+
     #[test]
     fn worktree_open_entry_display_name_is_sanitized_but_branch_stays_raw() {
-        let entry = super::WorktreeOpenEntry {
+        let entry = WorktreeOpenEntry {
             path: std::path::PathBuf::from("/tmp/repo-worktrees/visible"),
             branch: Some("feat/\u{202e}exe".into()),
             is_linked_worktree: true,
@@ -2346,15 +2352,21 @@ mod tests {
         assert_eq!(entry.display_name(), "feat/exe");
         assert_eq!(entry.branch.as_deref(), Some("feat/\u{202e}exe"));
 
-        let blank = super::WorktreeOpenEntry {
+        let blank = WorktreeOpenEntry {
             branch: Some("\u{200b}".into()),
             ..entry
         };
         assert_eq!(blank.display_name(), "visible");
-    }
 
-    use super::*;
-    use crossterm::event::KeyEvent;
+        // The directory-name fallback is the same provenance as the branch.
+        let hostile_dir = WorktreeOpenEntry {
+            path: std::path::PathBuf::from("/tmp/repo-worktrees/vis\u{202e}ible"),
+            branch: None,
+            is_linked_worktree: true,
+            already_open_ws_idx: None,
+        };
+        assert_eq!(hostile_dir.display_name(), "visible");
+    }
 
     #[test]
     fn pane_size_estimate_uses_headless_size_before_first_view() {
