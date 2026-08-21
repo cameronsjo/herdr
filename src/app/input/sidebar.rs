@@ -875,7 +875,11 @@ mod tests {
 
         let first_alpha_pane = app.state.workspaces[0].tabs[0].root_pane;
         let detail_area = app.state.agent_panel_rect();
-        let body = crate::ui::agent_panel_body_rect(detail_area, false);
+        let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
 
         // Row 0 is alpha's header; clicking it lands on alpha's first agent,
         // not the second row (its own agent row) or beta at all.
@@ -893,6 +897,61 @@ mod tests {
         );
         assert_eq!(
             app.state.agent_detail_target_at(body.y + 3),
+            Some((1, 0, beta_pane))
+        );
+    }
+
+    #[test]
+    fn clicking_into_a_scrolled_grouped_run_resolves_against_the_full_list() {
+        let mut app = app_for_mouse_test();
+        let mut alpha = Workspace::test_new("alpha");
+        let alpha_tab = alpha.test_add_tab(Some("a2"));
+        let alpha_second_pane = alpha.tabs[alpha_tab].root_pane;
+        let beta = Workspace::test_new("beta");
+        let beta_pane = beta.tabs[0].root_pane;
+        app.state.workspaces = vec![alpha, beta];
+        app.state.ensure_test_terminals();
+        for (ws_idx, tab_idx) in [(0, 0), (0, 1), (1, 0)] {
+            let pane_id = app.state.workspaces[ws_idx].tabs[tab_idx].root_pane;
+            let terminal_id = app.state.workspaces[ws_idx].tabs[tab_idx].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(Agent::Claude);
+        }
+        app.state.sidebar_agents.group_by = crate::config::AgentGroupBy::Workspace;
+
+        // Grouped, the three entries need five rows. Shrink the sidebar until
+        // the panel overflows by exactly one row so a scroll of 1 is real.
+        let mut detail_area = app.state.agent_panel_rect();
+        let mut metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
+        let mut height = app.state.view.sidebar_rect.height;
+        while metrics.max_offset_from_bottom != 1 && height > 0 {
+            height -= 1;
+            app.state.view.sidebar_rect = ratatui::layout::Rect::new(0, 0, 26, height);
+            detail_area = app.state.agent_panel_rect();
+            metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
+        }
+        assert_eq!(metrics.max_offset_from_bottom, 1);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        assert!(body.height >= 2);
+
+        // Scrolled one entry in, the first visible entry is alpha's second
+        // agent: mid-run, so it draws no header and takes one row. Beta's
+        // header follows on the very next row and resolves to beta's agent.
+        app.state.agent_panel_scroll = 1;
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y),
+            Some((0, alpha_tab, alpha_second_pane))
+        );
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y + 1),
             Some((1, 0, beta_pane))
         );
     }

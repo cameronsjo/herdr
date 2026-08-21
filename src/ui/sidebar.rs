@@ -548,7 +548,7 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
 /// One gate drives both the headers and the row layout. `agent_panel_sort` is a
 /// one-click toggle, so gating the header on the live sort while gating the
 /// layout on config would leave a `priority` user with no workspace shown at all.
-pub(crate) fn effective_agent_grouping(app: &AppState) -> bool {
+fn effective_agent_grouping(app: &AppState) -> bool {
     matches!(app.sidebar_agents.group_by, AgentGroupBy::Workspace)
         && matches!(app.agent_panel_sort, AgentPanelSort::Spaces)
         && app
@@ -609,7 +609,7 @@ fn agent_entry_height_from_rows(rows_len: usize, header_rows: u16, body_height: 
 
 /// Header rows this entry contributes before its own agent rows: 1 when
 /// grouping is on and the entry starts a workspace run, otherwise 0.
-pub(crate) fn agent_entry_header_rows(
+fn agent_entry_header_rows(
     app: &AppState,
     entry: &AgentPanelEntry,
     prev_ws_idx: Option<usize>,
@@ -1606,6 +1606,9 @@ fn render_agent_detail(
         let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
 
         if header_rows == 1 {
+            // The header belongs to the entry that draws it — the hit-test
+            // routes a click on it to this entry — so it carries the same
+            // active-row highlight as the agent rows under it.
             let width = body.width.saturating_sub(1) as usize;
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
@@ -1614,7 +1617,8 @@ fn render_agent_detail(
                         truncate_end(&detail.primary_label, width),
                         Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD),
                     ),
-                ])),
+                ]))
+                .style(row_style),
                 Rect::new(body.x, row_y, body.width, 1),
             );
         }
@@ -2127,6 +2131,43 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let metrics = agent_panel_scroll_metrics(&app, area);
         assert_eq!(metrics.max_offset_from_bottom, 1);
         assert_eq!(agent_panel_scroll_for_target(&app, area, 0, 2), 1);
+    }
+
+    #[test]
+    fn keyboard_scroll_for_target_keeps_a_grouped_entry_and_its_header_in_view() {
+        let app = app_with_two_grouped_workspaces();
+        // Four entries need six rows grouped; a four-row body has to scroll.
+        let area = Rect::new(0, 0, 24, AGENT_PANEL_HEADER_ROWS + 4);
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        assert_eq!(metrics.max_offset_from_bottom, 1);
+        let entries = agent_panel_entries(&app);
+
+        for target in 0..entries.len() {
+            let scroll = agent_panel_scroll_for_target(&app, area, 0, target);
+            assert!(scroll <= target, "target {target} scrolled past itself");
+            // Walk from `scroll` to `target` the way the renderer does; the
+            // target's full height — header included — must fit in the body.
+            let mut row_y = 0u16;
+            for (index, entry) in entries.iter().enumerate().skip(scroll) {
+                let height = agent_entry_height_in_body(
+                    &app,
+                    entry,
+                    body.height,
+                    agent_entry_prev_ws_idx(&entries, index),
+                );
+                if index == target {
+                    assert!(
+                        row_y + height <= body.height,
+                        "target {target} at scroll {scroll} lands below the fold"
+                    );
+                    break;
+                }
+                row_y = row_y
+                    .saturating_add(height)
+                    .saturating_add(agent_entry_gap(&app, &entries, index));
+            }
+        }
     }
 
     #[test]

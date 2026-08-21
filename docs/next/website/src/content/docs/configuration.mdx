@@ -439,7 +439,7 @@ claude = [
 ]
 ```
 
-An override replaces `rows`; it does not extend it. Override keys are case-sensitive canonical agent IDs such as `claude`, `codex`, and `pi`. Detection aliases such as `claude-code` are not accepted. Agents without an override, including custom reported agents, use `rows` — or `grouped_rows` while `group_by` is grouping entries.
+An override replaces `rows`; it does not extend it. Override keys are case-sensitive canonical agent IDs such as `claude`, `codex`, and `pi`. Detection aliases such as `claude-code` are not accepted. Agents without an override, including custom-reported agents, use `rows` — or `grouped_rows` while `group_by` is grouping entries.
 
 Custom `$name` tokens are dynamic values, not literal text. Add the token to a layout, then report its value from a script or plugin:
 
