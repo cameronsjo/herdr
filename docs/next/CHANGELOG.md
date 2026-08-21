@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `ui.sidebar.agents.group_by = "workspace"` now draws one workspace header above each run of adjacent agents from that workspace, so the agent name gets nearly the whole panel width instead of the workspace name repeating on every row. Grouped entries use the new `ui.sidebar.agents.grouped_rows` layout; grouping applies only in grouped (space) panel order.
 - CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
 - Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore. (#2730, #2743)
 - Herdr now keeps the outer terminal window title in sync with the session through `ui.window_title`, so window managers and terminal tab bars show the active workspace and the host the panes actually run on. (#2627, thanks @dhh)

@@ -14,6 +14,7 @@ use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
 use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
+use crate::config::AgentGroupBy;
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
 
@@ -542,33 +543,110 @@ pub(crate) fn agent_panel_body_rect(area: Rect, has_scrollbar: bool) -> Rect {
     Rect::new(area.x, body_y, body_width, body_height)
 }
 
+/// Whether the Agent panel currently groups entries under workspace headers.
+///
+/// One gate drives both the headers and the row layout. `agent_panel_sort` is a
+/// one-click toggle, so gating the header on the live sort while gating the
+/// layout on config would leave a `priority` user with no workspace shown at all.
+fn effective_agent_grouping(app: &AppState) -> bool {
+    matches!(app.sidebar_agents.group_by, AgentGroupBy::Workspace)
+        && matches!(app.agent_panel_sort, AgentPanelSort::Spaces)
+        && app
+            .agent_view_override
+            .as_ref()
+            .is_none_or(|view| view.sort.is_empty())
+}
+
 fn resolved_agent_rows(app: &AppState, entry: &AgentPanelEntry) -> Vec<Vec<ResolvedToken>> {
     let label = entry
         .state_labels
         .get(agent_panel_status_key(entry.state, entry.seen))
         .map(String::as_str)
         .unwrap_or_else(|| state_label(entry.state, entry.seen));
-    tokens::agent_rows(&app.sidebar_agents, entry, label)
+    tokens::agent_rows(
+        &app.sidebar_agents,
+        entry,
+        label,
+        effective_agent_grouping(app),
+    )
 }
 
+/// Rows this entry occupies, including the workspace header it renders when it
+/// starts a run.
+///
+/// `prev_ws_idx` is the preceding entry's `ws_idx` (`None` at the list head),
+/// which the caller resolves in O(1). Deriving run membership inside this
+/// function would make the four pane-scaled loops that call it quadratic.
+/// The predicate compares `ws_idx`, never labels: the render and geometry paths
+/// resolve workspace labels through different runtime registries.
 pub(crate) fn agent_entry_height_in_body(
     app: &AppState,
     entry: &AgentPanelEntry,
     body_height: u16,
+    prev_ws_idx: Option<usize>,
 ) -> u16 {
-    (resolved_agent_rows(app, entry)
-        .len()
+    agent_entry_height_from_rows(
+        resolved_agent_rows(app, entry).len(),
+        agent_entry_header_rows(app, entry, prev_ws_idx),
+        body_height,
+    )
+}
+
+/// The one definition of the height arithmetic.
+///
+/// `render_agent_detail` already holds the resolved rows, so it calls this
+/// directly rather than `agent_entry_height_in_body` — resolving them a second
+/// time would double the per-entry allocation inside the render loop, which is
+/// pane-scaled. Both paths still share this formula, which is the drift the
+/// architecture test in `scripts/test_ui_hot_path_architecture.py` guards.
+fn agent_entry_height_from_rows(rows_len: usize, header_rows: u16, body_height: u16) -> u16 {
+    (rows_len
         .max(1)
+        .saturating_add(usize::from(header_rows))
         .min(u16::MAX as usize) as u16)
         .min(body_height)
 }
 
-pub(crate) fn agent_entry_gap(app: &AppState, entry_idx: usize, entry_count: usize) -> u16 {
-    if entry_idx + 1 < entry_count {
-        app.sidebar_agents.row_gap
-    } else {
-        0
+/// Header rows this entry contributes before its own agent rows: 1 when
+/// grouping is on and the entry starts a workspace run, otherwise 0.
+fn agent_entry_header_rows(
+    app: &AppState,
+    entry: &AgentPanelEntry,
+    prev_ws_idx: Option<usize>,
+) -> u16 {
+    u16::from(effective_agent_grouping(app) && prev_ws_idx != Some(entry.ws_idx))
+}
+
+/// The preceding entry's `ws_idx`, for `agent_entry_height_in_body`.
+pub(crate) fn agent_entry_prev_ws_idx(
+    entries: &[AgentPanelEntry],
+    entry_idx: usize,
+) -> Option<usize> {
+    entry_idx
+        .checked_sub(1)
+        .and_then(|prev| entries.get(prev))
+        .map(|prev| prev.ws_idx)
+}
+
+/// Blank rows after this entry. Suppressed within a workspace run while
+/// grouping, so a run reads as one group rather than header / agent / gap /
+/// agent.
+pub(crate) fn agent_entry_gap(
+    app: &AppState,
+    entries: &[AgentPanelEntry],
+    entry_idx: usize,
+) -> u16 {
+    let Some(next) = entries.get(entry_idx + 1) else {
+        return 0;
+    };
+    if effective_agent_grouping(app)
+        && entries
+            .get(entry_idx)
+            .is_some_and(|entry| entry.ws_idx == next.ws_idx)
+    {
+        return 0;
     }
+    app.sidebar_agents.row_gap
 }
 
 fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> usize {
@@ -581,14 +659,19 @@ fn agent_panel_visible_count_from(app: &AppState, area: Rect, scroll: usize) -> 
     let mut visible = 0usize;
     let entries = agent_panel_entries(app);
     for (index, entry) in entries.iter().enumerate().skip(scroll) {
-        let height = agent_entry_height_in_body(app, entry, body.height);
+        let height = agent_entry_height_in_body(
+            app,
+            entry,
+            body.height,
+            agent_entry_prev_ws_idx(&entries, index),
+        );
         if used_rows.saturating_add(height) > body.height {
             break;
         }
         used_rows = used_rows.saturating_add(height);
         visible += 1;
         used_rows = used_rows
-            .saturating_add(agent_entry_gap(app, index, entries.len()))
+            .saturating_add(agent_entry_gap(app, &entries, index))
             .min(body.height);
     }
     visible
@@ -600,8 +683,14 @@ fn agent_panel_bottom_start(app: &AppState, area: Rect) -> usize {
     let mut used_rows = 0u16;
     let mut start = entries.len();
     for (index, entry) in entries.iter().enumerate().rev() {
-        let gap = agent_entry_gap(app, index, entries.len());
-        let needed = agent_entry_height_in_body(app, entry, body.height).saturating_add(gap);
+        let gap = agent_entry_gap(app, &entries, index);
+        let needed = agent_entry_height_in_body(
+            app,
+            entry,
+            body.height,
+            agent_entry_prev_ws_idx(&entries, index),
+        )
+        .saturating_add(gap);
         if used_rows.saturating_add(needed) > body.height {
             break;
         }
@@ -1481,15 +1570,21 @@ fn render_agent_detail(
     }
 
     let scroll = app.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+    let grouped = effective_agent_grouping(app);
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
-        let height = (rows.len().max(1) as u16).min(body.height);
+        let prev_ws_idx = agent_entry_prev_ws_idx(&details, index);
+        let header_rows = agent_entry_header_rows(app, detail, prev_ws_idx);
+        let height = agent_entry_height_from_rows(rows.len(), header_rows, body.height);
         if row_y.saturating_add(height) > body_bottom {
             break;
         }
+        // The clamp can leave room for the header but not the agent rows it
+        // labels; the agent row wins that tie.
+        let header_rows = if height > header_rows { header_rows } else { 0 };
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
         let row_style = if is_active {
@@ -1510,8 +1605,33 @@ fn render_agent_detail(
         let agent_style = Style::default().fg(p.overlay0).add_modifier(Modifier::DIM);
         let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
 
-        for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
-            let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
+        if header_rows == 1 {
+            // The header belongs to the entry that draws it — the hit-test
+            // routes a click on it to this entry — so it carries the same
+            // active-row highlight as the agent rows under it.
+            let width = body.width.saturating_sub(1) as usize;
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        truncate_end(&detail.primary_label, width),
+                        Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD),
+                    ),
+                ]))
+                .style(row_style),
+                Rect::new(body.x, row_y, body.width, 1),
+            );
+        }
+
+        let agent_rows = height.saturating_sub(header_rows);
+        for (row_index, resolved) in rows.iter().take(agent_rows as usize).enumerate() {
+            // Prefix and width budget key off the visual row, not `row_index`.
+            // While grouping, every agent row sits under a workspace header —
+            // including the rows of later entries in the same run, which draw no
+            // header of their own — so they all take the indented prefix.
+            let visual_row = row_index as u16 + header_rows;
+            let indent = if grouped || visual_row > 0 { 3u16 } else { 1 };
+            let mut spans = vec![Span::raw(if indent == 1 { " " } else { "   " })];
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1520,17 +1640,16 @@ fn render_agent_detail(
                 agent_style,
                 agent_style,
                 p,
-                body.width
-                    .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
+                body.width.saturating_sub(indent) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
-                Rect::new(body.x, row_y + row_index as u16, body.width, 1),
+                Rect::new(body.x, row_y + visual_row, body.width, 1),
             );
         }
         row_y = row_y
             .saturating_add(height)
-            .saturating_add(agent_entry_gap(app, index, details.len()))
+            .saturating_add(agent_entry_gap(app, &details, index))
             .min(body_bottom);
     }
 
@@ -2015,6 +2134,43 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn keyboard_scroll_for_target_keeps_a_grouped_entry_and_its_header_in_view() {
+        let app = app_with_two_grouped_workspaces();
+        // Four entries need six rows grouped; a four-row body has to scroll.
+        let area = Rect::new(0, 0, 24, AGENT_PANEL_HEADER_ROWS + 4);
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        assert_eq!(metrics.max_offset_from_bottom, 1);
+        let entries = agent_panel_entries(&app);
+
+        for target in 0..entries.len() {
+            let scroll = agent_panel_scroll_for_target(&app, area, 0, target);
+            assert!(scroll <= target, "target {target} scrolled past itself");
+            // Walk from `scroll` to `target` the way the renderer does; the
+            // target's full height — header included — must fit in the body.
+            let mut row_y = 0u16;
+            for (index, entry) in entries.iter().enumerate().skip(scroll) {
+                let height = agent_entry_height_in_body(
+                    &app,
+                    entry,
+                    body.height,
+                    agent_entry_prev_ws_idx(&entries, index),
+                );
+                if index == target {
+                    assert!(
+                        row_y + height <= body.height,
+                        "target {target} at scroll {scroll} lands below the fold"
+                    );
+                    break;
+                }
+                row_y = row_y
+                    .saturating_add(height)
+                    .saturating_add(agent_entry_gap(&app, &entries, index));
+            }
+        }
+    }
+
+    #[test]
     fn oversized_space_layout_is_clipped_to_the_section_body() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
@@ -2055,9 +2211,363 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         let entry = agent_panel_entries(&app).pop().unwrap();
         assert_eq!(
-            agent_entry_height_in_body(&app, &entry, agent_panel_body_rect(panel, false).height),
+            agent_entry_height_in_body(
+                &app,
+                &entry,
+                agent_panel_body_rect(panel, false).height,
+                None
+            ),
             agent_panel_body_rect(panel, false).height
         );
+    }
+
+    /// Two workspaces, two agent panes each, grouping enabled.
+    fn app_with_two_grouped_workspaces() -> crate::app::state::AppState {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut alpha = Workspace::test_new("alpha");
+        alpha.test_add_tab(Some("a2"));
+        let mut beta = Workspace::test_new("beta");
+        beta.test_add_tab(Some("b2"));
+        app.workspaces = vec![alpha, beta];
+        app.ensure_test_terminals();
+        for (ws_idx, tab_idx) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            let pane_id = app.workspaces[ws_idx].tabs[tab_idx].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[tab_idx].panes[&pane_id]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
+        app.sidebar_agents.group_by = crate::config::AgentGroupBy::Workspace;
+        app
+    }
+
+    fn sorting_agent_view() -> crate::api::schema::AgentViewSetParams {
+        crate::api::schema::AgentViewSetParams {
+            source: "test.views".to_string(),
+            label: None,
+            filter: None,
+            sort: vec![crate::api::schema::AgentViewSort {
+                field: crate::api::schema::AgentViewSortField::Builtin(
+                    crate::api::schema::AgentViewBuiltinSortField::Attention,
+                ),
+                order: crate::api::schema::AgentViewSortOrder::Asc,
+            }],
+        }
+    }
+
+    fn filtering_agent_view() -> crate::api::schema::AgentViewSetParams {
+        crate::api::schema::AgentViewSetParams {
+            source: "test.views".to_string(),
+            label: None,
+            filter: Some(crate::api::schema::AgentViewFilter::Eq {
+                field: crate::api::schema::AgentViewField::Builtin(
+                    crate::api::schema::AgentViewBuiltinField::Status,
+                ),
+                value: crate::api::schema::AgentViewValue::String("unknown".to_string()),
+            }),
+            sort: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn effective_grouping_needs_config_space_order_and_no_view_sort() {
+        let mut app = app_with_two_grouped_workspaces();
+        assert!(effective_agent_grouping(&app));
+
+        app.sidebar_agents.group_by = crate::config::AgentGroupBy::None;
+        assert!(!effective_agent_grouping(&app));
+        app.sidebar_agents.group_by = crate::config::AgentGroupBy::Workspace;
+
+        app.agent_panel_sort = AgentPanelSort::Priority;
+        assert!(!effective_agent_grouping(&app));
+        app.agent_panel_sort = AgentPanelSort::Spaces;
+
+        app.agent_view_override = Some(filtering_agent_view());
+        assert!(
+            effective_agent_grouping(&app),
+            "a filter-only view keeps space order, so grouping stays on"
+        );
+
+        app.agent_view_override = Some(sorting_agent_view());
+        assert!(
+            !effective_agent_grouping(&app),
+            "a view that sorts can interleave workspaces"
+        );
+    }
+
+    #[test]
+    fn grouped_entries_report_a_header_row_only_at_each_run_start() {
+        let app = app_with_two_grouped_workspaces();
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 4);
+
+        let headers: Vec<u16> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                agent_entry_header_rows(&app, entry, agent_entry_prev_ws_idx(&entries, index))
+            })
+            .collect();
+
+        assert_eq!(headers, [1, 0, 1, 0]);
+    }
+
+    #[test]
+    fn priority_sort_restores_ungrouped_heights_and_gaps() {
+        let mut app = app_with_two_grouped_workspaces();
+        app.agent_panel_sort = AgentPanelSort::Priority;
+        app.sidebar_agents.row_gap = 1;
+        let entries = agent_panel_entries(&app);
+
+        for (index, entry) in entries.iter().enumerate() {
+            assert_eq!(
+                agent_entry_height_in_body(
+                    &app,
+                    entry,
+                    40,
+                    agent_entry_prev_ws_idx(&entries, index)
+                ),
+                app.sidebar_agents.rows.len() as u16,
+                "entry {index} must keep its ungrouped height"
+            );
+        }
+        assert_eq!(agent_entry_gap(&app, &entries, 0), 1);
+        assert_eq!(agent_entry_gap(&app, &entries, entries.len() - 1), 0);
+    }
+
+    #[test]
+    fn grouping_suppresses_the_row_gap_inside_a_workspace_run() {
+        let mut app = app_with_two_grouped_workspaces();
+        app.sidebar_agents.row_gap = 1;
+        let entries = agent_panel_entries(&app);
+
+        assert_eq!(
+            agent_entry_gap(&app, &entries, 0),
+            0,
+            "inside the alpha run"
+        );
+        assert_eq!(agent_entry_gap(&app, &entries, 1), 1, "alpha to beta");
+        assert_eq!(agent_entry_gap(&app, &entries, 2), 0, "inside the beta run");
+        assert_eq!(agent_entry_gap(&app, &entries, 3), 0, "last entry");
+    }
+
+    #[test]
+    fn grouped_agent_panel_draws_one_header_per_workspace_run() {
+        let app = app_with_two_grouped_workspaces();
+        let area = Rect::new(0, 0, 24, 12);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(24, 12)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let rows: Vec<String> = (0..6)
+            .map(|offset| row_text(buffer, body.y + offset, body.width))
+            .collect();
+
+        assert_eq!(rows[0], " alpha");
+        assert_eq!(rows[3], " beta");
+        for agent_row in [&rows[1], &rows[2], &rows[4], &rows[5]] {
+            assert!(
+                agent_row.starts_with("   ") && agent_row.trim().contains("claude"),
+                "agent rows indent under their header: {agent_row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn scrolling_into_a_run_keeps_render_and_hit_test_geometry_aligned() {
+        let mut app = app_with_two_grouped_workspaces();
+        // Four entries need six rows grouped, so a four-row body can scroll.
+        let area = Rect::new(0, 0, 24, AGENT_PANEL_HEADER_ROWS + 4);
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        assert_eq!(metrics.max_offset_from_bottom, 1);
+        // Land the scroll on the second entry of the alpha run, mid-run: it
+        // draws no header, so every later entry shifts up by one row.
+        app.agent_panel_scroll = 1;
+        let entries = agent_panel_entries(&app);
+
+        let mut row_y = body.y;
+        let mut expected = Vec::new();
+        for (index, entry) in entries.iter().enumerate().skip(1) {
+            let height = agent_entry_height_in_body(
+                &app,
+                entry,
+                body.height,
+                agent_entry_prev_ws_idx(&entries, index),
+            );
+            expected.push((row_y, height, entry.pane_id));
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(agent_entry_gap(&app, &entries, index));
+        }
+
+        assert_eq!(expected[0].1, 1, "the mid-run entry drops its header");
+        assert_eq!(expected[1].1, 2, "the beta run start regains one");
+
+        let mut terminal = Terminal::new(TestBackend::new(24, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(
+            row_text(buffer, expected[0].0, body.width).starts_with("   "),
+            "the scrolled-into row keeps its indent without its header"
+        );
+        assert_eq!(
+            row_text(buffer, expected[1].0, body.width),
+            " beta",
+            "the beta header must land where the geometry says"
+        );
+    }
+
+    #[test]
+    fn a_clamped_entry_drops_its_header_before_its_agent_row() {
+        let mut app = app_with_two_grouped_workspaces();
+        // AGENT_PANEL_HEADER_ROWS + 1 leaves a one-row body.
+        let area = Rect::new(0, 0, 24, AGENT_PANEL_HEADER_ROWS + 1);
+        let body = agent_panel_body_rect(area, false);
+        assert_eq!(body.height, 1);
+        app.view.sidebar_rect = Rect::new(0, 0, 24, 30);
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(
+            agent_entry_height_in_body(&app, &entries[0], body.height, None),
+            1
+        );
+
+        let mut terminal =
+            Terminal::new(TestBackend::new(24, AGENT_PANEL_HEADER_ROWS + 1)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let row = row_text(terminal.backend().buffer(), body.y, body.width);
+
+        assert!(
+            row.contains("claude"),
+            "the agent row wins the last row, not the header: {row:?}"
+        );
+    }
+
+    #[test]
+    fn agent_entry_prev_ws_idx_at_the_head_and_past_the_end() {
+        let app = app_with_two_grouped_workspaces();
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 4);
+
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 0), None);
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 1), Some(0));
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 2), Some(0));
+        assert_eq!(agent_entry_prev_ws_idx(&entries, 3), Some(1));
+        // One past the last valid index still resolves against the last
+        // entry rather than falling back to None; no caller in this module
+        // passes an index this far out of range, but the geometry loops all
+        // resolve `prev_ws_idx` before checking whether `index` is in bounds,
+        // so this is the value they would see if one ever did.
+        assert_eq!(
+            agent_entry_prev_ws_idx(&entries, entries.len()),
+            Some(entries[entries.len() - 1].ws_idx)
+        );
+    }
+
+    #[test]
+    fn grouping_survives_a_filter_that_drops_a_runs_first_entry() {
+        let mut app = app_with_two_grouped_workspaces();
+        // Give alpha's first pane a different agent so a filter can drop it
+        // without touching the rest of the alpha run.
+        let first_pane = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Codex);
+        app.agent_view_override = Some(crate::api::schema::AgentViewSetParams {
+            source: "test.views".to_string(),
+            label: None,
+            filter: Some(crate::api::schema::AgentViewFilter::Eq {
+                field: crate::api::schema::AgentViewField::Builtin(
+                    crate::api::schema::AgentViewBuiltinField::Agent,
+                ),
+                value: crate::api::schema::AgentViewValue::String("claude".to_string()),
+            }),
+            sort: Vec::new(),
+        });
+
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 3, "the codex pane is filtered out");
+        assert!(
+            effective_agent_grouping(&app),
+            "a filter-only view keeps space order, so grouping stays on"
+        );
+
+        let headers: Vec<u16> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                agent_entry_header_rows(&app, entry, agent_entry_prev_ws_idx(&entries, index))
+            })
+            .collect();
+
+        // alpha's surviving pane is now first in the filtered list and still
+        // starts (and now ends) its own run; beta is unaffected.
+        assert_eq!(headers, [1, 1, 0]);
+    }
+
+    #[test]
+    fn grouped_rows_whose_tokens_all_resolve_to_none_still_reserve_one_row() {
+        let mut app = app_with_two_grouped_workspaces();
+        app.sidebar_agents.grouped_rows = vec![vec![crate::config::AgentSidebarToken::Custom(
+            "missing".into(),
+        )]];
+        let entries = agent_panel_entries(&app);
+
+        // The row is dropped entirely (no token in it resolved), but the
+        // entry still reserves its minimum one row of body height plus its
+        // header, matching the `.max(1)` in `agent_entry_height_in_body`.
+        assert_eq!(
+            agent_entry_height_in_body(&app, &entries[0], 40, None),
+            2,
+            "header row plus the reserved-but-blank agent row"
+        );
+
+        let area = Rect::new(0, 0, 24, 12);
+        let body = agent_panel_body_rect(area, false);
+        let mut terminal = Terminal::new(TestBackend::new(24, 12)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(row_text(buffer, body.y, body.width), " alpha");
+        assert_eq!(
+            row_text(buffer, body.y + 1, body.width).trim(),
+            "",
+            "the reserved agent row draws nothing when every token is unresolved"
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_numbering_is_unaffected_by_agent_grouping() {
+        let mut app = app_with_two_grouped_workspaces();
+        // Collapsed mode has no header affordance, so this must render
+        // identically to `collapsed_sidebar_numbers_grouped_agents_by_list_position`
+        // even with grouping configured on.
+        app.sidebar_collapsed = true;
+
+        let area = Rect::new(0, 0, 4, 12);
+        let (_, _, detail_area) = collapsed_sidebar_sections(area);
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .expect("collapsed sidebar should render");
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(detail_area.x, detail_area.y)].symbol(), "1");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 1)].symbol(), "2");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 2)].symbol(), "3");
+        assert_eq!(buffer[(detail_area.x, detail_area.y + 3)].symbol(), "4");
     }
 
     #[test]

@@ -816,6 +816,19 @@
           ]
         },
         {
+          "key": "ui.sidebar.agents.group_by",
+          "type": "enum",
+          "default": "\"none\"",
+          "description": "Group expanded Agent sidebar entries under one header per contiguous workspace run. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
+          "values": ["none", "workspace"]
+        },
+        {
+          "key": "ui.sidebar.agents.grouped_rows",
+          "type": "list of token rows",
+          "default": "[[\"state_icon\", \"tab\", \"agent\"]]",
+          "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; a rows_by_agent override still wins."
+        },
+        {
           "key": "ui.sidebar.agents.row_gap",
           "type": "integer",
           "default": "0",

@@ -37,6 +37,18 @@ FORBIDDEN_CALLS = (
 )
 
 
+SIDEBAR_SOURCE = PROJECT_ROOT / "src" / "ui" / "sidebar.rs"
+RENDER_AGENT_DETAIL_RE = re.compile(r"(?m)^fn render_agent_detail\s*\(")
+# The row-count floor is the fragment the two height computations shared before
+# they were unified; a reappearance in render_agent_detail means it recomputes
+# height itself again.
+INLINE_ENTRY_HEIGHT_RE = re.compile(r"\.\s*max\s*\(\s*1\s*\)")
+SHARED_ENTRY_HEIGHT_CALLS = (
+    "agent_entry_height_from_rows(",
+    "agent_entry_height_in_body(",
+)
+
+
 def blank_non_newlines(chars: list[str], start: int, end: int) -> None:
     for index in range(start, end):
         if chars[index] != "\n":
@@ -135,6 +147,21 @@ def production_code(source: str) -> str:
     return code
 
 
+def function_body(code: str, start: int) -> str:
+    depth = 0
+    index = code.index("{", start)
+    end = index
+    while end < len(code):
+        if code[end] == "{":
+            depth += 1
+        elif code[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[index : end + 1]
+        end += 1
+    raise AssertionError("unterminated function body")
+
+
 def find_violations(paths, rules) -> list[str]:
     violations: list[str] = []
     for path in paths:
@@ -168,6 +195,38 @@ class UiHotPathArchitectureTests(unittest.TestCase):
             "App/server code must use narrow terminal-state accessors:\n"
             + "\n".join(violations),
         )
+
+    def test_agent_entry_height_has_one_definition(self) -> None:
+        code = production_code(SIDEBAR_SOURCE.read_text(encoding="utf-8"))
+        render = RENDER_AGENT_DETAIL_RE.search(code)
+        self.assertIsNotNone(render, "render_agent_detail was renamed or removed")
+        body = function_body(code, render.start())
+
+        self.assertTrue(
+            any(call in body for call in SHARED_ENTRY_HEIGHT_CALLS),
+            "render_agent_detail must take entry heights from a shared height "
+            f"function (one of {SHARED_ENTRY_HEIGHT_CALLS})",
+        )
+        self.assertNotRegex(
+            body,
+            INLINE_ENTRY_HEIGHT_RE,
+            "render_agent_detail must not recompute entry height itself; the "
+            "hit-test and the scroll loops share agent_entry_height_from_rows "
+            "and the two must not drift",
+        )
+
+    def test_function_body_scanner_stops_at_the_closing_brace(self) -> None:
+        code = (
+            "fn render_agent_detail() {\n"
+            "    let a = if x { 1 } else { 2 };\n"
+            "    agent_entry_height_from_rows(rows.len(), h, b);\n"
+            "}\n"
+            "fn after() { rows.len().max(1) }\n"
+        )
+        body = function_body(code, RENDER_AGENT_DETAIL_RE.search(code).start())
+
+        self.assertIn("let a =", body)
+        self.assertNotRegex(body, INLINE_ENTRY_HEIGHT_RE)
 
     def test_scanner_ignores_non_production_references(self) -> None:
         source = '''

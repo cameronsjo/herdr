@@ -13,6 +13,7 @@ impl App {
     pub(crate) fn terminal_title_sidebar_changed(&self, changes: &TerminalTitleChanges) -> bool {
         let config = &self.state.sidebar_agents;
         std::iter::once(&config.rows)
+            .chain(std::iter::once(&config.grouped_rows))
             .chain(config.rows_by_agent.values())
             .flatten()
             .flatten()
@@ -213,6 +214,30 @@ mod tests {
             vec![vec![crate::config::AgentSidebarToken::TerminalTitle]],
         );
         assert!(app.terminal_title_sidebar_changed(&spinner_only));
+    }
+
+    #[test]
+    fn sidebar_redraws_for_a_title_token_that_only_appears_in_grouped_rows() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        // `rows` and `rows_by_agent` carry no title token at all; only
+        // `grouped_rows` does. `terminal_title_sidebar_changed` must still
+        // chain it, or a grouped panel would miss redraws for title changes.
+        app.state.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+        app.state.sidebar_agents.grouped_rows = vec![vec![
+            crate::config::AgentSidebarToken::TerminalTitleStripped,
+        ]];
+
+        let spinner_only = TerminalTitleChanges {
+            raw_changed: true,
+            ..TerminalTitleChanges::default()
+        };
+        assert!(!app.terminal_title_sidebar_changed(&spinner_only));
+        assert!(app.terminal_title_sidebar_changed(&TerminalTitleChanges {
+            stripped_changed: true,
+            ..TerminalTitleChanges::default()
+        }));
     }
 
     fn pane_updated_events(event_hub: &crate::api::EventHub) -> usize {

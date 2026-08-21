@@ -369,21 +369,42 @@ where
     Ok(rows_by_agent)
 }
 
+/// How the expanded Agent sidebar panel groups its entries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentGroupBy {
+    /// One self-describing entry per agent; no group headers.
+    #[default]
+    None,
+    /// Contiguous agents from the same workspace share one workspace header.
+    Workspace,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AgentsSidebarConfig {
     #[serde(deserialize_with = "deserialize_sidebar_rows")]
     pub rows: AgentSidebarRows,
+    #[serde(deserialize_with = "deserialize_sidebar_rows")]
+    pub grouped_rows: AgentSidebarRows,
     #[serde(default, deserialize_with = "deserialize_rows_by_agent")]
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
     pub row_gap: u16,
+    pub group_by: AgentGroupBy,
 }
 
 impl AgentsSidebarConfig {
-    pub(crate) fn rows_for_agent(&self, agent: Option<Agent>) -> &AgentSidebarRows {
+    /// Rows for one entry. A `rows_by_agent` override always wins; otherwise
+    /// grouping selects `grouped_rows` over `rows`. Grouping never edits a row
+    /// list — suppressing a token would drop the row entirely.
+    pub(crate) fn rows_for_agent(&self, agent: Option<Agent>, grouped: bool) -> &AgentSidebarRows {
         agent
             .and_then(|agent| self.rows_by_agent.get(crate::detect::agent_label(agent)))
-            .unwrap_or(&self.rows)
+            .unwrap_or(if grouped {
+                &self.grouped_rows
+            } else {
+                &self.rows
+            })
     }
 }
 
@@ -398,8 +419,14 @@ impl Default for AgentsSidebarConfig {
                 ],
                 vec![AgentSidebarToken::Agent],
             ],
+            grouped_rows: vec![vec![
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::Tab,
+                AgentSidebarToken::Agent,
+            ]],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
+            group_by: AgentGroupBy::None,
         }
     }
 }
@@ -449,8 +476,17 @@ mod tests {
                 vec![AgentSidebarToken::Agent],
             ]
         );
+        assert_eq!(
+            config.agents.grouped_rows,
+            vec![vec![
+                AgentSidebarToken::StateIcon,
+                AgentSidebarToken::Tab,
+                AgentSidebarToken::Agent,
+            ]]
+        );
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);
+        assert_eq!(config.agents.group_by, AgentGroupBy::None);
         assert_eq!(
             config.spaces.rows,
             vec![
@@ -595,6 +631,57 @@ rows = [[{ token = "git_status", fg = "#ff00aa" }], [{ token = "$jj", bold = tru
         assert!(toml::from_str::<crate::config::Config>(&input).is_err());
 
         let input = format!("[ui.sidebar.agents.rows_by_agent]\nclaude = [{too_many_rows}]\n");
+        assert!(toml::from_str::<crate::config::Config>(&input).is_err());
+    }
+
+    #[test]
+    fn group_by_selects_grouped_rows_and_agent_overrides_win_in_both_modes() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+group_by = "workspace"
+rows = [["workspace"]]
+grouped_rows = [["agent"]]
+
+[ui.sidebar.agents.rows_by_agent]
+claude = [["pane"]]
+"#,
+        )
+        .expect("grouped sidebar config");
+        let agents = &config.ui.sidebar.agents;
+
+        assert_eq!(agents.group_by, AgentGroupBy::Workspace);
+        assert_eq!(
+            agents.rows_for_agent(None, false),
+            &vec![vec![AgentSidebarToken::Workspace]]
+        );
+        assert_eq!(
+            agents.rows_for_agent(None, true),
+            &vec![vec![AgentSidebarToken::Agent]]
+        );
+        for grouped in [false, true] {
+            assert_eq!(
+                agents.rows_for_agent(Some(Agent::Claude), grouped),
+                &vec![vec![AgentSidebarToken::Pane]],
+                "rows_by_agent must win with grouped = {grouped}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_group_by_values_and_oversized_grouped_rows() {
+        for value in ["workspaces", "spaces", "Workspace", "true"] {
+            let input = format!("[ui.sidebar.agents]\ngroup_by = \"{value}\"\n");
+            assert!(
+                toml::from_str::<crate::config::Config>(&input).is_err(),
+                "accepted group_by = {value:?}"
+            );
+        }
+
+        let too_many_rows = std::iter::repeat_n("[\"agent\"]", MAX_SIDEBAR_ROWS + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        let input = format!("[ui.sidebar.agents]\ngrouped_rows = [{too_many_rows}]\n");
         assert!(toml::from_str::<crate::config::Config>(&input).is_err());
     }
 

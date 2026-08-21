@@ -465,7 +465,9 @@ Sort fields are `workspace_order`, `tab_order`, `pane_order`, `attention`,
 stable, evaluated in order, and accept `asc` or `desc`. Missing values stay
 after present values. When `sort` is omitted, the existing
 `ui.agent_panel_sort` policy remains active. A custom sort temporarily replaces
-that policy without rewriting config.
+that policy without rewriting config. It also suspends
+`ui.sidebar.agents.group_by` workspace grouping while the view is active, since
+a custom sort can interleave workspaces under one header.
 
 `source` identifies the owner. Plugins use `plugin:<HERDR_PLUGIN_ID>`; Herdr
 rejects plugin-owned sets when that plugin is missing or disabled. Other callers
