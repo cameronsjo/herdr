@@ -3,22 +3,6 @@
 ## Unreleased
 
 ### Added
-- `ui.sidebar.agents.group_by = "workspace"` now draws one workspace header above each run of adjacent agents from that workspace, so the agent name gets nearly the whole panel width instead of the workspace name repeating on every row. Grouped entries use the new `ui.sidebar.agents.grouped_rows` layout; grouping applies only in grouped (space) panel order.
-- CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
-- Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore. (#2730, #2743)
-- Herdr now keeps the outer terminal window title in sync with the session through `ui.window_title`, so window managers and terminal tab bars show the active workspace and the host the panes actually run on. (#2627, thanks @dhh)
-- The desktop tab bar now has configurable right-aligned status entries for zoom state, hostname, date/time, literal text, and asynchronously refreshed command output.
-- Optional `keys.move_tab_previous` and `keys.move_tab_next` bindings now reorder the active tab in place, wrapping at either end. (#2561, thanks @dhh)
-- Optional `keys.resize_pane_left`, `keys.resize_pane_down`, `keys.resize_pane_up`, and `keys.resize_pane_right` bindings now resize the focused pane in one keystroke without entering resize mode. (#2558, thanks @dhh)
-- Windows clients can now use `herdr --remote` to attach to Herdr servers on Linux and macOS. (#2329)
-- Devin CLI, Cursor Agent CLI, MastraCode, Hermes Agent, and Grok CLI integrations now install and run natively on Windows.
-- Panes can now route normal right-click gestures to mouse-reporting applications through the pane menu, `herdr pane input`, `pane.input.set`, or the `pane split --right-click pane` launch option.
-- `ui.pane_outer_borders` can now keep or hide the outside edges of split-pane borders independently from internal dividers. (#2535, thanks @dhh)
-- `theme.custom.sidebar_bg` can now give the desktop sidebar its own background without changing built-in theme defaults.
-- Settings and `ui.status_indicators = "symbols"` can now use distinct static shapes for blocked, working, done, idle, and unknown agent states. (#2260)
-- Navigate-mode selection rows now use a dedicated per-theme cursor color, customizable via `theme.custom.selection_bg`, so the cursor stays distinguishable from the active Space and Agent highlight.
-- Copy mode now supports `B`, `E`, and `W` motions over whitespace-delimited big words. (#2270, thanks @jplew)
-- The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
 - Added a command palette on `prefix+/` listing every runnable action with its shortcut, filtered as you type and ranked so an exact command name outranks a longer command containing it.
 - Added palette commands to move the focused pane to an existing space, a new space, or a new tab. Choosing an existing space opens the session navigator as a destination picker offering a new space, each space as a new tab there, or each tab to split into, with the selected row's effect shown above the footer.
 - `herdr tab move` now moves a tab within its space (`--index`), to another space (`--workspace`), or to a space created for it (`--new-workspace`).
@@ -27,6 +11,36 @@
 - The command palette now lists every enabled plugin's actions and panes, invoking the existing `plugin.action.invoke` / `plugin.pane.open` API paths on selection. Entries are filtered by declared context (pane-scoped actions only show with a focused pane) and by platform support.
 - The command palette now also runs the tab-reorder and one-keystroke pane-resize commands, so they are reachable without binding `keys.move_tab_previous`, `keys.move_tab_next`, or the four `keys.resize_pane_*` keys.
 - The command palette now matches "split vertical" and "split horizontal" against the pane context menu's "Split right"/"Split down" wording and "new pane", so a query using either vocabulary finds the same split actions. Keyword matches always rank below a direct name match.
+- `herdr --skill --install <dir>` writes the bundled Herdr skill and its reference files into a directory instead of printing it, so agents can install the skill without a second tool.
+- `ui.sidebar.agents.group_by = "workspace"` now draws one workspace header above each run of adjacent agents from that workspace, so the agent name gets nearly the whole panel width instead of the workspace name repeating on every row. Grouped entries use the new `ui.sidebar.agents.grouped_rows` layout; grouping applies only in grouped (space) panel order.
+
+### Fixed
+- Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
+- Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
+- Windows panes now keep bare `cursor-agent` launches detected after Cursor hands off to its bundled Node process. (#3032)
+- Oversized Kitty images no longer prevent smaller images shown later in the same pane from rendering. (#3033)
+- Claude Code panes now use visible turn, background shell, and background agent activity as working-state fallbacks when OSC titles are unavailable or disabled. (#1630, #2241)
+- Tab bar status commands now remove ESC-prefixed terminal control sequences instead of displaying their sequence bodies as text. (#3001)
+- Unix plugin pane commands now default `PWD` to their resolved working directory, so direct popup tools open at explicit `--cwd` paths while preserving caller-provided `PWD` values. (#2984)
+
+## [0.8.2] - 2026-08-19
+
+### Added
+- CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
+- Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore. (#2730, #2743)
+- Herdr now keeps the outer terminal window title in sync with the session through `ui.window_title`, so window managers and terminal tab bars show the active workspace and the host the panes actually run on. (#2627, thanks @dhh)
+- The desktop tab bar now has configurable right-aligned status entries for zoom state, hostname, date/time, literal text, and asynchronously refreshed command output.
+- Optional `keys.move_tab_previous` and `keys.move_tab_next` bindings now reorder the active tab in place, wrapping at either end. (#2561, thanks @dhh)
+- Optional `keys.resize_pane_left`, `keys.resize_pane_down`, `keys.resize_pane_up`, and `keys.resize_pane_right` bindings now resize the focused pane in one keystroke without entering resize mode. (#2558, thanks @dhh)
+- Windows clients can now use `herdr --remote` to attach to Herdr servers on Linux and macOS. (#2329)
+- Cursor Agent CLI, MastraCode, Hermes Agent, and Grok CLI integrations now install and run natively on Windows.
+- Panes can now route normal right-click gestures to mouse-reporting applications through the pane menu, `herdr pane input`, `pane.input.set`, or the `pane split --right-click pane` launch option.
+- `ui.pane_outer_borders` can now keep or hide the outside edges of split-pane borders independently from internal dividers. (#2535, thanks @dhh)
+- `theme.custom.sidebar_bg` can now give the desktop sidebar its own background without changing built-in theme defaults.
+- Settings and `ui.status_indicators = "symbols"` can now use distinct static shapes for blocked, working, done, idle, and unknown agent states. (#2260)
+- Navigate-mode selection rows now use a dedicated per-theme cursor color, customizable via `theme.custom.selection_bg`, so the cursor stays distinguishable from the active Space and Agent highlight.
+- Copy mode now supports `B`, `E`, and `W` motions over whitespace-delimited big words. (#2270, thanks @jplew)
+- The plugin marketplace now discovers valid manifests at repository roots and subdirectories, groups multiple plugins under each repository, and publishes their versions and exact default-branch commits.
 
 ### Changed
 - Windows support is now generally available through stable releases and uses the stable update channel by default. Existing preview installs stay on preview until explicitly switched.
@@ -35,9 +49,10 @@
 - Experimental pane graphics now support bounded named layers, acknowledged full-RGBA primary-layer direct file frames on audited local terminals, owned BGRA fallback, exact pixel mouse input, and placement-only resize replay.
 
 ### Fixed
-- Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
-- Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
-- High-rate output from many hidden panes no longer floods the server loop with redundant wakeups, and terminal input-mode synchronization no longer formats pane scrollback to read one keyboard flag.
+- Live handoff now preserves mouse forwarding for running pane applications. (#3000, thanks @xkrogen)
+- Unix CLI commands now exit quietly when a downstream pipe closes instead of panicking with exit 101. (#2994)
+- The terminal theme now keeps the active Space row fill visible when the Navigate cursor lands on it, in both expanded and collapsed sidebars. (#2987)
+- Busy multi-pane sessions now avoid redundant hidden-pane wakeups and full terminal-state formatting in pane-scaled paths, preventing CPU regressions from high-rate background output, scrollbars, and enhanced keyboard modes. (#2550, #2901, #2962)
 - Chinese IME commits now reach panes on macOS when the focused application requests printable key-release events. (#2924)
 - Windows now recognizes `Ctrl+1` through `Ctrl+9` keybindings instead of decoding those key records as control characters. (#2910)
 - PowerShell panes now keep their process-reported working directory synchronized with the shell's logical location. (#2879, thanks @Pimpmuckl)
