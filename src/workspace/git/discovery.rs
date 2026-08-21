@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::label::sanitize_label;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSpaceMetadata {
     pub key: String,
@@ -24,6 +26,14 @@ pub fn derive_label_from_cwd(cwd: &Path) -> String {
         .unwrap_or_else(|| fallback_label_from_cwd(cwd))
 }
 
+/// Automatic label for a non-repository directory.
+///
+/// The path component is attacker-influenced — a checked-out repository names
+/// its own directory — so it goes through [`sanitize_label`] like every label a
+/// setter accepts. Without it, an auto-named workspace would reach the sidebar
+/// unfiltered and uncapped. Sanitizing runs before the emptiness guard, so a
+/// name made entirely of stripped characters still falls through to the next
+/// arm instead of producing a blank label.
 pub fn fallback_label_from_cwd(cwd: &Path) -> String {
     if let Ok(home) = std::env::var("HOME") {
         let home = Path::new(&home);
@@ -34,9 +44,9 @@ pub fn fallback_label_from_cwd(cwd: &Path) -> String {
 
     cwd.file_name()
         .and_then(|n| n.to_str())
+        .map(sanitize_label)
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| cwd.display().to_string())
+        .unwrap_or_else(|| sanitize_label(cwd.display().to_string()))
 }
 
 pub fn git_worktree_info(cwd: &Path) -> Option<GitWorktreeInfo> {
@@ -60,11 +70,18 @@ pub fn git_space_metadata(cwd: &Path) -> Option<GitSpaceMetadata> {
     Some(git_space_metadata_from_info(&info))
 }
 
+/// Automatic label for a repository checkout — the branch that runs for any
+/// Git workspace, so the common one.
+///
+/// Sanitized for the same reason as [`fallback_label_from_cwd`]; the fallback
+/// arm sanitizes itself, so only the repo-name arm needs it here. A repo name
+/// that sanitizes to nothing falls through to the fallback arm.
 pub(crate) fn automatic_workspace_label(cwd: &Path, repo_root: &Path) -> String {
     repo_root
         .file_name()
         .and_then(|name| name.to_str())
-        .map(str::to_string)
+        .map(sanitize_label)
+        .filter(|label| !label.is_empty())
         .unwrap_or_else(|| fallback_label_from_cwd(cwd))
 }
 
@@ -84,11 +101,14 @@ pub(super) fn git_space_metadata_from_info(info: &GitWorktreeInfo) -> GitSpaceMe
         Some(".bare") => embedded_bare_repo_container(info).unwrap_or(&info.git_common_dir),
         _ => &info.git_common_dir,
     };
+    // Same attacker-influenced path component as the workspace label, and it
+    // is used as the worktree-group label and echoed over the API.
     let repo_name = label_path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("repo")
-        .to_string();
+        .map(sanitize_label)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "repo".to_string());
     GitSpaceMetadata {
         key,
         checkout_key,
@@ -411,6 +431,72 @@ mod tests {
         assert!(!metadata.is_linked_worktree);
 
         std::fs::remove_dir_all(bare).unwrap();
+    }
+
+    #[test]
+    fn cwd_derived_labels_go_through_the_same_sanitizer_as_the_setters() {
+        // A checked-out repository names its own directory, so both derivation
+        // arms take an attacker-influenced path component. Before this was
+        // filtered, an auto-named workspace was the one label path reaching the
+        // sidebar unfiltered — the bidi override below is zero-width, so it
+        // survives display-width truncation intact.
+        let base = temp_test_dir("cwd-label-sanitize");
+        let hostile = base.join("safe\u{202e}gnp.exe");
+        std::fs::create_dir_all(&hostile).unwrap();
+
+        assert_eq!(fallback_label_from_cwd(&hostile), "safegnp.exe");
+        assert_eq!(automatic_workspace_label(&hostile, &hostile), "safegnp.exe");
+
+        // The repo-name arm and the fallback arm are separate code paths, so
+        // pin the fallback reached through automatic_workspace_label too.
+        let rootless = Path::new("/");
+        assert_eq!(automatic_workspace_label(&hostile, rootless), "safegnp.exe");
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn cwd_derived_labels_are_length_capped() {
+        // Neither derivation arm touches the filesystem, so the path stays
+        // virtual: a 200-char component under a real temp dir would cross the
+        // Windows MAX_PATH limit.
+        let long = Path::new("/tmp/herdr-cap").join("z".repeat(200));
+
+        let cap = crate::label::MAX_LABEL_CHARS;
+        let fallback = fallback_label_from_cwd(&long);
+        assert_eq!(fallback.chars().count(), cap);
+        assert!(fallback.chars().all(|c| c == 'z'));
+        let automatic = automatic_workspace_label(&long, &long);
+        assert_eq!(automatic.chars().count(), cap);
+        assert!(automatic.chars().all(|c| c == 'z'));
+    }
+
+    #[test]
+    fn all_invisible_names_fall_through_instead_of_going_blank() {
+        // A name made only of format characters sanitizes to nothing. The
+        // emptiness guard runs after sanitizing, so each arm falls through to
+        // the next one rather than labelling the workspace with an empty string.
+        let parent = Path::new("/tmp/herdr-visible");
+        let invisible = parent.join("\u{200b}\u{202e}");
+
+        let fallback = fallback_label_from_cwd(&invisible);
+        assert!(!fallback.is_empty());
+        assert!(fallback.starts_with("/tmp/herdr-visible"));
+
+        // Repo-name arm empty → fallback arm, which here has a visible cwd.
+        assert_eq!(
+            automatic_workspace_label(parent, &invisible),
+            "herdr-visible"
+        );
+
+        let info = GitWorktreeInfo {
+            repo_root: invisible.clone(),
+            git_common_dir: invisible.join(".git"),
+            git_dir: invisible.join(".git"),
+            is_bare: false,
+            is_linked_worktree: false,
+        };
+        assert_eq!(git_space_metadata_from_info(&info).repo_name, "repo");
     }
 
     #[test]
