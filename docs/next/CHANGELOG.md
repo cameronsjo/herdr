@@ -15,6 +15,7 @@
 - `ui.sidebar.agents.group_by = "workspace"` now draws one workspace header above each run of adjacent agents from that workspace, so the agent name gets nearly the whole panel width instead of the workspace name repeating on every row. Grouped entries use the new `ui.sidebar.agents.grouped_rows` layout; grouping applies only in grouped (space) panel order.
 
 ### Fixed
+- Grouped workspace headers in the agents sidebar no longer take the focused agent's row highlight. The header labels a whole run, so highlighting it marked two rows for one focused agent — and only ever for the run's first agent, since a header is drawn by the entry above it. Clicking a header still focuses the run's first agent.
 - Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
 - Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
 - Windows panes now keep bare `cursor-agent` launches detected after Cursor hands off to its bundled Node process. (#3032)
