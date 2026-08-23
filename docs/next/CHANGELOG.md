@@ -13,14 +13,24 @@
 - The command palette now matches "split vertical" and "split horizontal" against the pane context menu's "Split right"/"Split down" wording and "new pane", so a query using either vocabulary finds the same split actions. Keyword matches always rank below a direct name match.
 - `herdr --skill --install <dir>` writes the bundled Herdr skill and its reference files into a directory instead of printing it, so agents can install the skill without a second tool.
 - `ui.sidebar.agents.group_by = "workspace"` now draws one workspace header above each run of adjacent agents from that workspace, so the agent name gets nearly the whole panel width instead of the workspace name repeating on every row. Grouped entries use the new `ui.sidebar.agents.grouped_rows` layout; grouping applies only in grouped (space) panel order.
+- Custom themes can now define separate light and dark color overrides when automatic theme switching is enabled. (#837, thanks @aneym)
 
 ### Fixed
 - Grouped workspace headers in the agents sidebar no longer take the focused agent's row highlight. The header labels a whole run, so highlighting it marked two rows for one focused agent — and only ever for the run's first agent, since a header is drawn by the entry above it. Clicking a header still focuses the run's first agent.
 - Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
 - Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
+- New lifecycle event subscriptions now stream only events emitted after subscription begins instead of replaying retained history. (#1270)
+- Windows users whose endpoint security blocks the fileless PowerShell install command can now use a local `install.cmd` bootstrap; installer downloads use `curl.exe` while preserving package checksum verification. (#2751)
+- Oh My Pi panes now stay working when a turn ends with an automatic continuation already scheduled, instead of briefly reporting idle and completing `agent wait` early. (#2851, thanks @taoeffect)
+- Retained mouse selections now copy when Ctrl+C or Cmd+C arrives before a delayed mouse release instead of forwarding the copy shortcut to the pane. (#3100, thanks @moret)
+- Removing a background worktree workspace no longer changes focus to its parent workspace. (#3098)
+- Prefix bindings such as `prefix+|` now recognize characters produced by macOS Option and custom keyboard layouts, while exact chords such as `prefix+alt+w` keep priority. (#3079, thanks @vlcinsky)
+- Direct terminal attaches now preserve multiline pastes as one paste instead of submitting each line separately. (#3054)
+- Windows clients now preserve layout-generated text for Shift-only keys, so characters such as `/` on German keyboards reach shell panes and pasted input. (#3045)
 - Windows panes now keep bare `cursor-agent` launches detected after Cursor hands off to its bundled Node process. (#3032)
 - Oversized Kitty images no longer prevent smaller images shown later in the same pane from rendering. (#3033)
 - Claude Code panes now use visible turn, background shell, and background agent activity as working-state fallbacks when OSC titles are unavailable or disabled. (#1630, #2241)
+- Claude Code panes now remain working while MCP tasks continue in the background after a turn ends. (#3090)
 - Tab bar status commands now remove ESC-prefixed terminal control sequences instead of displaying their sequence bodies as text. (#3001)
 - Unix plugin pane commands now default `PWD` to their resolved working directory, so direct popup tools open at explicit `--cwd` paths while preserving caller-provided `PWD` values. (#2984)
 
