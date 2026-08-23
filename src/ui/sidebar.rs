@@ -1617,9 +1617,12 @@ fn render_agent_detail(
         let state_icon = state_icon(detail.state, detail.seen, app.status_indicators, p);
 
         if header_rows == 1 {
-            // The header belongs to the entry that draws it — the hit-test
-            // routes a click on it to this entry — so it carries the same
-            // active-row highlight as the agent rows under it.
+            // The header labels the whole run, so it never carries the
+            // active-row highlight — even though the entry drawing it may be
+            // the focused pane. Doing so would mark two rows for one focused
+            // agent, and only ever for the run's *first* agent, since a later
+            // agent in the run draws no header of its own. The hit-test still
+            // routes a click here to the run's first agent; that is unchanged.
             let width = body.width.saturating_sub(1) as usize;
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
@@ -1628,8 +1631,7 @@ fn render_agent_detail(
                         truncate_end(&detail.primary_label, width),
                         Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD),
                     ),
-                ]))
-                .style(row_style),
+                ])),
                 Rect::new(body.x, row_y, body.width, 1),
             );
         }
@@ -2450,6 +2452,46 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(agent_entry_gap(&app, &entries, 1), 1, "alpha to beta");
         assert_eq!(agent_entry_gap(&app, &entries, 2), 0, "inside the beta run");
         assert_eq!(agent_entry_gap(&app, &entries, 3), 0, "last entry");
+    }
+
+    #[test]
+    fn grouped_workspace_header_stays_plain_under_the_focused_agent() {
+        let mut app = app_with_two_grouped_workspaces();
+        // The fixture leaves `active: None`, which would make every pane
+        // inactive and pass the "header is plain" half vacuously.
+        app.active = Some(0);
+        let first_pane = app.workspaces[0].tabs[0].root_pane;
+        app.workspaces[0].tabs[0].layout.focus_pane(first_pane);
+        assert!(app.is_active_pane(0, 0, first_pane));
+
+        let area = Rect::new(0, 0, 24, 12);
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_agent_detail(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let row_bgs = |y: u16| -> Vec<Option<ratatui::style::Color>> {
+            (body.x..body.x + body.width)
+                .map(|x| buffer[(x, y)].style().bg)
+                .collect()
+        };
+
+        // Body row 0 is the "alpha" header; row 1 is its first agent row.
+        assert!(
+            row_bgs(body.y + 1)
+                .iter()
+                .all(|bg| *bg == Some(app.palette.active_row_bg)),
+            "the focused agent's own row carries the active highlight"
+        );
+        assert!(
+            row_bgs(body.y)
+                .iter()
+                .all(|bg| *bg != Some(app.palette.active_row_bg)),
+            "the workspace header labels the run, not the focused agent"
+        );
     }
 
     #[test]
