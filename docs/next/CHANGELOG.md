@@ -19,6 +19,7 @@
 - Grouped workspace headers in the agents sidebar no longer take the focused agent's row highlight. The header labels a whole run, so highlighting it marked two rows for one focused agent — and only ever for the run's first agent, since a header is drawn by the entry above it. Clicking a header still focuses the run's first agent.
 - Branch names in the sidebar and the open-worktree dialog, pane titles, display-agent and custom token metadata set through the API, and agent names restored from a session file now go through the same control- and format-character filter as renamed labels, so a branch or restored name carrying a bidi override or zero-width character can no longer reorder or duplicate adjacent text.
 - Automatic workspace names derived from a directory or repository name are now filtered and length-capped like renamed ones, so a checkout whose directory name carries a bidi override or zero-width character can no longer reorder or duplicate adjacent sidebar text.
+- Running named servers now activate remote agent-detection manifests downloaded by another server, preventing stale agent states and `agent explain` output until restart. (#2711)
 - New lifecycle event subscriptions now stream only events emitted after subscription begins instead of replaying retained history. (#1270)
 - Windows users whose endpoint security blocks the fileless PowerShell install command can now use a local `install.cmd` bootstrap; installer downloads use `curl.exe` while preserving package checksum verification. (#2751)
 - Oh My Pi panes now stay working when a turn ends with an automatic continuation already scheduled, instead of briefly reporting idle and completing `agent wait` early. (#2851, thanks @taoeffect)
@@ -29,10 +30,13 @@
 - Windows clients now preserve layout-generated text for Shift-only keys, so characters such as `/` on German keyboards reach shell panes and pasted input. (#3045)
 - Windows panes now keep bare `cursor-agent` launches detected after Cursor hands off to its bundled Node process. (#3032)
 - Oversized Kitty images no longer prevent smaller images shown later in the same pane from rendering. (#3033)
+- `herdr agent explain --file` now reports fixture read failures as structured JSON instead of exposing Rust I/O debug output. (#3022)
+- Wayland clipboard copies no longer freeze Herdr while `wl-copy` remains alive to serve the selection. (#3014)
 - Claude Code panes now use visible turn, background shell, and background agent activity as working-state fallbacks when OSC titles are unavailable or disabled. (#1630, #2241)
 - Claude Code panes now remain working while MCP tasks continue in the background after a turn ends. (#3090)
 - Tab bar status commands now remove ESC-prefixed terminal control sequences instead of displaying their sequence bodies as text. (#3001)
 - Unix plugin pane commands now default `PWD` to their resolved working directory, so direct popup tools open at explicit `--cwd` paths while preserving caller-provided `PWD` values. (#2984)
+- Plugin link handlers now receive matching OSC 8 `file://` clicks while unmatched file links remain excluded from the system URL opener. (#2941)
 
 ## [0.8.2] - 2026-08-19
 
