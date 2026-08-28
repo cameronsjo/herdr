@@ -190,6 +190,90 @@ fn codex_hook_reports_persisted_root_session_and_ignores_ephemeral_or_nested_ses
 }
 
 #[test]
+fn codex_hook_reports_lifecycle_states_from_matching_events() {
+    for (action, event, expected_state) in [
+        ("working", "UserPromptSubmit", "working"),
+        ("working", "PreToolUse", "working"),
+        ("working", "PostToolUse", "working"),
+        ("blocked", "PermissionRequest", "blocked"),
+        ("idle", "Stop", "idle"),
+    ] {
+        let payload = format!(
+            r#"{{"hook_event_name":"{event}","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl"}}"#
+        );
+        let request = run_codex_hook(action, &payload).expect("matching event should report state");
+
+        assert_eq!(request["method"], "pane.report_agent");
+        assert_eq!(request["params"]["source"], "herdr:codex");
+        assert_eq!(request["params"]["agent"], "codex");
+        assert_eq!(request["params"]["state"], expected_state);
+        assert_eq!(request["params"]["agent_session_id"], "codex-session");
+    }
+
+    assert!(run_codex_hook(
+        "idle",
+        r#"{"hook_event_name":"PreToolUse","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl"}"#,
+    )
+    .is_none());
+}
+
+#[test]
+fn codex_metadata_hook_prefers_app_server_thread_name() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let fake_codex = base.join("codex");
+    fs::write(
+        &fake_codex,
+        r#"#!/bin/sh
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{}}'
+IFS= read -r initialized
+IFS= read -r thread_read
+printf '%s\n' '{"method":"thread/status/changed","params":{}}'
+printf '%s\n' '{"id":2,"result":{"thread":{"name":"Improve Codex-herdr integration","preview":"ignored preview"}}}'
+"#,
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&fake_codex).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_codex, permissions).unwrap();
+
+    let request = run_shell_hook_with_env(
+        "src/integration/assets/codex/herdr-agent-state.sh",
+        &["metadata"],
+        r#"{"hook_event_name":"SessionStart","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl"}"#,
+        &[("HERDR_CODEX_BIN_PATH", fake_codex.to_str().unwrap())],
+    )
+    .expect("metadata hook should report the app-server thread name");
+
+    assert_eq!(request["method"], "pane.report_metadata");
+    assert_eq!(request["params"]["source"], "herdr:codex");
+    assert_eq!(request["params"]["agent"], "codex");
+    assert_eq!(
+        request["params"]["title"],
+        "Improve Codex-herdr integration"
+    );
+    assert!(request["params"].get("applies_to_source").is_none());
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn codex_metadata_hook_falls_back_to_normalized_prompt() {
+    let request = run_shell_hook_with_env(
+        "src/integration/assets/codex/herdr-agent-state.sh",
+        &["metadata"],
+        r#"{"hook_event_name":"UserPromptSubmit","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl","prompt":"[Image #1]   Fix   the sidebar title"}"#,
+        &[("HERDR_CODEX_BIN_PATH", "/missing/herdr-test-codex")],
+    )
+    .expect("metadata hook should use the submitted prompt as a fallback");
+
+    assert_eq!(request["method"], "pane.report_metadata");
+    assert_eq!(request["params"]["title"], "Fix the sidebar title");
+}
+
+#[test]
 fn copilot_hook_reports_session_id_from_stdin() {
     let request = run_copilot_hook(
         r#"{"hook_event_name":"SessionStart","session_id":"copilot-session","source":"resume"}"#,
