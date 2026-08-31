@@ -93,11 +93,20 @@ impl<'de> Deserialize<'de> for SidebarTokenColor {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarTokenAlignment {
+    #[default]
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SidebarTokenStyle {
     pub fg: Option<SidebarTokenColor>,
     pub bold: Option<bool>,
     pub dim: Option<bool>,
+    pub align: Option<SidebarTokenAlignment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +168,8 @@ struct RawStyledSidebarToken {
     bold: Option<bool>,
     #[serde(default)]
     dim: Option<bool>,
+    #[serde(default)]
+    align: Option<SidebarTokenAlignment>,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +189,7 @@ impl RawSidebarToken {
                     fg: token.fg,
                     bold: token.bold,
                     dim: token.dim,
+                    align: token.align,
                 }),
             ),
         }
@@ -226,6 +238,9 @@ where
     }
     if let Some(dim) = style.dim {
         map.serialize_entry("dim", &dim)?;
+    }
+    if let Some(align) = style.align {
+        map.serialize_entry("align", &align)?;
     }
     map.end()
 }
@@ -554,7 +569,7 @@ row_gap = 3
         let config: crate::config::Config = toml::from_str(
             r##"
 [ui.sidebar.agents]
-rows = [[{ token = "workspace", fg = "#abc", bold = false }, "workspace"], [{ token = "$summary", dim = false }]]
+rows = [[{ token = "workspace", fg = "#abc", bold = false }, "workspace"], [{ token = "$summary", dim = false, align = "right" }]]
 
 [ui.sidebar.agents.rows_by_agent]
 claude = [[{ token = "agent", fg = "#112233", bold = true, dim = false }]]
@@ -588,6 +603,10 @@ rows = [[{ token = "git_status", fg = "#ff00aa" }], [{ token = "$jj", bold = tru
             style.fg.unwrap().ratatui(),
             ratatui::style::Color::Rgb(0xff, 0x00, 0xaa)
         );
+        let (token, style) = config.ui.sidebar.agents.rows[1][0].parts();
+        assert_eq!(token, &AgentSidebarToken::Custom("summary".into()));
+        assert_eq!(style.align, Some(SidebarTokenAlignment::Right));
+
         let (token, style) = config.ui.sidebar.spaces.rows[1][0].parts();
         assert_eq!(token, &SpaceSidebarToken::Custom("jj".into()));
         assert_eq!(style.bold, Some(true));
@@ -599,6 +618,7 @@ rows = [[{ token = "git_status", fg = "#ff00aa" }], [{ token = "$jj", bold = tru
             r##"{ token = "workspace", fg = "red" }"##,
             r##"{ token = "workspace", fg = "#abcd" }"##,
             r##"{ token = "workspace", underline = true }"##,
+            r##"{ token = "workspace", align = "center" }"##,
         ] {
             let input = format!("[ui.sidebar.agents]\nrows = [[{entry}]]\n");
             assert!(

@@ -14,7 +14,7 @@ use super::status::{state_icon, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
 use crate::app::state::{AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
-use crate::config::AgentGroupBy;
+use crate::config::{AgentGroupBy, SidebarTokenAlignment};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
 
@@ -1190,6 +1190,18 @@ fn resolved_token_spans(
     let mut remaining = max_width
         .saturating_sub(separator_width + fixed_width)
         .saturating_sub(minimum);
+    let right_start = visible_indices
+        .iter()
+        .position(|index| resolved[*index].style.align == Some(SidebarTokenAlignment::Right));
+    if let Some(right_start) = right_start {
+        for index in &visible_indices[right_start..] {
+            let budget = &mut budgets[*index];
+            let width = flexible_widths[*index];
+            let growth = width.saturating_sub(*budget).min(remaining);
+            *budget += growth;
+            remaining -= growth;
+        }
+    }
     while remaining > 0 {
         let mut grew = false;
         for (budget, width) in budgets.iter_mut().zip(&flexible_widths) {
@@ -1206,16 +1218,43 @@ fn resolved_token_spans(
             break;
         }
     }
+    let right_width = right_start.map(|right_start| {
+        let indices = &visible_indices[right_start..];
+        let content = indices
+            .iter()
+            .map(|index| fixed_widths[*index] + budgets[*index])
+            .sum::<usize>();
+        let separators = indices
+            .windows(2)
+            .map(|pair| display_width(tokens::separator(&resolved[pair[0]], &resolved[pair[1]])))
+            .sum::<usize>();
+        content + separators
+    });
+    let mut rendered_width = 0;
     let mut spans = Vec::new();
     for (position, index) in visible_indices.iter().copied().enumerate() {
         let token = &resolved[index];
+        if right_start == Some(position) {
+            let separator = (position > 0)
+                .then(|| tokens::separator(&resolved[visible_indices[position - 1]], token));
+            let separator_width = separator.map_or(0, display_width);
+            let padding = max_width
+                .saturating_sub(rendered_width + separator_width + right_width.unwrap_or(0));
+            if padding > 0 {
+                spans.push(Span::raw(" ".repeat(padding)));
+                rendered_width += padding;
+            }
+        }
         if position > 0 {
             let previous = &resolved[visible_indices[position - 1]];
+            let separator = tokens::separator(previous, token);
+            rendered_width += display_width(separator);
             spans.push(Span::styled(
-                tokens::separator(previous, token),
+                separator,
                 Style::default().fg(p.overlay0).add_modifier(Modifier::DIM),
             ));
         }
+        rendered_width += fixed_widths[index] + budgets[index];
         match &token.kind {
             ResolvedTokenKind::StateIcon => {
                 spans.push(Span::styled(
@@ -2115,6 +2154,39 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(metrics.max_offset_from_bottom, 0);
         assert_eq!(row_text(buffer, body.y, body.width), " pi");
         assert_eq!(row_text(buffer, body.y + 1, body.width), " claude");
+    }
+
+    #[test]
+    fn right_aligned_token_stays_at_the_row_edge() {
+        let app = crate::app::state::AppState::test_new();
+        let resolved = vec![
+            ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("a very long title".into())),
+            ResolvedToken {
+                kind: ResolvedTokenKind::StateText("idle".into()),
+                style: crate::config::SidebarTokenStyle {
+                    align: Some(SidebarTokenAlignment::Right),
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let spans = resolved_token_spans(
+            &resolved,
+            ("○", Style::default()),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            &app.palette,
+            20,
+        );
+        let rendered = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.ends_with("idle"));
+        assert_eq!(display_width(&rendered), 20);
     }
 
     #[test]
