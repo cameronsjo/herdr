@@ -534,7 +534,16 @@ mod tests {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
         )
         .unwrap();
+        let loose_ref = refs_dir.join("main");
         std::fs::set_permissions(&refs_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Root can bypass the permission restriction, so this environment
+        // cannot exercise the metadata-error path the test covers.
+        if std::fs::File::open(&loose_ref).is_ok() {
+            std::fs::set_permissions(&refs_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            return;
+        }
 
         let oid = read_ref_oid(&root, "refs/heads/main");
         std::fs::set_permissions(&refs_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
