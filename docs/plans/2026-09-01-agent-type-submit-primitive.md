@@ -27,8 +27,14 @@ The command stays generic: it does not know about `/compact`, `/journal`, or nam
 
 ## Implementation checklist
 
-- [ ] Add the API schema and CLI dispatch for `agent type-submit`.
-- [ ] Add an app handler that resolves agent targets and sends the encoded text plus Enter.
-- [ ] Add behavior tests for success and pre-write validation/refusal paths.
-- [ ] Update Herdr docs for the new primitive.
+- [x] Add the API schema and CLI dispatch for `agent type-submit`.
+- [x] Add an app handler that resolves agent targets and sends the encoded text plus Enter.
+- [x] Add behavior tests for success and pre-write validation/refusal paths.
+- [x] Update Herdr docs for the new primitive.
 - [ ] Run focused tests, then the agreed broader validation.
+
+## Validation notes
+
+- `PATH="$HOME/.cargo/bin:$PATH" cargo fmt` completed successfully.
+- `lsp_diagnostics` over the edited Rust files reported zero primary LSP diagnostics.
+- `PATH="$HOME/.cargo/bin:$PATH" SDKROOT="$(xcrun --show-sdk-path)" ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" cargo test agent_type_submit --no-fail-fast` is blocked before tests run by the vendored libghostty-vt Zig build: undefined macOS symbols including `__availability_version_check`, `_abort`, and `_arc4random_buf`.

@@ -67,9 +67,10 @@ herdr agent rename w1:p2 reviewer
 | 在现有窗格中启动受支持的智能体 | `agent start` |
 | 提交提示,并可选择等待 | `agent prompt` |
 | 向智能体交互界面发送按键 | `agent send-keys` |
+| 输入并提交智能体 UI 命令 | `agent type-submit` |
 | 等待智能体生命周期状态 | `agent wait` |
 
-`agent prompt` 会先发送文本,短暂延迟后再发送编码后的 Enter,并遵循终端当前的 bracketed paste 模式。即使智能体正在 working 也可以提交。如果智能体已经是 `blocked`,它不会发送任何终端输入,而是返回 `agent_blocked`;请先检查对话框,再用 `agent send-keys` 明确作出响应。使用 `agent send-keys` 进行 `esc`、`up`、`enter`、`ctrl+c` 等交互;`escape` 也是 `esc` 的别名。只有在明确需要原始终端控制时才使用窗格输入命令。
+`agent prompt` 会先发送文本,短暂延迟后再发送编码后的 Enter,并遵循终端当前的 bracketed paste 模式。即使智能体正在 working 也可以提交。如果智能体已经是 `blocked`,它不会发送任何终端输入,而是返回 `agent_blocked`;请先检查对话框,再用 `agent send-keys` 明确作出响应。对于必须输入到智能体 UI 而不是作为模型提示发送的斜杠命令或其他 harness 命令,使用 `agent type-submit`。使用 `agent send-keys` 进行 `esc`、`up`、`enter`、`ctrl+c` 等交互;`escape` 也是 `esc` 的别名。只有在明确需要原始终端控制时才使用窗格输入命令。
 
 窗格输入直接指定终端,不关心当前进程。智能体输入会解析实时智能体;如果该智能体已不再控制此窗格,操作会被拒绝。
 

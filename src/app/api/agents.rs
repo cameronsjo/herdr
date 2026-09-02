@@ -4,7 +4,7 @@ use bytes::Bytes;
 
 use crate::api::schema::{
     AgentPromptParams, AgentRenameParams, AgentSendKeysParams, AgentStartParams, AgentTarget,
-    PaneReadResult, ResponseResult,
+    AgentTypeSubmitParams, PaneReadResult, ResponseResult,
 };
 use crate::app::App;
 
@@ -286,6 +286,62 @@ impl App {
 
         encode_success(id, ResponseResult::Ok {})
     }
+
+    pub(super) fn handle_agent_type_submit(
+        &mut self,
+        id: String,
+        params: AgentTypeSubmitParams,
+    ) -> String {
+        if params.text.is_empty() {
+            return encode_error(
+                id,
+                "empty_agent_type_submit",
+                "agent type-submit text must not be empty",
+            );
+        }
+        if let Err(ch) = super::super::api_helpers::validate_api_text(&params.text) {
+            return encode_error(
+                id,
+                "invalid_agent_type_submit_text",
+                format!(
+                    "agent type-submit text contains unsupported control character U+{:04X}",
+                    ch as u32
+                ),
+            );
+        }
+        let resolved = match self.resolve_agent_target(&params.target) {
+            Ok(resolved) => resolved,
+            Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
+        };
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(resolved.ws_idx)
+            .and_then(|workspace| workspace.terminal_id(resolved.pane_id))
+        else {
+            return agent_not_found(id, &params.target);
+        };
+        let Some(expected_agent) = self
+            .state
+            .terminals
+            .get(terminal_id)
+            .and_then(|terminal| terminal.effective_known_agent())
+        else {
+            return agent_not_ready(id, &params.target);
+        };
+        let Some(runtime) = self.lookup_runtime_sender(resolved.ws_idx, resolved.pane_id) else {
+            return agent_not_found(id, &params.target);
+        };
+        if !super::super::agents::runtime_hosts_agent(runtime, expected_agent) {
+            return agent_not_ready(id, &params.target);
+        }
+        let bytes = super::super::api_helpers::encode_api_submission(runtime, &params.text);
+        if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
+            return encode_error(id, "agent_type_submit_failed", err.to_string());
+        }
+
+        encode_success(id, ResponseResult::Ok {})
+    }
 }
 
 fn agent_not_ready(id: String, target: &str) -> String {
@@ -529,6 +585,57 @@ mod tests {
         let success: SuccessResponse = serde_json::from_str(&sent).unwrap();
         assert!(matches!(success.result, ResponseResult::Ok {}));
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[A\r"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_type_submit_sends_text_and_enter_together() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+
+        let sent = app.handle_agent_type_submit(
+            "req-submit".into(),
+            AgentTypeSubmitParams {
+                target: "reviewer".into(),
+                text: "/compact".into(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&sent).unwrap();
+        assert!(matches!(success.result, ResponseResult::Ok {}));
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"/compact\r"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_type_submit_validates_text_before_writing() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+
+        let rejected = app.handle_agent_type_submit(
+            "req-invalid".into(),
+            AgentTypeSubmitParams {
+                target: "reviewer".into(),
+                text: "type\nsecond command".into(),
+            },
+        );
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&rejected).unwrap();
+        assert_eq!(error.error.code, "invalid_agent_type_submit_text");
         assert!(rx.try_recv().is_err());
     }
 

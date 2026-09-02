@@ -67,9 +67,10 @@ herdr agent rename w1:p2 reviewer
 | 既存のペインで対応済みエージェントを起動する | `agent start` |
 | プロンプトを送信し、必要なら完了を待つ | `agent prompt` |
 | エージェントの対話 UI にキーを送る | `agent send-keys` |
+| エージェント UI コマンドを入力して送信する | `agent type-submit` |
 | エージェントのライフサイクル状態を待つ | `agent wait` |
 
-`agent prompt` はテキストを送信し、短い遅延の後にエンコード済み Enter を送信します。ターミナルの現在の bracketed paste モードを尊重します。working 中のエージェントにも送信できます。エージェントがすでに `blocked` の場合は、ターミナル入力を送信せずに `agent_blocked` を返します。ダイアログを確認し、意図した応答には `agent send-keys` を使ってください。`esc`、`up`、`enter`、`ctrl+c` のような操作には `agent send-keys` を使います。`escape` も `esc` のエイリアスとして使えます。意図的に生のターミナルを操作したい場合は、ペイン入力コマンドを使ってください。
+`agent prompt` はテキストを送信し、短い遅延の後にエンコード済み Enter を送信します。ターミナルの現在の bracketed paste モードを尊重します。working 中のエージェントにも送信できます。エージェントがすでに `blocked` の場合は、ターミナル入力を送信せずに `agent_blocked` を返します。ダイアログを確認し、意図した応答には `agent send-keys` を使ってください。モデルプロンプトではなくエージェント UI に入力する必要があるスラッシュコマンドやハーネスコマンドには `agent type-submit` を使います。`esc`、`up`、`enter`、`ctrl+c` のような操作には `agent send-keys` を使います。`escape` も `esc` のエイリアスとして使えます。意図的に生のターミナルを操作したい場合は、ペイン入力コマンドを使ってください。
 
 ペイン入力は、現在のプロセスに関係なくターミナルを指定します。エージェント入力はライブエージェントを解決し、そのエージェントがペインを制御しなくなっていれば操作を拒否します。
 
