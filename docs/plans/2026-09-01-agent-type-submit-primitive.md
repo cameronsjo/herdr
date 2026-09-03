@@ -31,7 +31,7 @@ The command stays generic: it does not know about `/compact`, `/journal`, or nam
 - [x] Add an app handler that resolves agent targets and sends the encoded text plus Enter.
 - [x] Add behavior tests for success and pre-write validation/refusal paths.
 - [x] Update Herdr docs for the new primitive.
-- [ ] Run focused tests, then the agreed broader validation.
+- [x] Run focused tests, then the agreed broader validation.
 
 ## Validation notes
 
@@ -41,3 +41,7 @@ The command stays generic: it does not know about `/compact`, `/journal`, or nam
 - A minimal Zig build reproduced the same failure under full Xcode 26.5 and passed with `DEVELOPER_DIR=/Library/Developer/CommandLineTools`, so the blocker is local Zig/Xcode SDK selection rather than this feature's code.
 - `PATH="$HOME/.cargo/bin:$PATH" SDKROOT="$(xcrun --show-sdk-path)" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" cargo test agent_type_submit --no-fail-fast` completed successfully: 2 matching tests passed.
 - `PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" mise x just aqua:nextest-rs/nextest/cargo-nextest -- just check` reached the suite and failed in `tests/live_handoff.rs`; the same `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` failure reproduced on base `master` at `6ef60c32`, so it is not caused by this branch.
+- `PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" HERDR_UPDATE_API_SCHEMA=1 mise x just aqua:nextest-rs/nextest/cargo-nextest -- just test-one generated_protocol_schema_artifact_is_current` regenerated the stale API schema artifact and passed.
+- `PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" mise x just aqua:nextest-rs/nextest/cargo-nextest -- just ci 'all() - binary(live_handoff)'` completed successfully.
+- `PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" mise x just aqua:nextest-rs/nextest/cargo-nextest -- just windows-lint` completed successfully as part of the remaining-checks bundle.
+- `export PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=tag.gpgSign GIT_CONFIG_VALUE_0=false && python3 -m unittest scripts.test_agent_detection_manifest_check scripts.test_changelog scripts.test_config_reference_check scripts.test_docs_translation_parity scripts.test_hermes_integration_asset scripts.test_package_windows_conpty scripts.test_preview scripts.test_unix_installer scripts.test_vendor_libghostty_vt scripts.test_vendor_portable_pty` completed successfully: 98 tests passed.
