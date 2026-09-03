@@ -330,16 +330,19 @@ fn move_palette_selection(state: &mut AppState, delta: i32) {
 }
 
 /// Enter on a filter matching nothing leaves the palette open.
-fn run_palette_selection(state: &mut AppState) -> Option<NavigateAction> {
-    let action = crate::ui::filtered_palette_commands(state)
+fn run_palette_selection(state: &mut AppState) -> Option<(String, NavigateAction)> {
+    let selection: (String, NavigateAction) = crate::ui::filtered_palette_commands(state)
         .get(state.command_palette.selected)
-        .map(|command| command.action)?;
+        .map(|command| (command.id.clone(), command.action))?;
     leave_modal(state);
-    Some(action)
+    Some(selection)
 }
 
 #[must_use]
-pub(crate) fn handle_palette_key(state: &mut AppState, key: TerminalKey) -> Option<NavigateAction> {
+pub(crate) fn handle_palette_key(
+    state: &mut AppState,
+    key: TerminalKey,
+) -> Option<(String, NavigateAction)> {
     let text_char = keybind_help_text_char(key.clone());
     match key.code {
         KeyCode::Esc => leave_modal(state),

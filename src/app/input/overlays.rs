@@ -193,12 +193,13 @@ impl App {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(index) = self.state.palette_row_at(mouse.column, mouse.row) {
                         self.state.command_palette.selected = index;
-                        let action = crate::ui::filtered_palette_commands(&self.state)
-                            .get(index)
-                            .map(|command| command.action);
-                        if let Some(action) = action {
+                        let selection: Option<(String, crate::app::NavigateAction)> =
+                            crate::ui::filtered_palette_commands(&self.state)
+                                .get(index)
+                                .map(|command| (command.id.clone(), command.action));
+                        if let Some((command_id, action)) = selection {
                             leave_modal(&mut self.state);
-                            self.run_overlay_action(action);
+                            self.run_palette_command(command_id, action);
                         }
                     } else {
                         let rect = self.state.palette_popup_rect();
@@ -862,6 +863,14 @@ mod tests {
         ));
 
         assert_eq!(app.state.mode, Mode::Settings);
+        assert_eq!(
+            app.state
+                .command_palette
+                .recent_command_ids
+                .first()
+                .map(String::as_str),
+            Some("core:settings")
+        );
     }
 
     #[test]

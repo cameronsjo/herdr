@@ -1447,6 +1447,7 @@ pub struct PaletteState {
     /// Index into the filtered command list; a match is always selected.
     pub selected: usize,
     pub scroll: u16,
+    pub recent_command_ids: Vec<String>,
 }
 
 /// A pane move that landed on an existing tab, waiting on the user to pick

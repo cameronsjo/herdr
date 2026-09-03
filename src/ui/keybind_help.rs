@@ -660,6 +660,23 @@ mod tests {
     }
 
     #[test]
+    fn every_palette_help_action_has_a_stable_id_except_the_self_action() {
+        let state = AppState::test_new();
+        for entry in keybind_help_groups(&state)
+            .into_iter()
+            .flat_map(|(_, entries)| entries)
+        {
+            let Some(action) = entry.action else {
+                continue;
+            };
+            assert!(
+                action == NavigateAction::OpenCommandPalette || action.palette_id().is_some(),
+                "palette action {action:?} needs a stable id"
+            );
+        }
+    }
+
+    #[test]
     fn help_action_kw_carries_the_given_keywords() {
         let entry = help_action_kw(
             "v",

@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -17,11 +17,33 @@ use super::widgets::{
 };
 use crate::app::{AppState, NavigateAction};
 
+const EMPTY_PALETTE_LIMIT: usize = 12;
+const FEATURED_COMMAND_IDS: [&str; EMPTY_PALETTE_LIMIT] = [
+    "core:new-workspace",
+    "core:new-worktree",
+    "core:open-worktree",
+    "core:new-tab",
+    "core:split-vertical",
+    "core:split-horizontal",
+    "core:move-pane-to-space",
+    "core:move-pane-to-new-tab",
+    "core:move-tab-to-space",
+    "core:zoom-pane",
+    "core:toggle-sidebar",
+    "core:settings",
+];
+
 pub(crate) struct PaletteCommand {
+    pub id: String,
     pub name: Cow<'static, str>,
     pub key: String,
     pub action: NavigateAction,
     pub keywords: &'static [&'static str],
+}
+
+struct PluginPaletteCommand {
+    command: PaletteCommand,
+    kind: &'static str,
 }
 
 pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
@@ -30,10 +52,12 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
         .into_iter()
         .flat_map(|(_, entries)| entries)
         .filter_map(|entry| {
+            let action: NavigateAction = entry.action?;
             Some(PaletteCommand {
+                id: action.palette_id()?.to_string(),
                 name: entry.label,
                 key: entry.key,
-                action: entry.action?,
+                action,
                 keywords: entry.keywords,
             })
         })
@@ -45,35 +69,50 @@ pub(crate) fn palette_commands(app: &AppState) -> Vec<PaletteCommand> {
 
     let plugin_actions = crate::app::palette_plugin_actions(app);
     let plugin_action_count = plugin_actions.len();
-    for (index, action) in plugin_actions.into_iter().enumerate() {
-        commands.push(PaletteCommand {
-            name: Cow::Owned(format!(
-                "{} — {}",
-                plugin_display_name(app, &action.plugin_id),
-                action.title
-            )),
-            key: String::new(),
-            action: NavigateAction::InvokePluginAction(index),
-            keywords: &[],
-        });
-    }
+    let mut plugin_commands: Vec<PluginPaletteCommand> = plugin_actions
+        .into_iter()
+        .enumerate()
+        .map(|(index, action)| {
+            let display_name: String = plugin_display_name(app, &action.plugin_id);
+            PluginPaletteCommand {
+                command: PaletteCommand {
+                    id: format!("plugin-action:{}", action.qualified_id()),
+                    name: Cow::Owned(plugin_command_name(&display_name, &action.title)),
+                    key: String::new(),
+                    action: NavigateAction::InvokePluginAction(index),
+                    keywords: &[],
+                },
+                kind: "action",
+            }
+        })
+        .collect();
     trace!(plugin_action_count, "Added plugin actions");
 
     let plugin_panes = crate::app::palette_plugin_panes(app);
     let plugin_pane_count = plugin_panes.len();
-    for (index, (plugin_id, pane)) in plugin_panes.into_iter().enumerate() {
-        commands.push(PaletteCommand {
-            name: Cow::Owned(format!(
-                "{} — {}",
-                plugin_display_name(app, &plugin_id),
-                pane.title
-            )),
-            key: String::new(),
-            action: NavigateAction::OpenPluginPane(index),
-            keywords: &[],
-        });
-    }
+    plugin_commands.extend(plugin_panes.into_iter().enumerate().map(
+        |(index, (plugin_id, pane))| {
+            let display_name: String = plugin_display_name(app, &plugin_id);
+            PluginPaletteCommand {
+                command: PaletteCommand {
+                    id: format!("plugin-pane:{plugin_id}.{}", pane.id),
+                    name: Cow::Owned(plugin_command_name(&display_name, &pane.title)),
+                    key: String::new(),
+                    action: NavigateAction::OpenPluginPane(index),
+                    keywords: &[],
+                },
+                kind: "pane",
+            }
+        },
+    ));
     trace!(plugin_pane_count, "Added plugin panes");
+
+    disambiguate_plugin_labels(&mut plugin_commands);
+    commands.extend(
+        plugin_commands
+            .into_iter()
+            .map(|plugin_command| plugin_command.command),
+    );
 
     debug!(
         total_commands = commands.len(),
@@ -87,6 +126,43 @@ fn plugin_display_name(app: &AppState, plugin_id: &str) -> String {
         .get(plugin_id)
         .map(|plugin| plugin.name.clone())
         .unwrap_or_else(|| plugin_id.to_string())
+}
+
+fn plugin_command_name(plugin_name: &str, title: &str) -> String {
+    let repeated_prefix: bool = title
+        .get(..plugin_name.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(plugin_name));
+    let remainder: &str = title.get(plugin_name.len()..).unwrap_or_default();
+    if repeated_prefix
+        && (remainder.is_empty()
+            || remainder.starts_with(':')
+            || remainder.starts_with(" —")
+            || remainder.starts_with(" -"))
+    {
+        title.to_string()
+    } else {
+        format!("{plugin_name} — {title}")
+    }
+}
+
+fn disambiguate_plugin_labels(plugin_commands: &mut [PluginPaletteCommand]) {
+    let mut label_counts: HashMap<String, usize> = HashMap::new();
+    for plugin_command in plugin_commands.iter() {
+        *label_counts
+            .entry(plugin_command.command.name.to_string())
+            .or_default() += 1;
+    }
+    for plugin_command in plugin_commands {
+        if label_counts
+            .get(plugin_command.command.name.as_ref())
+            .is_some_and(|count| *count > 1)
+        {
+            plugin_command.command.name = Cow::Owned(format!(
+                "{} ({})",
+                plugin_command.command.name, plugin_command.kind
+            ));
+        }
+    }
 }
 
 /// Ranking by match quality rather than list order keeps a query that exactly
@@ -126,15 +202,34 @@ fn command_match_rank(command: &PaletteCommand, query: &str) -> Option<u8> {
         .map(|rank| rank + MAX_NAME_RANK + 1)
 }
 
+fn compact_palette_commands(
+    commands: Vec<PaletteCommand>,
+    recent_command_ids: &[String],
+) -> Vec<PaletteCommand> {
+    let mut commands_by_id: HashMap<String, PaletteCommand> = commands
+        .into_iter()
+        .map(|command| (command.id.clone(), command))
+        .collect();
+    recent_command_ids
+        .iter()
+        .map(String::as_str)
+        .chain(FEATURED_COMMAND_IDS)
+        .filter_map(|command_id| commands_by_id.remove(command_id))
+        .take(EMPTY_PALETTE_LIMIT)
+        .collect()
+}
+
 pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
-    let query = app.command_palette.query.trim().to_lowercase();
-    let commands = palette_commands(app);
+    let query: String = app.command_palette.query.trim().to_lowercase();
+    let commands: Vec<PaletteCommand> = palette_commands(app);
     if query.is_empty() {
+        let compact: Vec<PaletteCommand> =
+            compact_palette_commands(commands, &app.command_palette.recent_command_ids);
         trace!(
-            total_commands = commands.len(),
-            "Query empty, returning all commands"
+            result_count = compact.len(),
+            "Returning compact palette commands for an empty query"
         );
-        return commands;
+        return compact;
     }
 
     debug!(query = %query, available_commands = commands.len(), "Filtering palette commands");
@@ -146,7 +241,7 @@ pub(crate) fn filtered_palette_commands(app: &AppState) -> Vec<PaletteCommand> {
         })
         .collect();
 
-    let matched_count = ranked.len();
+    let matched_count: usize = ranked.len();
     debug!(query = %query, matched_commands = matched_count, "Command matching complete");
 
     ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
@@ -212,7 +307,10 @@ pub(super) fn render_palette_overlay(app: &AppState, frame: &mut Frame) {
     );
 
     let query_span = if app.command_palette.query.is_empty() {
-        Span::styled("type to filter", Style::default().fg(app.palette.overlay0))
+        Span::styled(
+            "recent first · type to search all",
+            Style::default().fg(app.palette.overlay0),
+        )
     } else {
         Span::styled(
             app.command_palette.query.clone(),
@@ -352,6 +450,74 @@ mod tests {
         assert!(!palette_commands(&state).is_empty());
     }
 
+    #[test]
+    fn empty_query_is_compact_and_does_not_offer_the_palette_itself() {
+        let names = names("");
+        assert_eq!(names.len(), EMPTY_PALETTE_LIMIT);
+        assert!(!names.iter().any(|name| name == "command palette"));
+    }
+
+    #[test]
+    fn remembered_available_commands_lead_the_empty_palette_without_duplicates() {
+        let mut state = AppState::test_new();
+        state.command_palette.recent_command_ids = vec![
+            "core:resize-pane-left".to_string(),
+            "core:new-tab".to_string(),
+            "plugin-action:missing.action".to_string(),
+        ];
+        let commands = filtered_palette_commands(&state);
+        let ids: Vec<&str> = commands.iter().map(|command| command.id.as_str()).collect();
+
+        assert_eq!(ids.first().copied(), Some("core:resize-pane-left"));
+        assert_eq!(ids.get(1).copied(), Some("core:new-tab"));
+        assert_eq!(ids.iter().filter(|id| **id == "core:new-tab").count(), 1);
+        assert_eq!(ids.len(), EMPTY_PALETTE_LIMIT);
+    }
+
+    #[test]
+    fn typing_searches_commands_omitted_from_the_compact_palette() {
+        let matches = names("resize pane left");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("resize pane left")
+        );
+    }
+
+    #[test]
+    fn the_palette_self_action_is_not_searchable() {
+        assert!(names("command palette").is_empty());
+    }
+
+    #[test]
+    fn plugin_titles_do_not_repeat_an_existing_brand_prefix() {
+        assert_eq!(
+            plugin_command_name("Herdr Plus", "Herdr Plus: Projects"),
+            "Herdr Plus: Projects"
+        );
+        assert_eq!(
+            plugin_command_name("Browser", "Open localhost"),
+            "Browser — Open localhost"
+        );
+    }
+
+    #[test]
+    fn identical_plugin_action_and_pane_labels_show_their_kind() {
+        let mut commands = vec![
+            PluginPaletteCommand {
+                command: command("Herdr Plus: Projects", &[]),
+                kind: "action",
+            },
+            PluginPaletteCommand {
+                command: command("Herdr Plus: Projects", &[]),
+                kind: "pane",
+            },
+        ];
+        disambiguate_plugin_labels(&mut commands);
+
+        assert_eq!(commands[0].command.name, "Herdr Plus: Projects (action)");
+        assert_eq!(commands[1].command.name, "Herdr Plus: Projects (pane)");
+    }
+
     // A help row reaches the palette only when it carries a NavigateAction, so
     // a row added upstream as a plain entry is silently palette-invisible. These
     // six arrived that way in an upstream sync.
@@ -455,6 +621,7 @@ mod tests {
 
     fn command(name: &'static str, keywords: &'static [&'static str]) -> PaletteCommand {
         PaletteCommand {
+            id: format!("test:{name}"),
             name: Cow::Borrowed(name),
             key: String::new(),
             action: NavigateAction::ClosePane,

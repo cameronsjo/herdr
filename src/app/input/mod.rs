@@ -71,6 +71,16 @@ use self::{
 use super::state::{AppState, Mode};
 use super::App;
 
+#[cfg(not(test))]
+fn persist_palette_history(recent_command_ids: &[String]) -> std::io::Result<()> {
+    crate::palette_history::save(recent_command_ids)
+}
+
+#[cfg(test)]
+fn persist_palette_history(_recent_command_ids: &[String]) -> std::io::Result<()> {
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Key handling
 // ---------------------------------------------------------------------------
@@ -80,6 +90,27 @@ impl App {
     /// pressing its shortcut would.
     pub(super) fn run_overlay_action(&mut self, action: navigate::NavigateAction) {
         self.execute_tui_navigate_action(action, navigate::ActionContext::Direct);
+    }
+
+    pub(super) fn run_palette_command(
+        &mut self,
+        command_id: String,
+        action: navigate::NavigateAction,
+    ) {
+        crate::palette_history::remember(
+            &mut self.state.command_palette.recent_command_ids,
+            command_id,
+        );
+        if let Err(error) = persist_palette_history(&self.state.command_palette.recent_command_ids)
+        {
+            let path = crate::palette_history::store_path();
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "Failed to save command palette history; running the selected command without persistence"
+            );
+        }
+        self.run_overlay_action(action);
     }
 
     pub(super) async fn handle_key(
@@ -122,8 +153,8 @@ impl App {
                 Mode::GlobalMenu => handle_global_menu_key(&mut self.state, key_event),
                 Mode::KeybindHelp => handle_keybind_help_key(&mut self.state, key),
                 Mode::Palette => {
-                    if let Some(action) = handle_palette_key(&mut self.state, key) {
-                        self.run_overlay_action(action);
+                    if let Some((command_id, action)) = handle_palette_key(&mut self.state, key) {
+                        self.run_palette_command(command_id, action);
                     }
                 }
                 Mode::MoveSplitDirection => {

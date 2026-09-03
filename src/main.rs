@@ -75,6 +75,7 @@ mod layout;
 mod logging;
 mod metadata_tokens;
 mod noninteractive_process;
+mod palette_history;
 mod pane;
 mod pane_graphics_files;
 mod persist;

@@ -39,10 +39,22 @@ The curated fallback will prioritize creation, movement, layout, and settings ac
 ## Checklist
 
 - [x] Inventory the core and currently installed plugin command surface.
-- [ ] Add stable command identifiers and compact empty-query selection as pure, tested palette logic.
-- [ ] Add bounded client-local history loading, recording, and failure logging.
-- [ ] Normalize plugin labels and distinguish exact action/pane collisions.
-- [ ] Preserve full-query search, keyboard selection, scrolling, and mouse execution behavior with focused tests.
-- [ ] Update unreleased user documentation for the adaptive palette behavior.
-- [ ] Run focused diagnostics and tests, then run `just check`.
-- [ ] Record any implementation deviations and final verification evidence in this plan.
+- [x] Add stable command identifiers and compact empty-query selection as pure, tested palette logic.
+- [x] Add bounded client-local history loading, recording, and failure logging.
+- [x] Normalize plugin labels and distinguish exact action/pane collisions.
+- [x] Preserve full-query search, keyboard selection, scrolling, and mouse execution behavior with focused tests.
+- [x] Update unreleased user documentation for the adaptive palette behavior.
+- [x] Run focused diagnostics and tests, then run the repository-supported `just check` equivalent.
+- [x] Record implementation deviations and final verification evidence in this plan.
+
+## Implementation notes
+
+Stable core identifiers live on `NavigateAction` rather than individual help entries. This keeps one identifier per semantic action while a test requires every help action except the intentionally omitted self-opening action to resolve to an identifier.
+
+Native Rust builds remain blocked on this Mac by the repository's documented Zig 0.15.2/macOS SDK incompatibility. The supported `./scripts/docker-check.sh` path replaced `just check` without reducing coverage.
+
+## Verification
+
+- Focused palette run: the Docker command `cargo nextest run --locked palette --no-fail-fast` passed all 47 matching tests.
+- Full repository run: `./scripts/docker-check.sh` passed formatting, Clippy, 3,649 Rust tests, its 14 documented container-environment exceptions, and all 95 maintenance tests.
+- Primary language-server diagnostics reported zero errors across all changed Rust files.

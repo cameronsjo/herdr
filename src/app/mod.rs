@@ -252,6 +252,27 @@ fn load_plugin_registry(no_session: bool) -> crate::app::state::InstalledPluginR
         .collect()
 }
 
+#[cfg(not(test))]
+fn load_palette_history() -> Vec<String> {
+    match crate::palette_history::load() {
+        Ok(recent_command_ids) => recent_command_ids,
+        Err(error) => {
+            let path = crate::palette_history::store_path();
+            tracing::warn!(
+                path = %path.display(),
+                error = %error,
+                "Failed to load command palette history; continuing without remembered commands"
+            );
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(test)]
+fn load_palette_history() -> Vec<String> {
+    Vec::new()
+}
+
 fn agent_panel_sort_from_config(
     sort: crate::config::AgentPanelSortConfig,
 ) -> state::AgentPanelSort {
@@ -600,7 +621,10 @@ impl App {
                 }
             }),
             keybind_help: state::KeybindHelpState::default(),
-            command_palette: state::PaletteState::default(),
+            command_palette: state::PaletteState {
+                recent_command_ids: load_palette_history(),
+                ..state::PaletteState::default()
+            },
             navigator: state::NavigatorState::default(),
             pending_pane_split: None,
             copy_mode: None,
@@ -1947,8 +1971,9 @@ impl App {
                 self.handle_context_menu_key_via_api(key_event);
             }
             Mode::Palette => {
-                if let Some(action) = input::handle_palette_key(&mut self.state, key) {
-                    self.run_overlay_action(action);
+                if let Some((command_id, action)) = input::handle_palette_key(&mut self.state, key)
+                {
+                    self.run_palette_command(command_id, action);
                 }
             }
             Mode::MoveSplitDirection => {
