@@ -48,6 +48,13 @@ concurrency:
 
 jobs:
   validate:
+    # This fork does not publish herdr.dev and does not maintain the published
+    # docs contract: docs/versions/manifest.json names upstream tags like `v0.8.2`,
+    # while this fork tags `v0.8.2-palette.N`, so the check resolves a ref that
+    # cannot exist here. Same guard the fork already applies to pr-gate and
+    # preview; it arrived without one because upstream replaced website.yml,
+    # which carried it, with these two files.
+    if: github.repository == 'herdrdev/herdr'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
