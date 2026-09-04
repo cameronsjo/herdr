@@ -763,7 +763,13 @@ mod tests {
     fn api_tab_move_to_workspace_reissues_identity_and_keeps_panes() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub.clone());
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
         seed_two_workspaces(&mut app);
 
         let moved_root = app.state.workspaces[0].tabs[1].root_pane;
@@ -809,7 +815,13 @@ mod tests {
     fn api_tab_move_reissues_tab_number_when_target_already_uses_it() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         // Give the target a tab carrying the same public number as the mover,
         // which is the collision that silently resolved the wrong tab before.
@@ -855,7 +867,13 @@ mod tests {
     fn api_tab_move_rejects_an_out_of_range_workspace_id_without_panicking() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
 
@@ -889,7 +907,13 @@ mod tests {
     fn api_tab_move_rejects_an_out_of_bounds_insert_index_without_detaching() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let target_workspace_id = app.public_workspace_id(1);
@@ -920,7 +944,13 @@ mod tests {
     fn api_tab_move_requires_a_destination_or_an_insert_index() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let moved_root = app.state.workspaces[0].tabs[1].root_pane;
@@ -946,7 +976,13 @@ mod tests {
     fn a_moved_pane_keeps_only_its_most_recent_alias() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         let pane = app.state.workspaces[0].tabs[0].root_pane;
 
@@ -972,7 +1008,13 @@ mod tests {
     fn a_live_pane_id_outranks_a_stale_alias_for_the_same_string() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
 
         // Take a real pane id, then forge an alias under that exact string
@@ -999,7 +1041,13 @@ mod tests {
     fn api_tab_move_refuses_the_last_tab_in_a_workspace() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         app.state.workspaces = vec![Workspace::test_new("source"), Workspace::test_new("target")];
         app.state.active = Some(0);
 
@@ -1031,7 +1079,13 @@ mod tests {
     fn api_tab_move_to_same_workspace_is_unchanged() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let source_workspace_id = app.public_workspace_id(0);
@@ -1061,7 +1115,13 @@ mod tests {
     fn api_tab_move_to_new_workspace_creates_one_and_emits_the_cross_event() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub.clone());
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
         let mut source = Workspace::test_new("source");
         source.test_add_tab(Some("movable"));
         app.state.workspaces = vec![source];
@@ -1114,7 +1174,13 @@ mod tests {
     fn api_tab_move_without_destination_still_reorders() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         let mut workspace = Workspace::test_new("tabs");
         workspace.test_add_tab(Some("two"));
         app.state.workspaces = vec![workspace];

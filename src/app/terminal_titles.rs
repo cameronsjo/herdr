@@ -238,7 +238,13 @@ mod tests {
     fn sidebar_redraws_for_a_title_token_that_only_appears_in_grouped_rows() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         // `rows` and `rows_by_agent` carry no title token at all; only
         // `grouped_rows` does. `terminal_title_sidebar_changed` must still
         // chain it, or a grouped panel would miss redraws for title changes.
