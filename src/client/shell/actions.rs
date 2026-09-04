@@ -1,5 +1,26 @@
 use super::*;
 
+/// The `insert_index` that moves the item at `source` one slot toward the front
+/// or the back of a list of `len` items, wrapping at either end. The keyboard
+/// reorder actions and the tab context menu's share this so a keyboard reorder
+/// and a menu reorder cannot land in different places.
+pub(super) fn reorder_insert_index(len: usize, source: usize, forward: bool) -> Option<usize> {
+    if len <= 1 {
+        return None;
+    }
+    Some(if forward {
+        if source + 1 >= len {
+            0
+        } else {
+            source + 2
+        }
+    } else if source == 0 {
+        len
+    } else {
+        source - 1
+    })
+}
+
 impl ClientShellState {
     pub(super) fn record_binding(
         &mut self,
@@ -1015,24 +1036,15 @@ impl ClientShellState {
                 // sidebar's grouped view: `insert_index` indexes the list the
                 // server keeps, so a filtered or grouped position would move
                 // the workspace somewhere else entirely.
-                if snapshot.workspaces.len() <= 1 {
-                    return None;
-                }
                 let source = snapshot
                     .workspaces
                     .iter()
                     .position(|workspace| workspace.workspace_id == focused_workspace)?;
-                let insert_index = if action == KeybindAction::MoveWorkspaceNext {
-                    if source + 1 >= snapshot.workspaces.len() {
-                        0
-                    } else {
-                        source + 2
-                    }
-                } else if source == 0 {
-                    snapshot.workspaces.len()
-                } else {
-                    source - 1
-                };
+                let insert_index = reorder_insert_index(
+                    snapshot.workspaces.len(),
+                    source,
+                    action == KeybindAction::MoveWorkspaceNext,
+                )?;
                 Some(Method::WorkspaceMove(WorkspaceMoveParams {
                     workspace_id: focused_workspace,
                     insert_index,
@@ -1072,22 +1084,10 @@ impl ClientShellState {
                     .iter()
                     .filter(|tab| tab.workspace_id == focused_workspace)
                     .collect::<Vec<_>>();
-                if tabs.len() <= 1 {
-                    return None;
-                }
                 let focused_tab = focused_tab?;
                 let source = tabs.iter().position(|tab| tab.tab_id == focused_tab)?;
-                let insert_index = if action == KeybindAction::MoveTabNext {
-                    if source + 1 >= tabs.len() {
-                        0
-                    } else {
-                        source + 2
-                    }
-                } else if source == 0 {
-                    tabs.len()
-                } else {
-                    source - 1
-                };
+                let insert_index =
+                    reorder_insert_index(tabs.len(), source, action == KeybindAction::MoveTabNext)?;
                 Some(Method::TabMove(TabMoveParams {
                     tab_id: focused_tab,
                     insert_index: Some(insert_index),

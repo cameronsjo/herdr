@@ -384,3 +384,188 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
             if params.workspace_id == "ws_1" && params.close_group
     ));
 }
+
+/// Adds `count` extra spaces after `ws_1`, all unfocused, so reorder and
+/// cross-space move paths have somewhere to go.
+fn snapshot_with_spaces(count: usize) -> ClientShellSnapshot {
+    let mut projected = snapshot();
+    for number in 2..=(count + 1) {
+        let mut workspace = projected.workspaces[0].clone();
+        workspace.workspace_id = format!("ws_{number}");
+        workspace.active_tab_id = format!("tab_ws{number}");
+        workspace.number = number;
+        workspace.label = format!("space-{number}");
+        workspace.focused = false;
+        projected.workspaces.push(workspace);
+    }
+    projected
+}
+
+#[test]
+fn workspace_context_menu_reorders_the_clicked_space_not_the_focused_one() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot_with_spaces(2)));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("three spaces");
+
+    let second = state.hits.workspaces[1].rect;
+    assert_eq!(state.hits.workspaces[1].workspace_id, "ws_2");
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: second.x + 2,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(106, 20).expect("workspace context menu");
+    let move_down = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::MoveWorkspaceNext)
+            .expect("move down item"),
+        _ => panic!("workspace context menu"),
+    };
+    let row = state.hits.context_menu_rows[move_down].0;
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x + 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("workspace reorder should use the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceMove(params)
+            if params.workspace_id == "ws_2" && params.insert_index == 3
+    ));
+}
+
+#[test]
+fn tab_context_menu_reorders_the_clicked_tab_and_arms_a_destination_pick() {
+    let mut projected = snapshot();
+    for number in 2..=3 {
+        let mut tab = projected.tabs[0].clone();
+        tab.tab_id = format!("tab_{number}");
+        tab.number = number;
+        tab.label = number.to_string();
+        tab.focused = false;
+        projected.tabs.push(tab);
+    }
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("three tabs");
+
+    let second = state.hits.tabs[1].0;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: second.x + 1,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(106, 20).expect("tab context menu");
+    let move_right = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::MoveTabNext)
+            .expect("move right item"),
+        _ => panic!("tab context menu"),
+    };
+    let row = state.hits.context_menu_rows[move_right].0;
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x + 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(outcome.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::TabMove(params)
+                    if params.tab_id == "tab_2" && params.insert_index == Some(3)
+            )
+    )));
+
+    state.overlay = None;
+    state.compose(106, 20).expect("tab bar");
+    let second = state.hits.tabs[1].0;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: second.x + 1,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(106, 20).expect("tab context menu");
+    let to_space = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::MoveTabToSpace)
+            .expect("move to space item"),
+        _ => panic!("tab context menu"),
+    };
+    let row = state.hits.context_menu_rows[to_space].0;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: row.x + 1,
+        row: row.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("move to space should open the navigator as a destination picker");
+    };
+    assert_eq!(navigator.pending_tab_move.as_deref(), Some("tab_2"));
+    assert!(navigator.move_armed());
+}
+
+#[test]
+fn pane_context_menu_moves_the_clicked_pane_to_a_new_space() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: pane.x + 1,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.compose(106, 20).expect("pane context menu");
+    let to_new_space = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::MovePaneToNewSpace)
+            .expect("move to new space item"),
+        _ => panic!("pane context menu"),
+    };
+    let row = state.hits.context_menu_rows[to_new_space].0;
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x + 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("pane move should use the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneMove(params)
+            if params.pane_id == "pane_1"
+                && matches!(
+                    params.destination,
+                    crate::api::schema::PaneMoveDestination::NewWorkspace { .. }
+                )
+    ));
+}

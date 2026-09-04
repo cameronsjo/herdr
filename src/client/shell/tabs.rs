@@ -12,6 +12,7 @@ pub(crate) fn render_tab_bar(
     tab_scroll: &mut usize,
     reveal_focused_tab: &mut bool,
     tab_drag_insert_index: Option<usize>,
+    drop_target_tab_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
@@ -100,7 +101,12 @@ pub(crate) fn render_tab_bar(
             break;
         }
         let rect = Rect::new(x, area.y, width, 1);
-        let style = if tab.focused {
+        let style = if drop_target_tab_id == Some(tab.tab_id.as_str()) {
+            Style::default()
+                .fg(panel_contrast_fg(palette))
+                .bg(palette.selection_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if tab.focused {
             let base = Style::default()
                 .fg(panel_contrast_fg(palette))
                 .bg(palette.accent);

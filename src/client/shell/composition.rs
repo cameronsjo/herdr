@@ -36,6 +36,23 @@ impl ClientShellState {
             Some(ClientChromeDrag::Tab { insert_index, .. }) => *insert_index,
             _ => None,
         };
+        // One read of the drag state feeds both highlights, so the sidebar and
+        // the tab bar cannot disagree about where the drop would land.
+        let (drop_target_workspace_id, drop_target_tab_id) = match &self.chrome_drag {
+            Some(ClientChromeDrag::Tab {
+                target_workspace_id,
+                ..
+            }) => (target_workspace_id.as_deref(), None),
+            Some(ClientChromeDrag::Pane {
+                target: Some(ClientPaneDropTarget::Workspace(workspace_id)),
+                ..
+            }) => (Some(workspace_id.as_str()), None),
+            Some(ClientChromeDrag::Pane {
+                target: Some(ClientPaneDropTarget::Tab(tab_id)),
+                ..
+            }) => (None, Some(tab_id.as_str())),
+            _ => (None, None),
+        };
         let (dragged_workspace_id, workspace_drop_indicator_row) = match &self.chrome_drag {
             Some(ClientChromeDrag::Workspace {
                 source_workspace_id,
@@ -67,6 +84,8 @@ impl ClientShellState {
                     .flatten(),
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                drop_target_workspace_id,
+                drop_target_tab_id,
             },
         );
         self.hits.panes = surface

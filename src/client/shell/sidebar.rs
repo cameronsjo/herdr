@@ -293,7 +293,9 @@ pub(crate) fn render_sidebar(
         let rect = Rect::new(body.x, y, content_width, row_height);
         let selected = state.selected_workspace_id == Some(workspace.workspace_id.as_str());
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
-        if selected {
+        let drop_target = state.drop_target_workspace_id == Some(workspace.workspace_id.as_str());
+        // A drop target reads as a selection: it is the row the release acts on.
+        if drop_target || selected {
             buffer.set_style(rect, Style::default().bg(palette.selection_bg));
         } else if dragged {
             buffer.set_style(rect, Style::default().bg(palette.surface1));

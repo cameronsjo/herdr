@@ -758,3 +758,297 @@ fn context_menu_keyboard_and_outside_click_are_client_owned() {
     assert!(outside.repaint);
     assert!(state.overlay.is_none());
 }
+
+/// A snapshot with `count` extra spaces and one agent row per pane, so tab and
+/// pane drags have both a destination space and a grab handle.
+fn snapshot_with_spaces_and_agents(count: usize) -> ClientShellSnapshot {
+    let mut projected = snapshot();
+    for number in 2..=(count + 1) {
+        let mut workspace = projected.workspaces[0].clone();
+        workspace.workspace_id = format!("ws_{number}");
+        workspace.active_tab_id = format!("tab_ws{number}");
+        workspace.number = number;
+        workspace.label = format!("space-{number}");
+        workspace.focused = false;
+        projected.workspaces.push(workspace);
+    }
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("first".into()),
+        display_agent: None,
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    }];
+    projected
+}
+
+#[test]
+fn tab_dragged_onto_a_sidebar_space_moves_the_whole_tab_there() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot_with_spaces_and_agents(1)));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("two spaces");
+    let tab = state.hits.tabs[0].0;
+    let other_space = state.hits.workspaces[1].rect;
+    assert_eq!(state.hits.workspaces[1].workspace_id, "ws_2");
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: tab.x + 1,
+        row: tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let drag = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: other_space.x + 2,
+        row: other_space.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(drag.repaint);
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::Tab {
+            insert_index: None,
+            ref target_workspace_id,
+            ..
+        }) if target_workspace_id.as_deref() == Some("ws_2")
+    ));
+
+    let release =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: other_space.x + 2,
+            row: other_space.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &release.actions[..] else {
+        panic!("cross-space tab drag should use the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::TabMove(params)
+            if params.tab_id == "tab_1"
+                && matches!(
+                    params.destination,
+                    Some(crate::api::schema::TabMoveDestination::Workspace {
+                        ref workspace_id,
+                        insert_index: None,
+                    }) if workspace_id == "ws_2"
+                )
+    ));
+}
+
+#[test]
+fn tab_dragged_onto_a_scrolled_space_list_targets_the_row_that_was_drawn() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot_with_spaces_and_agents(11)));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("many spaces");
+    state.workspace_scroll = 2;
+    state.compose(106, 20).expect("scrolled space list");
+    let first_visible_rect = state.hits.workspaces[0].rect;
+    let first_visible_id = state.hits.workspaces[0].workspace_id.clone();
+    assert_ne!(
+        first_visible_id, "ws_1",
+        "the space list must actually be scrolled for this to test anything"
+    );
+    let tab = state.hits.tabs[0].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: tab.x + 1,
+        row: tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: first_visible_rect.x + 2,
+        row: first_visible_rect.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let release =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: first_visible_rect.x + 2,
+            row: first_visible_rect.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &release.actions[..] else {
+        panic!("cross-space tab drag should use the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::TabMove(params)
+            if matches!(
+                params.destination,
+                Some(crate::api::schema::TabMoveDestination::Workspace { ref workspace_id, .. })
+                    if workspace_id == &first_visible_id
+            )
+    ));
+}
+
+#[test]
+fn agent_row_click_still_focuses_but_a_drag_onto_a_space_moves_the_pane() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot_with_spaces_and_agents(1)));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("agent row");
+    let agent = state.hits.agents[0].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: agent.x + 1,
+        row: agent.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: agent.x + 1,
+        row: agent.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        &click.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_1"
+            )
+    ));
+
+    let other_space = state.hits.workspaces[1].rect;
+    assert_eq!(state.hits.workspaces[1].workspace_id, "ws_2");
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: agent.x + 1,
+        row: agent.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: other_space.x + 2,
+        row: other_space.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::Pane {
+            ref pane_id,
+            target: Some(ClientPaneDropTarget::Workspace(ref workspace_id)),
+        }) if pane_id == "pane_1" && workspace_id == "ws_2"
+    ));
+    let release =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: other_space.x + 2,
+            row: other_space.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &release.actions[..] else {
+        panic!("pane drag should use the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneMove(params)
+            if params.pane_id == "pane_1"
+                && matches!(
+                    params.destination,
+                    crate::api::schema::PaneMoveDestination::NewTab {
+                        workspace_id: Some(ref workspace_id),
+                        ..
+                    } if workspace_id == "ws_2"
+                )
+    ));
+}
+
+#[test]
+fn pane_dragged_onto_another_tab_asks_which_way_it_splits() {
+    let mut projected = snapshot_with_spaces_and_agents(1);
+    let mut tab = projected.tabs[0].clone();
+    tab.tab_id = "tab_2".into();
+    tab.number = 2;
+    tab.label = "2".into();
+    tab.focused = false;
+    projected.tabs.push(tab);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("two tabs");
+    let agent = state.hits.agents[0].0;
+    let own_tab = state.hits.tabs[0].0;
+    let other_tab = state.hits.tabs[1].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: agent.x + 1,
+        row: agent.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: own_tab.x + 1,
+        row: own_tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: other_tab.x + 1,
+        row: other_tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let release =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: other_tab.x + 1,
+            row: other_tab.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(release.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::PaneSplitDirection(ref pending))
+            if pending.pane_id == "pane_1" && pending.tab_id == "tab_2"
+    ));
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn pane_dropped_back_on_its_own_tab_is_a_no_op() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot_with_spaces_and_agents(1)));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("agent row");
+    let agent = state.hits.agents[0].0;
+    let own_tab = state.hits.tabs[0].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: agent.x + 1,
+        row: agent.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: own_tab.x + 1,
+        row: own_tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let release =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: own_tab.x + 1,
+            row: own_tab.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(release.actions.is_empty());
+    assert!(state.overlay.is_none());
+}

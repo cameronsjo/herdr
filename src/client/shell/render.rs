@@ -208,6 +208,11 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) selected_workspace_id: Option<&'a str>,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    /// The sidebar space a dragged tab or pane would land in, highlighted while
+    /// the drag is over it.
+    pub(super) drop_target_workspace_id: Option<&'a str>,
+    /// The tab a dragged pane would split into, highlighted the same way.
+    pub(super) drop_target_tab_id: Option<&'a str>,
 }
 
 pub(super) fn render_shell(
@@ -257,6 +262,7 @@ pub(super) fn render_shell(
             state.tab_scroll,
             state.reveal_focused_tab,
             state.tab_drag_insert_index,
+            state.drop_target_tab_id,
             &mut hits,
         );
     }
