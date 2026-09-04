@@ -381,3 +381,69 @@ The three seats produced two genuine conflicts, both adjudicated in the plan:
 ## Provenance
 
 Every commit carries the producer tuple, `refs #<issue-number>` in the body, no closing keywords.
+
+## Deviations
+
+- **2026-09-04 — step 3 resequenced after step 4, by Cameron's call.** The plan
+  sized the sync as a scaled-up conflict resolution ("47 files overlap, against 3
+  conflicts in the 2026-08-26 sync"). Measured, it is a port. Upstream's
+  `refactor: render the shell in the client` rewrote 203 files under `src/`
+  (`+57,490 / −62,762`), dissolving `src/app/input/` and most of `src/ui/` into a
+  new `src/client/shell/` layer; `git` finds **zero renames even at 30%
+  similarity**, so nothing maps 1:1. The fork diverges by 61 files / `+6,839`
+  lines in `src/`, and upstream **deleted 11 of those 61 outright**, carrying
+  ~2,100 lines of fork work (`src/app/input/navigate.rs` alone is `+728`).
+  `src/ui/palette.rs` never appears in the conflict list because upstream never
+  had it — it survives the merge as an orphan importing modules that no longer
+  exist.
+
+  The split that decided the order: **every file step 4 touches survives upstream
+  unchanged in shape** (`src/app/agents.rs`, `src/persist/restore.rs`,
+  `src/config/sidebar.rs`, `src/cli/spec.rs`, `scripts/docker-check.sh`,
+  `README.md`), while **every file step 5 touches is one upstream deleted**. So
+  step 4 lands first and survives the port untouched; step 5 is built once, on
+  the new architecture, after it. The first sync attempt was aborted cleanly and
+  its worktree removed.
+
+- **2026-09-04 — step 3.3's manifest question answered "leave them".** The plan
+  offered two arms: prove `herdr update` is unreachable under brew-only
+  distribution, or move `website/latest.json` / `preview.json` with the offset.
+  Proven unreachable: `self_update` returns `Err` for Homebrew installs at
+  `src/update.rs:2073-2081`, and the background path routes to
+  `auto_update_homebrew` (`:2227-2234`), which never calls
+  `perform_live_handoff` — so `ReleaseInfo.target_protocol` cannot reach
+  `expected_protocol`. The fork's `release.yml` dispatches a tap bump only
+  (`:184`) and never writes either manifest; both are inert upstream snapshots
+  the sync carries. For a non-brew fork install the offset makes handoff **fail
+  closed**, which is the improvement over today's silent same-number
+  cross-lineage handoff.
+
+- **2026-09-04 — step 3.5's `refs` collision scan run early and clear.** The 37
+  upstream commits carry 20 `refs #N` lines, all `#2724`–`#3571`; fork issues top
+  out at `#27`. `label-next-release-issues.yml:130` also warns-and-continues on
+  an unreadable issue, so an unmatched ref cannot redden the run.
+
+- **2026-09-04 — PR #27 took a fix before merging.** CodeRabbit's finding was
+  correct and the dispatched review confirmed it: `handle_agent_type_submit`
+  omitted the `Agent::GithubCopilot` focus-gained branch its sibling
+  `handle_agent_prompt` has, so a type-submit into a refocused Copilot pane wrote
+  the text and let Copilot drop the Enter. Fixed in `4eab7e74` with a covering
+  test, plus a note recording why type-submit deliberately does not refuse a
+  blocked agent.
+
+## Learnings
+
+- **`just check` and `cargo` do build on this Mac**, contradicting the plan's
+  constraint and the standing repo note. The Zig-0.15.2-vs-macOS-26-SDK link wall
+  is avoided by pointing at the Command Line Tools SDK:
+  `PATH="$HOME/.cargo/bin:$PATH" DEVELOPER_DIR=/Library/Developer/CommandLineTools ZIG="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" cargo test …`.
+  A targeted `cargo test` now takes ~30s where `scripts/docker-check.sh` takes
+  ~12 minutes.
+
+- **No merged fork PR had ever carried a human review**, and the step-0 audit of
+  the never-reviewed control set returned one Critical (issue #18's premise,
+  confirmed) plus seven Important. It also settled the plan's open question:
+  `sanitize_label` **cannot** launder a name on the API paths, because
+  `valid_agent_name`'s charset is a fixed point of the sanitizer and runs first.
+  Restore is the only reachable laundering path — which is exactly why the fix
+  belongs in the setter and not in `restore.rs`.
