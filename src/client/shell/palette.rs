@@ -177,7 +177,17 @@ fn action_context_applies(
     })
 }
 
+/// Builds the palette row label for a plugin action or pane.
+///
+/// Both inputs come from a plugin manifest, which the server accepts after only
+/// a non-empty trim, and this label is drawn straight to the host terminal. A
+/// pane process can install a manifest through `plugin.link`, so the strings are
+/// untrusted; under `herdr --remote` they also cross machines. Filtering here
+/// covers both callers — actions and panes — because this is the one place the
+/// two strings become a drawn label.
 fn plugin_command_name(plugin_name: &str, title: &str) -> String {
+    let plugin_name = &crate::label::sanitize_label(plugin_name);
+    let title = &crate::label::sanitize_label(title);
     let repeated_prefix = title
         .get(..plugin_name.len())
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(plugin_name));

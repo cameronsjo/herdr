@@ -427,7 +427,23 @@ impl ClientShellState {
                     .into_iter()
                     .filter(|entry| !entry.is_bare && !entry.is_prunable)
                     .map(|entry| {
-                        let label = entry.branch.clone().unwrap_or_else(|| entry.label.clone());
+                        // Display only: `branch` itself stays raw below, because
+                        // detached-vs-attached identity reads its presence. Both
+                        // the branch and the label fallback come out of
+                        // `git worktree list`, and git permits control and format
+                        // characters in a branch name, so the whole result is
+                        // filtered rather than just the branch arm — this label is
+                        // drawn straight to the host terminal by the picker.
+                        let shown = |text: &str| {
+                            let text = crate::label::sanitize_label(text).trim().to_string();
+                            (!text.is_empty()).then_some(text)
+                        };
+                        let label = entry
+                            .branch
+                            .as_deref()
+                            .and_then(shown)
+                            .or_else(|| shown(&entry.label))
+                            .unwrap_or_else(|| crate::label::sanitize_label(entry.path.as_str()));
                         ClientWorktreeOpenEntry {
                             path: entry.path,
                             branch: entry.branch,
