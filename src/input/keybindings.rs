@@ -36,6 +36,8 @@ pub(crate) enum KeybindAction {
     MoveTabToNewSpace,
     PreviousWorkspace,
     NextWorkspace,
+    MoveWorkspacePrevious,
+    MoveWorkspaceNext,
     PreviousAgent,
     NextAgent,
     NewTab,
@@ -99,6 +101,8 @@ impl KeybindAction {
             Self::MoveTabToNewSpace => Some("core:move-tab-to-new-space"),
             Self::PreviousWorkspace => Some("core:previous-workspace"),
             Self::NextWorkspace => Some("core:next-workspace"),
+            Self::MoveWorkspacePrevious => Some("core:move-workspace-previous"),
+            Self::MoveWorkspaceNext => Some("core:move-workspace-next"),
             Self::PreviousAgent => Some("core:previous-agent"),
             Self::NextAgent => Some("core:next-agent"),
             Self::NewTab => Some("core:new-tab"),
@@ -113,6 +117,10 @@ impl KeybindAction {
             Self::FocusPaneDown => Some("core:focus-pane-down"),
             Self::FocusPaneUp => Some("core:focus-pane-up"),
             Self::FocusPaneRight => Some("core:focus-pane-right"),
+            Self::SwapPaneLeft => Some("core:swap-pane-left"),
+            Self::SwapPaneDown => Some("core:swap-pane-down"),
+            Self::SwapPaneUp => Some("core:swap-pane-up"),
+            Self::SwapPaneRight => Some("core:swap-pane-right"),
             Self::SplitVertical => Some("core:split-vertical"),
             Self::SplitHorizontal => Some("core:split-horizontal"),
             Self::ClosePane => Some("core:close-pane"),
@@ -135,10 +143,6 @@ impl KeybindAction {
             | Self::SwitchWorkspace(_)
             | Self::SwitchTab(_)
             | Self::FocusAgent(_)
-            | Self::SwapPaneLeft
-            | Self::SwapPaneDown
-            | Self::SwapPaneUp
-            | Self::SwapPaneRight
             | Self::EditScrollback
             | Self::CopyMode
             | Self::Help => None,
@@ -185,6 +189,28 @@ pub(crate) fn resolve_non_indexed_action(
             KeybindAction::PreviousWorkspace,
         ),
         (&keybinds.next_workspace, KeybindAction::NextWorkspace),
+        (
+            &keybinds.move_workspace_previous,
+            KeybindAction::MoveWorkspacePrevious,
+        ),
+        (
+            &keybinds.move_workspace_next,
+            KeybindAction::MoveWorkspaceNext,
+        ),
+        (&keybinds.move_pane_to_space, KeybindAction::MovePaneToSpace),
+        (
+            &keybinds.move_pane_to_new_space,
+            KeybindAction::MovePaneToNewSpace,
+        ),
+        (
+            &keybinds.move_pane_to_new_tab,
+            KeybindAction::MovePaneToNewTab,
+        ),
+        (&keybinds.move_tab_to_space, KeybindAction::MoveTabToSpace),
+        (
+            &keybinds.move_tab_to_new_space,
+            KeybindAction::MoveTabToNewSpace,
+        ),
         (&keybinds.previous_agent, KeybindAction::PreviousAgent),
         (&keybinds.next_agent, KeybindAction::NextAgent),
         (&keybinds.new_tab, KeybindAction::NewTab),

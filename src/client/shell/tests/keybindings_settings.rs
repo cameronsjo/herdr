@@ -770,3 +770,58 @@ fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
     assert!(state.handle_input_bytes(b"\r").actions.is_empty());
     assert_eq!(state.mode, ClientShellMode::Terminal);
 }
+
+// Workspace reorder indexes the endpoint's own workspace list. The sidebar's
+// grouped view is a different order, so a reorder computed from it would move
+// the workspace somewhere the user did not ask for.
+#[test]
+fn workspace_reorder_actions_dispatch_workspace_move_with_wrapping_indices() {
+    use crate::api::schema::{Method, WorkspaceMoveParams};
+    use crate::input::KeybindAction;
+
+    fn state_with(focused: &str) -> ClientShellState {
+        let mut snapshot = snapshot();
+        let template = snapshot.workspaces[0].clone();
+        snapshot.workspaces = (1..=3)
+            .map(|number| {
+                let mut workspace = template.clone();
+                workspace.workspace_id = format!("ws_{number}");
+                workspace.number = number;
+                workspace.focused = false;
+                workspace
+            })
+            .collect();
+        snapshot.focused_workspace_id = Some(focused.to_string());
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(snapshot));
+        state
+    }
+
+    let expectations = [
+        ("ws_2", KeybindAction::MoveWorkspacePrevious, 0usize),
+        ("ws_2", KeybindAction::MoveWorkspaceNext, 3usize),
+        ("ws_1", KeybindAction::MoveWorkspacePrevious, 3usize),
+        ("ws_3", KeybindAction::MoveWorkspaceNext, 0usize),
+    ];
+    for (focused, action, insert_index) in expectations {
+        let method = state_with(focused)
+            .endpoint_method_for_action(action)
+            .expect("workspace reorder dispatches an endpoint method");
+        assert_eq!(
+            method,
+            Method::WorkspaceMove(WorkspaceMoveParams {
+                workspace_id: focused.to_string(),
+                insert_index,
+            }),
+            "{action:?} from {focused}"
+        );
+    }
+
+    // A lone workspace has nowhere to go; sending a move would be a no-op
+    // round trip the endpoint has to reject.
+    let mut single = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    single.set_snapshot(Box::new(snapshot()));
+    assert!(single
+        .endpoint_method_for_action(KeybindAction::MoveWorkspaceNext)
+        .is_none());
+}

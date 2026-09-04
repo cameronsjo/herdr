@@ -376,6 +376,20 @@ pub struct KeysConfig {
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
     pub next_workspace: BindingConfig,
+    /// Move the active workspace one position toward the front. Unset by default.
+    pub move_workspace_previous: BindingConfig,
+    /// Move the active workspace one position toward the back. Unset by default.
+    pub move_workspace_next: BindingConfig,
+    /// Move the focused pane to another workspace. Unset by default.
+    pub move_pane_to_space: BindingConfig,
+    /// Move the focused pane to a new workspace. Unset by default.
+    pub move_pane_to_new_space: BindingConfig,
+    /// Move the focused pane to a new tab. Unset by default.
+    pub move_pane_to_new_tab: BindingConfig,
+    /// Move the active tab to another workspace. Unset by default.
+    pub move_tab_to_space: BindingConfig,
+    /// Move the active tab to a new workspace. Unset by default.
+    pub move_tab_to_new_space: BindingConfig,
     /// Focus the previous agent shown in the agent panel. Unset by default.
     pub previous_agent: BindingConfig,
     /// Focus the next agent shown in the agent panel. Unset by default.
@@ -510,6 +524,20 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    move_workspace_previous: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_workspace_next: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_to_space: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_to_new_space: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_pane_to_new_tab: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_tab_to_space: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    move_tab_to_new_space: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_agent: Option<BindingConfig>,
@@ -635,6 +663,13 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(open_notification_target);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
+        apply_field!(move_workspace_previous);
+        apply_field!(move_workspace_next);
+        apply_field!(move_pane_to_space);
+        apply_field!(move_pane_to_new_space);
+        apply_field!(move_pane_to_new_tab);
+        apply_field!(move_tab_to_space);
+        apply_field!(move_tab_to_new_space);
         apply_field!(previous_agent);
         apply_field!(next_agent);
         apply_field!(focus_agent);
@@ -740,6 +775,13 @@ impl KeysConfig {
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
+        copy_effective_action_field!(move_workspace_previous, keybinds.move_workspace_previous);
+        copy_effective_action_field!(move_workspace_next, keybinds.move_workspace_next);
+        copy_effective_action_field!(move_pane_to_space, keybinds.move_pane_to_space);
+        copy_effective_action_field!(move_pane_to_new_space, keybinds.move_pane_to_new_space);
+        copy_effective_action_field!(move_pane_to_new_tab, keybinds.move_pane_to_new_tab);
+        copy_effective_action_field!(move_tab_to_space, keybinds.move_tab_to_space);
+        copy_effective_action_field!(move_tab_to_new_space, keybinds.move_tab_to_new_space);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
         copy_effective_action_field!(next_agent, keybinds.next_agent);
         copy_effective_indexed_field!(focus_agent, keybinds.focus_agent);
@@ -1051,6 +1093,13 @@ impl Default for KeysConfig {
             open_notification_target: BindingConfig::one("prefix+o"),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
+            move_workspace_previous: BindingConfig::empty(),
+            move_workspace_next: BindingConfig::empty(),
+            move_pane_to_space: BindingConfig::empty(),
+            move_pane_to_new_space: BindingConfig::empty(),
+            move_pane_to_new_tab: BindingConfig::empty(),
+            move_tab_to_space: BindingConfig::empty(),
+            move_tab_to_new_space: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),
             next_agent: BindingConfig::empty(),
             focus_agent: BindingConfig::empty(),

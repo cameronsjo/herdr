@@ -912,7 +912,7 @@ impl ClientShellState {
             Method, PaneDirection, PaneFocusDirectionParams, PaneMoveDestination, PaneMoveParams,
             PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomMode,
             PaneZoomParams, SplitDirection, TabCreateParams, TabMoveDestination, TabMoveParams,
-            TabTarget, WorkspaceTarget,
+            TabTarget, WorkspaceMoveParams, WorkspaceTarget,
         };
         use crate::input::KeybindAction;
 
@@ -1009,6 +1009,34 @@ impl ClientShellState {
                     .clone();
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
+            }
+            KeybindAction::MoveWorkspacePrevious | KeybindAction::MoveWorkspaceNext => {
+                // Reorder uses the endpoint's own workspace order, not the
+                // sidebar's grouped view: `insert_index` indexes the list the
+                // server keeps, so a filtered or grouped position would move
+                // the workspace somewhere else entirely.
+                if snapshot.workspaces.len() <= 1 {
+                    return None;
+                }
+                let source = snapshot
+                    .workspaces
+                    .iter()
+                    .position(|workspace| workspace.workspace_id == focused_workspace)?;
+                let insert_index = if action == KeybindAction::MoveWorkspaceNext {
+                    if source + 1 >= snapshot.workspaces.len() {
+                        0
+                    } else {
+                        source + 2
+                    }
+                } else if source == 0 {
+                    snapshot.workspaces.len()
+                } else {
+                    source - 1
+                };
+                Some(Method::WorkspaceMove(WorkspaceMoveParams {
+                    workspace_id: focused_workspace,
+                    insert_index,
+                }))
             }
             KeybindAction::SwitchTab(index) => {
                 let tabs = snapshot

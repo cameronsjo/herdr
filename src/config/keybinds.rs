@@ -334,6 +334,13 @@ pub struct Keybinds {
     pub open_notification_target: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
+    pub move_workspace_previous: ActionKeybinds,
+    pub move_workspace_next: ActionKeybinds,
+    pub move_pane_to_space: ActionKeybinds,
+    pub move_pane_to_new_space: ActionKeybinds,
+    pub move_pane_to_new_tab: ActionKeybinds,
+    pub move_tab_to_space: ActionKeybinds,
+    pub move_tab_to_new_space: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
     pub next_agent: ActionKeybinds,
     pub focus_agent: Vec<IndexedKeybind>,
@@ -503,6 +510,13 @@ impl Config {
             open_notification_target: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
+            move_workspace_previous: empty_action!(),
+            move_workspace_next: empty_action!(),
+            move_pane_to_space: empty_action!(),
+            move_pane_to_new_space: empty_action!(),
+            move_pane_to_new_tab: empty_action!(),
+            move_tab_to_space: empty_action!(),
+            move_tab_to_new_space: empty_action!(),
             previous_agent: empty_action!(),
             next_agent: empty_action!(),
             focus_agent: Vec::new(),
@@ -636,6 +650,25 @@ impl Config {
             );
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
+            apply_action!(
+                keybinds.move_workspace_previous,
+                move_workspace_previous,
+                source
+            );
+            apply_action!(keybinds.move_workspace_next, move_workspace_next, source);
+            apply_action!(keybinds.move_pane_to_space, move_pane_to_space, source);
+            apply_action!(
+                keybinds.move_pane_to_new_space,
+                move_pane_to_new_space,
+                source
+            );
+            apply_action!(keybinds.move_pane_to_new_tab, move_pane_to_new_tab, source);
+            apply_action!(keybinds.move_tab_to_space, move_tab_to_space, source);
+            apply_action!(
+                keybinds.move_tab_to_new_space,
+                move_tab_to_new_space,
+                source
+            );
             apply_action!(keybinds.previous_agent, previous_agent, source);
             apply_action!(keybinds.next_agent, next_agent, source);
             apply_indexed!(
@@ -2309,5 +2342,59 @@ width = "80%"
             .collect_diagnostics()
             .iter()
             .any(|diag| diag.contains("popup size on non-popup custom command")));
+    }
+
+    #[test]
+    fn move_actions_are_unbound_by_default_and_bindable_from_config() {
+        use crate::input::{resolve_prefix_binding, KeybindAction, KeybindMatch};
+
+        let defaults = Config::default().keybinds();
+        for bindings in [
+            &defaults.move_workspace_previous,
+            &defaults.move_workspace_next,
+            &defaults.move_pane_to_space,
+            &defaults.move_pane_to_new_space,
+            &defaults.move_pane_to_new_tab,
+            &defaults.move_tab_to_space,
+            &defaults.move_tab_to_new_space,
+        ] {
+            assert!(
+                bindings.bindings.is_empty(),
+                "reshuffle actions ship unbound so they cannot displace a default binding"
+            );
+        }
+
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+move_workspace_previous = "prefix+shift+comma"
+move_workspace_next = "prefix+shift+period"
+move_pane_to_space = "prefix+shift+m"
+move_pane_to_new_space = "prefix+shift+n"
+move_pane_to_new_tab = "prefix+shift+b"
+move_tab_to_space = "prefix+shift+g"
+move_tab_to_new_space = "prefix+shift+y"
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+
+        for (combo, expected) in [
+            ("shift+comma", KeybindAction::MoveWorkspacePrevious),
+            ("shift+period", KeybindAction::MoveWorkspaceNext),
+            ("shift+m", KeybindAction::MovePaneToSpace),
+            ("shift+n", KeybindAction::MovePaneToNewSpace),
+            ("shift+b", KeybindAction::MovePaneToNewTab),
+            ("shift+g", KeybindAction::MoveTabToSpace),
+            ("shift+y", KeybindAction::MoveTabToNewSpace),
+        ] {
+            let (code, modifiers) = parse_key_combo(combo).expect("test combo parses");
+            let key = TerminalKey::new(code, modifiers);
+            let resolved = resolve_prefix_binding(&keybinds, &key);
+            assert!(
+                matches!(resolved, Some(KeybindMatch::Action(action)) if action == expected),
+                "{combo} should bind {expected:?}, got {resolved:?}"
+            );
+        }
     }
 }

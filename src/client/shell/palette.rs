@@ -505,11 +505,13 @@ mod tests {
         assert!(names("command palette").is_empty());
     }
 
-    // A help row reaches the palette only when it carries a KeybindAction, so
-    // a row added upstream as a plain entry is silently palette-invisible.
-    // These six arrived that way in an upstream sync.
+    // A help row reaches the palette only when it carries a KeybindAction and
+    // the action carries a palette id, so an action missing either is silently
+    // palette-invisible however bindable and dispatchable it is. Six rows
+    // arrived that way in an upstream sync; the four pane swaps had a row but
+    // no palette id, which this list would not have caught until it named them.
     #[test]
-    fn tab_reorder_and_pane_resize_rows_reach_the_palette() {
+    fn reorder_and_resize_rows_reach_the_palette() {
         let snapshot = super::super::tests::snapshot();
         let actions: Vec<PaletteAction> = palette_commands(&keybinds(), &no_plugins(), &snapshot)
             .into_iter()
@@ -519,6 +521,12 @@ mod tests {
         for expected in [
             KeybindAction::MoveTabPrevious,
             KeybindAction::MoveTabNext,
+            KeybindAction::MoveWorkspacePrevious,
+            KeybindAction::MoveWorkspaceNext,
+            KeybindAction::SwapPaneLeft,
+            KeybindAction::SwapPaneDown,
+            KeybindAction::SwapPaneUp,
+            KeybindAction::SwapPaneRight,
             KeybindAction::ResizePaneLeft,
             KeybindAction::ResizePaneDown,
             KeybindAction::ResizePaneUp,
@@ -559,6 +567,32 @@ mod tests {
                 .iter()
                 .any(|keyword| keyword.contains("workspace")),
             "move tab to space should be findable by workspace vocabulary"
+        );
+    }
+
+    // The context menu and the sidebar say "move pane"; the API says "swap".
+    // Without the keyword bridge the palette answers nothing to the wording a
+    // user arrives with.
+    #[test]
+    fn move_pane_left_matches_swap_pane_left_via_keyword() {
+        let matches = names("move pane left");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("swap pane left"),
+            "got {matches:?}"
+        );
+    }
+
+    #[test]
+    fn reorder_workspace_matches_both_workspace_move_commands_via_keywords() {
+        let matches = names("reorder workspace");
+        assert!(
+            matches.iter().any(|name| name == "move workspace up"),
+            "got {matches:?}"
+        );
+        assert!(
+            matches.iter().any(|name| name == "move workspace down"),
+            "got {matches:?}"
         );
     }
 

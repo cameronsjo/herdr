@@ -224,6 +224,22 @@ pub(crate) fn keybind_help_groups(
                     "next workspace",
                     KeybindAction::NextWorkspace,
                 ),
+                action_entry_kw(
+                    binding_label(&keybinds.move_workspace_previous),
+                    "move workspace up",
+                    KeybindAction::MoveWorkspacePrevious,
+                    &["reorder workspace", "move workspace left", "move space up"],
+                ),
+                action_entry_kw(
+                    binding_label(&keybinds.move_workspace_next),
+                    "move workspace down",
+                    KeybindAction::MoveWorkspaceNext,
+                    &[
+                        "reorder workspace",
+                        "move workspace right",
+                        "move space down",
+                    ],
+                ),
                 entry(
                     indexed_label(&keybinds.switch_workspace),
                     "switch workspace 1-9",
@@ -271,13 +287,13 @@ pub(crate) fn keybind_help_groups(
                 ),
                 entry(indexed_label(&keybinds.switch_tab), "switch tab 1-9"),
                 action_entry_kw(
-                    "",
+                    binding_label(&keybinds.move_tab_to_space),
                     "move tab to space",
                     KeybindAction::MoveTabToSpace,
                     &["send tab to workspace", "move tab to another space"],
                 ),
                 action_entry_kw(
-                    "",
+                    binding_label(&keybinds.move_tab_to_new_space),
                     "move tab to new space",
                     KeybindAction::MoveTabToNewSpace,
                     &["split tab into workspace", "new space from tab"],
@@ -315,19 +331,19 @@ pub(crate) fn keybind_help_groups(
                     KeybindAction::RenamePane,
                 ),
                 action_entry_kw(
-                    "",
+                    binding_label(&keybinds.move_pane_to_space),
                     "move pane to space",
                     KeybindAction::MovePaneToSpace,
                     &["send pane to workspace", "move pane to another space"],
                 ),
                 action_entry_kw(
-                    "",
+                    binding_label(&keybinds.move_pane_to_new_space),
                     "move pane to new space",
                     KeybindAction::MovePaneToNewSpace,
                     &["split pane into workspace", "new space from pane"],
                 ),
                 action_entry_kw(
-                    "",
+                    binding_label(&keybinds.move_pane_to_new_tab),
                     "move pane to new tab",
                     KeybindAction::MovePaneToNewTab,
                     &["send pane to new tab"],
@@ -388,6 +404,30 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.focus_pane_right),
                     "focus pane right",
                     KeybindAction::FocusPaneRight,
+                ),
+                action_entry_kw(
+                    binding_label(&keybinds.swap_pane_left),
+                    "swap pane left",
+                    KeybindAction::SwapPaneLeft,
+                    &["move pane left", "swap pane with left"],
+                ),
+                action_entry_kw(
+                    binding_label(&keybinds.swap_pane_down),
+                    "swap pane down",
+                    KeybindAction::SwapPaneDown,
+                    &["move pane down", "swap pane with below"],
+                ),
+                action_entry_kw(
+                    binding_label(&keybinds.swap_pane_up),
+                    "swap pane up",
+                    KeybindAction::SwapPaneUp,
+                    &["move pane up", "swap pane with above"],
+                ),
+                action_entry_kw(
+                    binding_label(&keybinds.swap_pane_right),
+                    "swap pane right",
+                    KeybindAction::SwapPaneRight,
+                    &["move pane right", "swap pane with right"],
                 ),
                 action_entry(
                     binding_label(&keybinds.cycle_pane_next),
