@@ -11,7 +11,15 @@ tab prompts for which way it splits against that tab's focused pane. The palette
 lists any enabled plugin's actions and panes, so a plugin author's `herdr-plugin.toml`
 commands are reachable by browsing instead of only through a bound key or the CLI/API.
 
-Nothing else changes. The keybind reference on `?` behaves exactly as upstream ships it.
+This fork also carries a handful of smaller additions on top of upstream:
+
+- Sanitized workspace/agent labels, so directory-derived names can't smuggle
+  bidi overrides or other control characters into the sidebar.
+- Improved Codex lifecycle detection and pane titles.
+- An `agent type-submit` CLI/API primitive for driving an agent's input.
+- Aligned trailing token groups in the sidebar.
+
+The keybind reference on `?` behaves exactly as upstream ships it.
 
 ## Why it lives here
 
