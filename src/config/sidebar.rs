@@ -409,17 +409,20 @@ pub struct AgentsSidebarConfig {
 }
 
 impl AgentsSidebarConfig {
-    /// Rows for one entry. A `rows_by_agent` override always wins; otherwise
-    /// grouping selects `grouped_rows` over `rows`. Grouping never edits a row
-    /// list — suppressing a token would drop the row entirely.
+    /// Rows for one entry. When grouped, `grouped_rows` always wins: it is
+    /// the row list built for the tokens grouping suppresses (a group header
+    /// already shows the workspace), and a `rows_by_agent` override written
+    /// for the ungrouped layout would otherwise repeat that token under an
+    /// already-grouped header. Ungrouped, a `rows_by_agent` override wins
+    /// over `rows`. Grouping never edits a row list — suppressing a token
+    /// would drop the row entirely.
     pub(crate) fn rows_for_agent(&self, agent: Option<Agent>, grouped: bool) -> &AgentSidebarRows {
+        if grouped {
+            return &self.grouped_rows;
+        }
         agent
             .and_then(|agent| self.rows_by_agent.get(crate::detect::agent_label(agent)))
-            .unwrap_or(if grouped {
-                &self.grouped_rows
-            } else {
-                &self.rows
-            })
+            .unwrap_or(&self.rows)
     }
 }
 
@@ -655,7 +658,7 @@ rows = [[{ token = "git_status", fg = "#ff00aa" }], [{ token = "$jj", bold = tru
     }
 
     #[test]
-    fn group_by_selects_grouped_rows_and_agent_overrides_win_in_both_modes() {
+    fn group_by_selects_grouped_rows_and_agent_overrides_win_only_ungrouped() {
         let config: crate::config::Config = toml::from_str(
             r#"
 [ui.sidebar.agents]
@@ -679,13 +682,44 @@ claude = [["pane"]]
             agents.rows_for_agent(None, true),
             &vec![vec![AgentSidebarToken::Agent]]
         );
-        for grouped in [false, true] {
-            assert_eq!(
-                agents.rows_for_agent(Some(Agent::Claude), grouped),
-                &vec![vec![AgentSidebarToken::Pane]],
-                "rows_by_agent must win with grouped = {grouped}"
-            );
-        }
+        assert_eq!(
+            agents.rows_for_agent(Some(Agent::Claude), false),
+            &vec![vec![AgentSidebarToken::Pane]],
+            "rows_by_agent must win when ungrouped"
+        );
+        assert_eq!(
+            agents.rows_for_agent(Some(Agent::Claude), true),
+            &vec![vec![AgentSidebarToken::Agent]],
+            "grouped_rows must win over rows_by_agent when grouped"
+        );
+    }
+
+    #[test]
+    fn grouped_agent_override_does_not_duplicate_workspace_token() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+group_by = "workspace"
+rows = [["workspace", "agent"]]
+grouped_rows = [["agent"]]
+
+[ui.sidebar.agents.rows_by_agent]
+claude = [["workspace", "agent"]]
+"#,
+        )
+        .expect("grouped sidebar config with per-agent override");
+        let agents = &config.ui.sidebar.agents;
+
+        let resolved = agents.rows_for_agent(Some(Agent::Claude), true);
+
+        assert!(
+            !resolved
+                .iter()
+                .flatten()
+                .any(|token| matches!(token, AgentSidebarToken::Workspace)),
+            "grouped rows must not repeat the workspace token a group header already shows: {resolved:?}"
+        );
+        assert_eq!(resolved, &vec![vec![AgentSidebarToken::Agent]]);
     }
 
     #[test]
