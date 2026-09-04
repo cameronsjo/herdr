@@ -251,12 +251,16 @@ impl ClientShellState {
 
     pub(super) fn receive_palette_plugins(
         &mut self,
-        plugins: Vec<crate::api::schema::InstalledPluginInfo>,
+        installed: Vec<crate::api::schema::InstalledPluginInfo>,
+        host_platform: Option<crate::api::schema::PluginPlatform>,
     ) -> bool {
         let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
             return false;
         };
-        palette.plugins = plugins;
+        palette.plugins = super::palette::PalettePlugins {
+            installed,
+            host_platform,
+        };
         palette.selected = 0;
         palette.scroll = 0;
         true
@@ -284,15 +288,11 @@ impl ClientShellState {
             .unwrap_or(1)
     }
 
-    fn palette_max_scroll(&self) -> usize {
-        self.filtered_palette_commands()
-            .len()
-            .saturating_sub(self.palette_body_height())
-    }
-
-    fn ensure_palette_selection_visible(&mut self) {
+    /// Takes the row count from the caller: rebuilding the command list is the
+    /// expensive part, and every caller has already built it.
+    fn ensure_palette_selection_visible(&mut self, count: usize) {
         let viewport = self.palette_body_height();
-        let max_scroll = self.palette_max_scroll();
+        let max_scroll = count.saturating_sub(viewport);
         let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
             return;
         };
@@ -318,7 +318,7 @@ impl ClientShellState {
         }
         let current = palette.selected.min(count - 1) as isize;
         palette.selected = (current + delta).rem_euclid(count as isize) as usize;
-        self.ensure_palette_selection_visible();
+        self.ensure_palette_selection_visible(count);
     }
 
     fn reset_palette_selection(&mut self) {

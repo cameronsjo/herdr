@@ -107,7 +107,15 @@ impl App {
             .cloned()
             .collect::<Vec<_>>();
         plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
-        encode_success(id, ResponseResult::PluginList { plugins })
+        encode_success(
+            id,
+            ResponseResult::PluginList {
+                plugins,
+                // The server is the only side that knows which platform will
+                // actually run these commands.
+                host_platform: Some(manifest::current_platform()),
+            },
+        )
     }
 
     pub(super) fn handle_plugin_unlink(
@@ -1007,7 +1015,7 @@ platforms = ["linux", "macos", "windows"]
             id: "list".into(),
             method: Method::PluginList(PluginListParams { plugin_id: None }),
         });
-        let ResponseResult::PluginList { plugins } = response_result(&list) else {
+        let ResponseResult::PluginList { plugins, .. } = response_result(&list) else {
             panic!("expected plugin list response: {list}");
         };
         assert_eq!(plugins.len(), 1);
@@ -1031,7 +1039,7 @@ platforms = ["linux", "macos", "windows"]
             id: "list-empty".into(),
             method: Method::PluginList(PluginListParams { plugin_id: None }),
         });
-        let ResponseResult::PluginList { plugins } = response_result(&list) else {
+        let ResponseResult::PluginList { plugins, .. } = response_result(&list) else {
             panic!("expected plugin list response: {list}");
         };
         assert!(plugins.is_empty());
@@ -2137,7 +2145,7 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
             id: "plugin-list".into(),
             method: Method::PluginList(PluginListParams { plugin_id: None }),
         });
-        let ResponseResult::PluginList { plugins } = response_result(&list) else {
+        let ResponseResult::PluginList { plugins, .. } = response_result(&list) else {
             panic!("expected plugin list: {list}");
         };
         assert_eq!(plugins.len(), 1);

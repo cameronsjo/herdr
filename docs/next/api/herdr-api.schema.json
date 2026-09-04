@@ -10497,6 +10497,17 @@
             },
             {
               "properties": {
+                "host_platform": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/PluginPlatform"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The platform the answering server runs on, so a client can tell\nwhich declared `platforms` entries that server would accept. A\nremote client's own OS is not the deciding one.\n\nAbsent from an older server. A consumer must read absence as\n\"unknown\" and not filter, because the server refuses an\nunsupported action at invoke time anyway — whereas hiding a\nrunnable action leaves no other way to reach it."
+                },
                 "plugins": {
                   "items": {
                     "$ref": "#/schemas/success_response/$defs/InstalledPluginInfo"

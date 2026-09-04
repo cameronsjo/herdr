@@ -13,7 +13,7 @@ use super::panes::{
 };
 use super::plugins::{
     InstalledPluginInfo, PluginActionInfo, PluginCommandLogInfo, PluginInvocationContext,
-    PluginPaneInfo,
+    PluginPaneInfo, PluginPlatform,
 };
 use super::server::ServerCapabilities;
 use super::session::SessionSnapshot;
@@ -261,6 +261,16 @@ pub enum ResponseResult {
     },
     PluginList {
         plugins: Vec<InstalledPluginInfo>,
+        /// The platform the answering server runs on, so a client can tell
+        /// which declared `platforms` entries that server would accept. A
+        /// remote client's own OS is not the deciding one.
+        ///
+        /// Absent from an older server. A consumer must read absence as
+        /// "unknown" and not filter, because the server refuses an
+        /// unsupported action at invoke time anyway — whereas hiding a
+        /// runnable action leaves no other way to reach it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_platform: Option<PluginPlatform>,
     },
     PluginUnlinked {
         plugin_id: String,

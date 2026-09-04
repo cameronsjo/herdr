@@ -852,9 +852,13 @@ impl ClientShellState {
             }
             PendingEndpointKind::PalettePluginList => {
                 return match result {
-                    Ok(crate::api::schema::ResponseResult::PluginList { plugins }) => {
-                        (self.receive_palette_plugins(plugins), Vec::new())
-                    }
+                    Ok(crate::api::schema::ResponseResult::PluginList {
+                        plugins,
+                        host_platform,
+                    }) => (
+                        self.receive_palette_plugins(plugins, host_platform),
+                        Vec::new(),
+                    ),
                     // The palette keeps its core rows either way; a failed or
                     // unexpected plugin list only costs the plugin rows.
                     Ok(_) | Err(_) => (false, Vec::new()),

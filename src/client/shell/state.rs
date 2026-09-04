@@ -427,7 +427,7 @@ pub(super) struct ClientPaletteOverlay {
     pub(super) selected: usize,
     pub(super) scroll: usize,
     pub(super) recent_command_ids: Vec<String>,
-    pub(super) plugins: Vec<crate::api::schema::InstalledPluginInfo>,
+    pub(super) plugins: super::palette::PalettePlugins,
 }
 
 /// A pane move that landed on an existing tab, waiting on the user to pick

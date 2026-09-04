@@ -1056,6 +1056,7 @@ fn plugin_link_list_unlink_round_trip() {
             id: "plugin_list".into(),
             result: ResponseResult::PluginList {
                 plugins: vec![plugin.clone()],
+                host_platform: Some(crate::api::schema::PluginPlatform::Linux),
             },
         },
         SuccessResponse {

@@ -118,28 +118,43 @@ struct PluginPaletteCommand {
     kind: &'static str,
 }
 
-/// The client's own platform. Plugin manifests declare which platforms an
-/// action or pane supports, and the endpoint refuses an unsupported one; the
-/// palette hides those rows rather than offering a row that can only error.
-/// For a client attached to a server on a different OS this reads the wrong
-/// platform — the endpoint's refusal remains the backstop in that case.
-const fn host_platform() -> Option<PluginPlatform> {
-    if cfg!(target_os = "linux") {
-        Some(PluginPlatform::Linux)
-    } else if cfg!(target_os = "macos") {
-        Some(PluginPlatform::Macos)
-    } else if cfg!(windows) {
-        Some(PluginPlatform::Windows)
-    } else {
-        None
-    }
+/// What the endpoint reported on the palette's `plugin.list` call. Empty
+/// until the response arrives, and empty forever against an endpoint that
+/// does not support the method — the palette's core rows do not depend on it.
+#[derive(Debug, Default)]
+pub(crate) struct PalettePlugins {
+    pub installed: Vec<InstalledPluginInfo>,
+    /// The platform the answering server runs on. `None` against a server too
+    /// old to report it, which means "do not filter" — see
+    /// [`platform_supported`].
+    pub host_platform: Option<PluginPlatform>,
 }
 
-fn platform_supported(platforms: Option<&Vec<PluginPlatform>>) -> bool {
+/// Whether the server would run this action or pane, given the platform it
+/// reported on `plugin.list`.
+///
+/// The deciding platform is the *server's*, never the client's: `herdr
+/// --remote` puts the two on different machines, and the commands run where
+/// the server is. Filtering on the client's own OS is wrong in both
+/// directions, and only one of them is recoverable — too permissive and the
+/// server's own check refuses the invoke with an error the operator sees, but
+/// too restrictive and the row is hidden, the invoke never sent, and a
+/// runnable action has no other way to be reached.
+///
+/// `host_platform` is `None` against a server too old to report it. That case
+/// must not filter, for the same reason: unknown resolves toward the
+/// recoverable direction.
+fn platform_supported(
+    platforms: Option<&Vec<PluginPlatform>>,
+    host_platform: Option<PluginPlatform>,
+) -> bool {
     let Some(platforms) = platforms.filter(|platforms| !platforms.is_empty()) else {
         return true;
     };
-    host_platform().is_some_and(|host| platforms.contains(&host))
+    let Some(host) = host_platform else {
+        return true;
+    };
+    platforms.contains(&host)
 }
 
 /// The manifest's `contexts` list says what focus an action needs. An action
@@ -200,12 +215,16 @@ fn disambiguate_plugin_labels(plugin_commands: &mut [PluginPaletteCommand]) {
 }
 
 fn plugin_palette_commands(
-    plugins: &[InstalledPluginInfo],
+    plugins: &PalettePlugins,
     snapshot: &ClientShellSnapshot,
 ) -> Vec<PaletteCommand> {
+    let host_platform = plugins.host_platform;
     let mut plugin_commands: Vec<PluginPaletteCommand> = Vec::new();
-    let mut enabled: Vec<&InstalledPluginInfo> =
-        plugins.iter().filter(|plugin| plugin.enabled).collect();
+    let mut enabled: Vec<&InstalledPluginInfo> = plugins
+        .installed
+        .iter()
+        .filter(|plugin| plugin.enabled)
+        .collect();
     enabled.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
 
     for plugin in &enabled {
@@ -213,7 +232,10 @@ fn plugin_palette_commands(
             .actions
             .iter()
             .filter(|action| {
-                platform_supported(action.platforms.as_ref().or(plugin.platforms.as_ref()))
+                platform_supported(
+                    action.platforms.as_ref().or(plugin.platforms.as_ref()),
+                    host_platform,
+                )
             })
             .filter(|action| action_context_applies(&action.contexts, snapshot))
             .collect();
@@ -240,7 +262,10 @@ fn plugin_palette_commands(
             .panes
             .iter()
             .filter(|pane| {
-                platform_supported(pane.platforms.as_ref().or(plugin.platforms.as_ref()))
+                platform_supported(
+                    pane.platforms.as_ref().or(plugin.platforms.as_ref()),
+                    host_platform,
+                )
             })
             .collect();
         panes.sort_by(|left, right| left.id.cmp(&right.id));
@@ -270,7 +295,7 @@ fn plugin_palette_commands(
 
 pub(crate) fn palette_commands(
     keybinds: &LiveKeybindConfig,
-    plugins: &[InstalledPluginInfo],
+    plugins: &PalettePlugins,
     snapshot: &ClientShellSnapshot,
 ) -> Vec<PaletteCommand> {
     let mut commands: Vec<PaletteCommand> =
@@ -350,7 +375,7 @@ pub(crate) fn filtered_palette_commands(
     query: &str,
     recent_command_ids: &[String],
     keybinds: &LiveKeybindConfig,
-    plugins: &[InstalledPluginInfo],
+    plugins: &PalettePlugins,
     snapshot: &ClientShellSnapshot,
 ) -> Vec<PaletteCommand> {
     let query = query.trim().to_lowercase();
@@ -383,7 +408,7 @@ mod tests {
 
     fn names(query: &str) -> Vec<String> {
         let snapshot = super::super::tests::snapshot();
-        filtered_palette_commands(query, &[], &keybinds(), &[], &snapshot)
+        filtered_palette_commands(query, &[], &keybinds(), &no_plugins(), &snapshot)
             .into_iter()
             .map(|command| command.name.into_owned())
             .collect()
@@ -428,7 +453,7 @@ mod tests {
     #[test]
     fn every_palette_command_is_runnable() {
         let snapshot = super::super::tests::snapshot();
-        assert!(!palette_commands(&keybinds(), &[], &snapshot).is_empty());
+        assert!(!palette_commands(&keybinds(), &no_plugins(), &snapshot).is_empty());
     }
 
     #[test]
@@ -446,7 +471,8 @@ mod tests {
             "core:new-tab".to_string(),
             "plugin-action:missing.action".to_string(),
         ];
-        let commands = filtered_palette_commands("", &recent, &keybinds(), &[], &snapshot);
+        let commands =
+            filtered_palette_commands("", &recent, &keybinds(), &no_plugins(), &snapshot);
         let ids: Vec<&str> = commands.iter().map(|command| command.id.as_str()).collect();
 
         assert_eq!(ids.first().copied(), Some("core:resize-pane-left"));
@@ -475,7 +501,7 @@ mod tests {
     #[test]
     fn tab_reorder_and_pane_resize_rows_reach_the_palette() {
         let snapshot = super::super::tests::snapshot();
-        let actions: Vec<PaletteAction> = palette_commands(&keybinds(), &[], &snapshot)
+        let actions: Vec<PaletteAction> = palette_commands(&keybinds(), &no_plugins(), &snapshot)
             .into_iter()
             .map(|command| command.action)
             .collect();
@@ -498,7 +524,7 @@ mod tests {
     #[test]
     fn move_tab_to_space_commands_reach_the_palette() {
         let snapshot = super::super::tests::snapshot();
-        let commands = palette_commands(&keybinds(), &[], &snapshot);
+        let commands = palette_commands(&keybinds(), &no_plugins(), &snapshot);
 
         for expected in [
             KeybindAction::MoveTabToSpace,
@@ -685,13 +711,13 @@ mod tests {
         let snapshot = super::super::tests::snapshot();
         let mut plugin = test_plugin();
         plugin.enabled = false;
-        assert!(plugin_palette_commands(&[plugin], &snapshot).is_empty());
+        assert!(plugin_palette_commands(&host_plugins(vec![plugin]), &snapshot).is_empty());
     }
 
     #[test]
     fn an_enabled_plugin_offers_its_actions_and_panes() {
         let snapshot = super::super::tests::snapshot();
-        let commands = plugin_palette_commands(&[test_plugin()], &snapshot);
+        let commands = plugin_palette_commands(&host_plugins(vec![test_plugin()]), &snapshot);
         let ids: Vec<&str> = commands.iter().map(|command| command.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -713,20 +739,79 @@ mod tests {
         );
     }
 
+    // The deciding platform is the server's. These three pin all of it: a
+    // manifest matching the server is offered, one that does not is hidden,
+    // and a server that never said stops the filter entirely — including when
+    // the manifest names a platform the *client* happens to be running on,
+    // which is the case a cfg!-based filter got wrong.
     #[test]
-    fn a_platform_the_client_is_not_running_on_hides_the_row() {
+    fn a_manifest_platform_matching_the_server_is_offered() {
         let snapshot = super::super::tests::snapshot();
         let mut plugin = test_plugin();
-        let other = if host_platform() == Some(PluginPlatform::Linux) {
-            PluginPlatform::Windows
-        } else {
-            PluginPlatform::Linux
+        plugin.actions[0].platforms = Some(vec![PluginPlatform::Windows]);
+        let plugins = PalettePlugins {
+            installed: vec![plugin],
+            host_platform: Some(PluginPlatform::Windows),
         };
-        plugin.actions[0].platforms = Some(vec![other]);
-        let commands = plugin_palette_commands(&[plugin], &snapshot);
+        let commands = plugin_palette_commands(&plugins, &snapshot);
+        assert!(commands
+            .iter()
+            .any(|command| command.id == "plugin-action:demo.build"));
+    }
+
+    #[test]
+    fn a_manifest_platform_the_server_does_not_run_hides_the_row() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        plugin.actions[0].platforms = Some(vec![PluginPlatform::Windows]);
+        let plugins = PalettePlugins {
+            installed: vec![plugin],
+            host_platform: Some(PluginPlatform::Linux),
+        };
+        let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(commands
             .iter()
             .all(|command| command.id != "plugin-action:demo.build"));
+    }
+
+    #[test]
+    fn a_server_that_reports_no_platform_hides_nothing() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        // Every platform except the one this test binary runs on, so a
+        // reintroduced cfg!-based filter would hide the row and fail here.
+        plugin.actions[0].platforms = Some(
+            vec![
+                PluginPlatform::Linux,
+                PluginPlatform::Macos,
+                PluginPlatform::Windows,
+            ]
+            .into_iter()
+            .filter(|platform| *platform != this_binarys_platform())
+            .collect(),
+        );
+        let plugins = PalettePlugins {
+            installed: vec![plugin],
+            host_platform: None,
+        };
+        let commands = plugin_palette_commands(&plugins, &snapshot);
+        assert!(
+            commands
+                .iter()
+                .any(|command| command.id == "plugin-action:demo.build"),
+            "an unreported server platform must not filter: hiding a runnable \
+             action leaves no other way to reach it"
+        );
+    }
+
+    fn this_binarys_platform() -> PluginPlatform {
+        if cfg!(target_os = "linux") {
+            PluginPlatform::Linux
+        } else if cfg!(target_os = "macos") {
+            PluginPlatform::Macos
+        } else {
+            PluginPlatform::Windows
+        }
     }
 
     #[test]
@@ -734,10 +819,81 @@ mod tests {
         let snapshot = super::super::tests::snapshot();
         let mut plugin = test_plugin();
         plugin.actions[0].contexts = vec![PluginActionContext::Selection];
-        let commands = plugin_palette_commands(&[plugin], &snapshot);
+        let commands = plugin_palette_commands(&host_plugins(vec![plugin]), &snapshot);
         assert!(commands
             .iter()
             .all(|command| command.id != "plugin-action:demo.build"));
+    }
+
+    fn no_plugins() -> PalettePlugins {
+        PalettePlugins::default()
+    }
+
+    /// Plugins whose declared platforms always match, so a test that is not
+    /// about platform filtering never trips it.
+    fn host_plugins(installed: Vec<InstalledPluginInfo>) -> PalettePlugins {
+        PalettePlugins {
+            installed,
+            host_platform: Some(this_binarys_platform()),
+        }
+    }
+
+    // Two plugins, because the sort is across plugins as well as within one:
+    // a single-fixture test would pass on a comparator that only orders
+    // actions inside their own plugin. Actions come before panes, plugin ids
+    // ascending, then item ids ascending.
+    #[test]
+    fn rows_from_several_plugins_sort_deterministically() {
+        let snapshot = super::super::tests::snapshot();
+        let mut second = test_plugin();
+        second.plugin_id = "alpha".into();
+        second.name = "Alpha".into();
+        second
+            .actions
+            .push(crate::api::schema::PluginManifestAction {
+                id: "aaa-first".into(),
+                title: "Aaa first".into(),
+                description: None,
+                contexts: Vec::new(),
+                platforms: None,
+                command: vec!["true".into()],
+            });
+
+        let commands =
+            plugin_palette_commands(&host_plugins(vec![test_plugin(), second]), &snapshot);
+        let ids: Vec<&str> = commands.iter().map(|command| command.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "plugin-action:alpha.aaa-first",
+                "plugin-action:alpha.build",
+                "plugin-action:demo.build",
+                "plugin-pane:alpha.board",
+                "plugin-pane:demo.board",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_sort_does_not_depend_on_the_order_the_endpoint_listed_plugins() {
+        let snapshot = super::super::tests::snapshot();
+        let mut second = test_plugin();
+        second.plugin_id = "alpha".into();
+        second.name = "Alpha".into();
+
+        let forward = plugin_palette_commands(
+            &host_plugins(vec![test_plugin(), second.clone()]),
+            &snapshot,
+        );
+        let reversed =
+            plugin_palette_commands(&host_plugins(vec![second, test_plugin()]), &snapshot);
+        let ids = |commands: Vec<PaletteCommand>| {
+            commands
+                .into_iter()
+                .map(|command| command.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(forward), ids(reversed));
     }
 
     fn test_plugin() -> InstalledPluginInfo {
