@@ -244,7 +244,7 @@ pub(super) struct ClientAgentPress {
 /// Where a dragged pane would land. A workspace row means a new tab in that
 /// space; a tab means a split against that tab, whose direction the picker
 /// asks for on drop.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(super) enum ClientPaneDropTarget {
     Workspace(String),
     Tab(String),

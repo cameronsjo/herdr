@@ -477,6 +477,27 @@ impl ClientShellState {
             .map(|hit| hit.workspace_id.clone())
     }
 
+    /// Where a dragged tab would land: an insert position in its own tab bar,
+    /// or a sidebar space to move the whole tab to. The two are exclusive — the
+    /// pointer cannot be over both — and the tab's own space is not a move. The
+    /// drag opener and the drag update share this so they cannot disagree about
+    /// what the pointer is over.
+    fn tab_drop_target_at(
+        &self,
+        point: (u16, u16),
+        source_workspace_id: &str,
+    ) -> (Option<usize>, Option<String>) {
+        let insert_index = self.tab_drop_index_at(point);
+        if insert_index.is_some() {
+            return (insert_index, None);
+        }
+        (
+            None,
+            self.sidebar_workspace_at(point)
+                .filter(|candidate| candidate != source_workspace_id),
+        )
+    }
+
     /// Where a dragged pane would land: a tab in the tab bar, or a workspace row
     /// in the sidebar. Both come straight from published hit rects.
     fn pane_drop_target_at(&self, point: (u16, u16)) -> Option<ClientPaneDropTarget> {
@@ -1110,14 +1131,8 @@ impl ClientShellState {
                 }
                 Some(ClientChromeDrag::Tab { workspace_id, .. }) => {
                     let source_workspace_id = workspace_id.clone();
-                    let insert_index = self.tab_drop_index_at(point);
-                    // A reorder inside the tab bar and a move onto a sidebar
-                    // space are the same drag; the pointer decides which, and
-                    // the tab's own space is not a move.
-                    let target_workspace_id = insert_index.is_none().then(|| {
-                        self.sidebar_workspace_at(point)
-                            .filter(|workspace_id| workspace_id != &source_workspace_id)
-                    });
+                    let (insert_index, target_workspace_id) =
+                        self.tab_drop_target_at(point, &source_workspace_id);
                     if let Some(ClientChromeDrag::Tab {
                         insert_index: current,
                         target_workspace_id: current_workspace,
@@ -1125,7 +1140,7 @@ impl ClientShellState {
                     }) = self.chrome_drag.as_mut()
                     {
                         *current = insert_index;
-                        *current_workspace = target_workspace_id.flatten();
+                        *current_workspace = target_workspace_id;
                     }
                     outcome.repaint = true;
                     return;
@@ -1196,12 +1211,8 @@ impl ClientShellState {
                 if delta >= 1 {
                     let tab_id = press.tab_id.clone();
                     let workspace_id = press.workspace_id.clone();
-                    let insert_index = self.tab_drop_index_at(point);
-                    let target_workspace_id = insert_index.is_none().then(|| {
-                        self.sidebar_workspace_at(point)
-                            .filter(|candidate| candidate != &workspace_id)
-                    });
-                    let target_workspace_id = target_workspace_id.flatten();
+                    let (insert_index, target_workspace_id) =
+                        self.tab_drop_target_at(point, &workspace_id);
                     if insert_index.is_some() || target_workspace_id.is_some() {
                         self.chrome_drag = Some(ClientChromeDrag::Tab {
                             tab_id,

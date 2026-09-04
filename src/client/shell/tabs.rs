@@ -101,9 +101,11 @@ pub(crate) fn render_tab_bar(
             break;
         }
         let rect = Rect::new(x, area.y, width, 1);
+        // `selection_bg` is a surface, not an accent, so it takes normal text
+        // rather than the inverted foreground the focused tab uses.
         let style = if drop_target_tab_id == Some(tab.tab_id.as_str()) {
             Style::default()
-                .fg(panel_contrast_fg(palette))
+                .fg(palette.text)
                 .bg(palette.selection_bg)
                 .add_modifier(Modifier::BOLD)
         } else if tab.focused {

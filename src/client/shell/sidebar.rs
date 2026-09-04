@@ -294,8 +294,13 @@ pub(crate) fn render_sidebar(
         let selected = state.selected_workspace_id == Some(workspace.workspace_id.as_str());
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
         let drop_target = state.drop_target_workspace_id == Some(workspace.workspace_id.as_str());
-        // A drop target reads as a selection: it is the row the release acts on.
-        if drop_target || selected {
+        // A drop target reads as a selection: it is the row the release acts
+        // on. A theme whose selection background is Reset would draw nothing at
+        // all, so a drop target falls back to the drag surface — a drop target
+        // the operator cannot see is worse than one styled slightly off.
+        if drop_target && palette.selection_bg == ratatui::style::Color::Reset {
+            buffer.set_style(rect, Style::default().bg(palette.surface1));
+        } else if drop_target || selected {
             buffer.set_style(rect, Style::default().bg(palette.selection_bg));
         } else if dragged {
             buffer.set_style(rect, Style::default().bg(palette.surface1));
