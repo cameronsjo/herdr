@@ -1187,6 +1187,31 @@ fn authority_mutation_requests_round_trip() {
     let restored: Request = serde_json::from_value(json).unwrap();
     assert_eq!(restored, workspace_move_block);
 
+    let workspace_merge = Request {
+        id: "merge_ws".into(),
+        method: Method::WorkspaceMerge(crate::api::schema::WorkspaceMergeParams {
+            source_workspace_id: "w1".into(),
+            target_workspace_id: "w2".into(),
+            merge_group: true,
+        }),
+    };
+    let json = serde_json::to_value(&workspace_merge).unwrap();
+    assert_eq!(json["method"], "workspace.merge");
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, workspace_merge);
+    // The default omits the flag on the wire, so an explicit merge of a
+    // worktree group is never something a caller sends by accident.
+    let default_flag = serde_json::to_value(&Request {
+        id: "merge_ws_default".into(),
+        method: Method::WorkspaceMerge(crate::api::schema::WorkspaceMergeParams {
+            source_workspace_id: "w1".into(),
+            target_workspace_id: "w2".into(),
+            merge_group: false,
+        }),
+    })
+    .unwrap();
+    assert!(default_flag["params"].get("merge_group").is_none());
+
     let tab_move = Request {
         id: "move_tab".into(),
         method: Method::TabMove(TabMoveParams {

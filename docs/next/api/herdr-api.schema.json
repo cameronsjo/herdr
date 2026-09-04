@@ -4641,6 +4641,25 @@
           },
           "type": "object"
         },
+        "WorkspaceMergeParams": {
+          "description": "Relocates every tab of `source_workspace_id` into `target_workspace_id` and\nthen closes the emptied source.\n\n`merge_group` is the same explicit-intent gate `workspace.close` carries: a\nsource that owns linked worktree workspaces refuses without it, so merge\ncannot become a way around that control. With the flag the whole worktree\ngroup merges — every member's tabs move to the target, and every member\ncloses. Merge never destroys a tab.",
+          "properties": {
+            "merge_group": {
+              "type": "boolean"
+            },
+            "source_workspace_id": {
+              "type": "string"
+            },
+            "target_workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_workspace_id",
+            "target_workspace_id"
+          ],
+          "type": "object"
+        },
         "WorkspaceMoveBlockParams": {
           "properties": {
             "before_workspace_id": {
@@ -5236,6 +5255,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceReportMetadataParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.merge",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceMergeParams"
             }
           },
           "required": [

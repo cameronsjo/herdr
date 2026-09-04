@@ -26,6 +26,22 @@ pub struct WorkspaceCloseParams {
     pub close_group: bool,
 }
 
+/// Relocates every tab of `source_workspace_id` into `target_workspace_id` and
+/// then closes the emptied source.
+///
+/// `merge_group` is the same explicit-intent gate `workspace.close` carries: a
+/// source that owns linked worktree workspaces refuses without it, so merge
+/// cannot become a way around that control. With the flag the whole worktree
+/// group merges — every member's tabs move to the target, and every member
+/// closes. Merge never destroys a tab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceMergeParams {
+    pub source_workspace_id: String,
+    pub target_workspace_id: String,
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub merge_group: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceRenameParams {
     pub workspace_id: String,
