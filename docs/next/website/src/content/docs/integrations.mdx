@@ -58,7 +58,8 @@ Herdr uses integrations in two ways:
 | Integration type | Agents | Effect |
 | --- | --- | --- |
 | Lifecycle authority | Pi, OMP, Kimi Code CLI, OpenCode, Kilo Code CLI, MastraCode | When installed and actively reporting for the pane, hook or plugin events author `idle`, `working`, and `blocked`. Herdr does not also use screen manifest fallback for that same lifecycle authority. |
-| Session identity | Claude Code, Codex, GitHub Copilot CLI, Devin CLI, Droid, Qoder CLI, Qwen Code, Cursor Agent CLI, Hermes Agent, Antigravity CLI, Grok CLI | The integration reports native session references for restore. State still comes from Herdr's screen manifest detection. |
+| Screen-assisted lifecycle | Codex | Hook events report state and native session identity. Strong, newer visible screen evidence corrects gaps caused by concurrent stop hooks and permission flows. |
+| Session identity | Claude Code, GitHub Copilot CLI, Devin CLI, Droid, Qoder CLI, Qwen Code, Cursor Agent CLI, Hermes Agent, Antigravity CLI, Grok CLI | The integration reports native session references for restore. State still comes from Herdr's screen manifest detection. |
 
 Custom integrations can also report state that is not visible in the native terminal UI. They do not need to be built into Herdr or use a recognized agent executable.
 
@@ -147,7 +148,9 @@ Install the Codex hook:
 herdr integration install codex
 ```
 
-The Codex hook reports session identity through the same local socket API used by other integrations. Codex state comes from Herdr's screen manifest detection.
+The Codex hook reports session identity and lifecycle state through the local Herdr socket. `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` report `working`; `PermissionRequest` reports `blocked`; and `Stop` reports `idle`. Codex runs hook handlers concurrently and does not emit an approval-resolved hook, so Herdr keeps screen detection active: a newer strong visible-working signal can correct a stale `Stop` or permission report, and a visible blocker can correct a stale working report.
+
+The hook also reports a presentation title without changing Codex's native thread id. It reads the thread's `/rename` name or preview through Codex's public app-server protocol, then falls back to the submitted prompt when that metadata is unavailable.
 
 Herdr uses `~/.codex` by default, or `CODEX_HOME` when set. The Codex config directory must already exist. Install writes `herdr-agent-state.sh`, updates `hooks.json`, and ensures `[features] hooks = true` in `config.toml`. It also removes the deprecated top-level `codex_hooks` flag when present. Uninstall removes Herdr entries from `hooks.json` and deletes the hook script, but leaves `config.toml` unchanged.
 

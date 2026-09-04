@@ -64,41 +64,65 @@ pub(crate) fn ensure_command_hook(
     timeout: u64,
     matcher: Option<&str>,
 ) -> io::Result<()> {
+    ensure_command_hook_with_background(hooks, event, command, timeout, matcher, false)
+}
+
+pub(crate) fn ensure_background_command_hook(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    command: String,
+    timeout: u64,
+    matcher: Option<&str>,
+) -> io::Result<()> {
+    ensure_command_hook_with_background(hooks, event, command, timeout, matcher, true)
+}
+
+fn ensure_command_hook_with_background(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    command: String,
+    timeout: u64,
+    matcher: Option<&str>,
+    background: bool,
+) -> io::Result<()> {
     let entries = hooks
         .entry(event.to_string())
         .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
         .ok_or_else(|| io::Error::other(format!("hook entries for {event} must be an array")))?;
 
-    let already_installed = entries.iter().any(|entry| {
-        entry
-            .get("hooks")
-            .and_then(Value::as_array)
-            .is_some_and(|hook_entries| {
-                hook_entries.iter().any(|hook| {
-                    hook.get("type").and_then(Value::as_str) == Some("command")
-                        && hook.get("command").and_then(Value::as_str) == Some(command.as_str())
-                })
-            })
-    });
-    if already_installed {
-        return Ok(());
+    for entry in entries.iter_mut() {
+        let Some(hook_entries) = entry.get_mut("hooks").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for hook in hook_entries {
+            if hook.get("type").and_then(Value::as_str) != Some("command")
+                || hook.get("command").and_then(Value::as_str) != Some(command.as_str())
+            {
+                continue;
+            }
+            if background {
+                let Some(hook) = hook.as_object_mut() else {
+                    continue;
+                };
+                hook.insert("async".to_string(), Value::Bool(true));
+            }
+            return Ok(());
+        }
     }
 
     let mut entry = Map::new();
     if let Some(matcher) = matcher {
         entry.insert("matcher".to_string(), Value::String(matcher.to_string()));
     }
-    entry.insert(
-        "hooks".to_string(),
-        json!([
-            {
-                "type": "command",
-                "command": command,
-                "timeout": timeout,
-            }
-        ]),
-    );
+    let mut hook = Map::new();
+    hook.insert("type".to_string(), Value::String("command".to_string()));
+    hook.insert("command".to_string(), Value::String(command));
+    hook.insert("timeout".to_string(), Value::Number(timeout.into()));
+    if background {
+        hook.insert("async".to_string(), Value::Bool(true));
+    }
+    entry.insert("hooks".to_string(), Value::Array(vec![Value::Object(hook)]));
 
     entries.push(Value::Object(entry));
     Ok(())

@@ -1257,7 +1257,7 @@ fn codex_v2_integration_status_is_outdated() {
 
     assert_eq!(codex.path, hook_path);
     assert_eq!(codex.installed_version, Some(2));
-    assert_eq!(codex.expected_version, 8);
+    assert_eq!(codex.expected_version, 9);
     assert_eq!(codex.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -1288,10 +1288,33 @@ fn install_codex_writes_hook_and_updates_hooks_and_config() {
         .as_str()
         .unwrap()
         .contains(" session"));
-    assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
-    assert!(hooks["hooks"].get("PreToolUse").is_none());
-    assert!(hooks["hooks"].get("PermissionRequest").is_none());
-    assert!(hooks["hooks"].get("Stop").is_none());
+    for (event, expected_actions) in [
+        ("SessionStart", &["session", "metadata"][..]),
+        ("UserPromptSubmit", &["working", "metadata"][..]),
+        ("PreToolUse", &["working"][..]),
+        ("PermissionRequest", &["blocked"][..]),
+        ("PostToolUse", &["working"][..]),
+        ("Stop", &["idle", "metadata"][..]),
+    ] {
+        let entries = hooks["hooks"][event].as_array().unwrap();
+        let commands: Vec<&str> = entries
+            .iter()
+            .flat_map(|entry| entry["hooks"].as_array().unwrap())
+            .map(|hook| hook["command"].as_str().unwrap())
+            .collect();
+        for action in expected_actions {
+            assert!(commands.iter().any(|command| command.ends_with(action)));
+        }
+        for entry in entries {
+            for hook in entry["hooks"].as_array().unwrap() {
+                let is_metadata = hook["command"].as_str().unwrap().ends_with("metadata");
+                assert_eq!(
+                    hook.get("async").and_then(Value::as_bool),
+                    is_metadata.then_some(true)
+                );
+            }
+        }
+    }
     assert!(config.contains("model = \"gpt-5.4\""));
     assert!(config.contains("[features]"));
     assert!(config.contains("hooks = true"));
@@ -1341,11 +1364,21 @@ fn install_codex_is_idempotent_for_hook_entries_and_feature_flag() {
         serde_json::from_str(&fs::read_to_string(codex_dir.join("hooks.json")).unwrap()).unwrap();
     let config = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
 
-    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
-    assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
-    assert!(hooks["hooks"].get("PreToolUse").is_none());
-    assert!(hooks["hooks"].get("PermissionRequest").is_none());
-    assert!(hooks["hooks"].get("Stop").is_none());
+    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        hooks["hooks"]["UserPromptSubmit"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(hooks["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        hooks["hooks"]["PermissionRequest"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(hooks["hooks"]["PostToolUse"].as_array().unwrap().len(), 1);
+    assert_eq!(hooks["hooks"]["Stop"].as_array().unwrap().len(), 2);
     assert_eq!(config.matches("hooks = true").count(), 1);
     assert!(!config.contains("codex_hooks"));
     assert!(config.contains("other = true"));
@@ -1390,14 +1423,22 @@ fn uninstall_codex_removes_herdr_hooks_and_leaves_config_alone() {
     fs::write(&hook_path, CODEX_HOOK_ASSET).unwrap();
     let hooks = serde_json::json!({
         "hooks": {
-            "SessionStart": [{"hooks": [{"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10}]}],
+            "SessionStart": [{"hooks": [
+                {"type": "command", "command": format!("bash '{}' session", hook_path.display()), "timeout": 10},
+                {"type": "command", "command": format!("bash '{}' metadata", hook_path.display()), "timeout": 10, "async": true}
+            ]}],
             "UserPromptSubmit": [{"hooks": [
                 {"type": "command", "command": format!("bash '{}' working", hook_path.display()), "timeout": 10},
+                {"type": "command", "command": format!("bash '{}' metadata", hook_path.display()), "timeout": 10, "async": true},
                 {"type": "command", "command": "echo keep", "timeout": 10}
             ]}],
             "PreToolUse": [{"hooks": [{"type": "command", "command": format!("bash '{}' working", hook_path.display()), "timeout": 10}]}],
             "PermissionRequest": [{"hooks": [{"type": "command", "command": format!("bash '{}' blocked", hook_path.display()), "timeout": 10}]}],
-            "Stop": [{"hooks": [{"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10}]}]
+            "PostToolUse": [{"hooks": [{"type": "command", "command": format!("bash '{}' working", hook_path.display()), "timeout": 10}]}],
+            "Stop": [{"hooks": [
+                {"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10},
+                {"type": "command", "command": format!("bash '{}' metadata", hook_path.display()), "timeout": 10, "async": true}
+            ]}]
         }
     });
     fs::write(
@@ -1423,6 +1464,7 @@ fn uninstall_codex_removes_herdr_hooks_and_leaves_config_alone() {
     assert!(hooks["hooks"].get("SessionStart").is_none());
     assert!(hooks["hooks"].get("PreToolUse").is_none());
     assert!(hooks["hooks"].get("PermissionRequest").is_none());
+    assert!(hooks["hooks"].get("PostToolUse").is_none());
     assert!(hooks["hooks"].get("Stop").is_none());
     assert_eq!(
         hooks["hooks"]["UserPromptSubmit"][0]["hooks"]

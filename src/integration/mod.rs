@@ -49,7 +49,19 @@ const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/codex/herdr-agent-state.sh")
 };
-const CODEX_INTEGRATION_VERSION: u32 = 8;
+const CODEX_INTEGRATION_VERSION: u32 = 9;
+const CODEX_STATE_HOOK_EVENTS: [(&str, &str); 5] = [
+    ("UserPromptSubmit", "working"),
+    ("PreToolUse", "working"),
+    ("PermissionRequest", "blocked"),
+    ("PostToolUse", "working"),
+    ("Stop", "idle"),
+];
+const CODEX_METADATA_HOOK_EVENTS: [(&str, &str); 3] = [
+    ("SessionStart", "metadata"),
+    ("UserPromptSubmit", "metadata"),
+    ("Stop", "metadata"),
+];
 const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {
