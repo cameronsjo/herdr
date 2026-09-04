@@ -615,6 +615,41 @@ mod tests {
         assert_eq!(command_match_rank(&cmd, ""), Some(1));
     }
 
+    // `pane_split_direction_geometry` sizes each button from the label's byte
+    // length, which only equals its rendered width while the labels stay
+    // ASCII. A wide or multi-byte glyph would silently mis-size the rect the
+    // mouse hit-test shares with the renderer.
+    #[test]
+    fn split_button_labels_are_ascii_so_byte_length_is_their_rendered_width() {
+        for label in [SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL] {
+            assert!(label.is_ascii(), "{label:?} must stay ASCII");
+            assert_eq!(
+                label.len(),
+                unicode_width::UnicodeWidthStr::width(label),
+                "{label:?} byte length must equal its rendered width"
+            );
+        }
+    }
+
+    #[test]
+    fn the_split_picker_fits_its_two_buttons() {
+        let (_, _, vertical, horizontal) =
+            pane_split_direction_geometry(Rect::new(0, 0, 120, 40)).expect("geometry");
+        assert_eq!(usize::from(vertical.width), SPLIT_VERTICAL_LABEL.len());
+        assert_eq!(usize::from(horizontal.width), SPLIT_HORIZONTAL_LABEL.len());
+        assert!(
+            horizontal.x >= vertical.x + vertical.width,
+            "buttons must not overlap: {vertical:?} {horizontal:?}"
+        );
+        assert_eq!(vertical.y, horizontal.y);
+    }
+
+    #[test]
+    fn a_terminal_too_small_for_the_palette_yields_no_geometry() {
+        assert!(palette_geometry(Rect::new(0, 0, 10, 4)).is_none());
+        assert!(pane_split_direction_geometry(Rect::new(0, 0, 10, 4)).is_none());
+    }
+
     #[test]
     fn plugin_titles_do_not_repeat_an_existing_brand_prefix() {
         assert_eq!(

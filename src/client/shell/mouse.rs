@@ -1648,15 +1648,15 @@ impl ClientShellState {
                         outcome.repaint = true;
                     }
                 }
-                MouseEventKind::ScrollUp => self.move_palette_selection(-3),
-                MouseEventKind::ScrollDown => self.move_palette_selection(3),
+                MouseEventKind::ScrollUp => {
+                    self.move_palette_selection(-3);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.move_palette_selection(3);
+                    outcome.repaint = true;
+                }
                 _ => {}
-            }
-            if matches!(
-                mouse.kind,
-                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-            ) {
-                outcome.repaint = true;
             }
             return;
         }
