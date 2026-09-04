@@ -1708,6 +1708,11 @@ pub enum VersionCheck {
     Incompatible(String),
 }
 
+/// Whether a protocol version carries this fork's offset.
+pub fn is_fork_protocol(version: u32) -> bool {
+    version >= FORK_PROTOCOL_OFFSET
+}
+
 /// Checks whether a client's protocol version is compatible with this server.
 ///
 /// Current rules:
@@ -1716,11 +1721,6 @@ pub enum VersionCheck {
 /// - A client with a newer version than the server is rejected.
 /// - A client with an older version than the server is rejected
 ///   (backward compatibility is not yet supported).
-/// Whether a protocol version carries this fork's offset.
-pub fn is_fork_protocol(version: u32) -> bool {
-    version >= FORK_PROTOCOL_OFFSET
-}
-
 pub fn check_client_version(client_version: u32) -> VersionCheck {
     if client_version == 0 {
         return VersionCheck::Incompatible(
