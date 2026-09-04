@@ -57,15 +57,29 @@ pub const UPSTREAM_PROTOCOL_VERSION: u32 = 22;
 /// ambiguous again, which is the collision this whole scheme exists to prevent.
 pub const FORK_REVISION: u32 = 0;
 
-// Compile-time, not a test: a revision that has overflowed its span should stop
-// the build outright rather than wait for someone to run the suite.
+/// Written as a literal on purpose, not as the sum of the constants above.
+///
+/// `scripts/changelog.py` reads this line with the regex
+/// `pub const PROTOCOL_VERSION: u32 = (\d+);`, and it is not the only tool that
+/// may want the number without compiling the crate. A computed expression is
+/// invisible to all of them, and the failure is remote from the cause — the
+/// release tooling reports it cannot find a protocol version at all.
+///
+/// The assertion below is what keeps the literal honest, at compile time.
+pub const PROTOCOL_VERSION: u32 = 1220;
+
+// Compile-time, not tests: a literal that has drifted from its parts, or a fork
+// revision that has overflowed its span, should stop the build outright rather
+// than wait for someone to run the suite.
 const _: () = assert!(
     FORK_REVISION < FORK_REVISION_SPAN,
     "FORK_REVISION has carried into the upstream digits; the protocol version can no longer be decomposed"
 );
-
-pub const PROTOCOL_VERSION: u32 =
-    FORK_PROTOCOL_OFFSET + UPSTREAM_PROTOCOL_VERSION * FORK_REVISION_SPAN + FORK_REVISION;
+const _: () = assert!(
+    PROTOCOL_VERSION
+        == FORK_PROTOCOL_OFFSET + UPSTREAM_PROTOCOL_VERSION * FORK_REVISION_SPAN + FORK_REVISION,
+    "PROTOCOL_VERSION no longer matches its own decomposition; update the literal and the parts together"
+);
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
