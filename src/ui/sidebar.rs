@@ -13,6 +13,7 @@ pub(crate) use self::tokens::{
 use super::text::{display_width, truncate_end};
 use crate::app::state::Palette;
 use crate::app::AppState;
+use crate::config::SidebarTokenAlignment;
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
 
@@ -194,6 +195,21 @@ pub(crate) fn resolved_token_spans(
     let mut remaining = max_width
         .saturating_sub(separator_width + fixed_width)
         .saturating_sub(minimum);
+    // A token marked `align = "right"` opens a trailing group: it and every
+    // visible token after it are funded to their full width first, so the group
+    // can be pushed against the right edge below without truncating mid-group.
+    let right_start = visible_indices
+        .iter()
+        .position(|index| resolved[*index].style.align == Some(SidebarTokenAlignment::Right));
+    if let Some(right_start) = right_start {
+        for index in &visible_indices[right_start..] {
+            let budget = &mut budgets[*index];
+            let width = flexible_widths[*index];
+            let growth = width.saturating_sub(*budget).min(remaining);
+            *budget += growth;
+            remaining -= growth;
+        }
+    }
     while remaining > 0 {
         let mut grew = false;
         for (budget, width) in budgets.iter_mut().zip(&flexible_widths) {
@@ -211,18 +227,45 @@ pub(crate) fn resolved_token_spans(
         }
     }
 
+    let right_width = right_start.map(|right_start| {
+        let indices = &visible_indices[right_start..];
+        let content = indices
+            .iter()
+            .map(|index| fixed_widths[*index] + budgets[*index])
+            .sum::<usize>();
+        let separators = indices
+            .windows(2)
+            .map(|pair| display_width(tokens::separator(&resolved[pair[0]], &resolved[pair[1]])))
+            .sum::<usize>();
+        content + separators
+    });
+    let mut rendered_width = 0;
     let mut spans = Vec::new();
     for (position, index) in visible_indices.iter().copied().enumerate() {
         let token = &resolved[index];
+        if right_start == Some(position) {
+            let separator = (position > 0)
+                .then(|| tokens::separator(&resolved[visible_indices[position - 1]], token));
+            let separator_width = separator.map_or(0, display_width);
+            let padding = max_width
+                .saturating_sub(rendered_width + separator_width + right_width.unwrap_or(0));
+            if padding > 0 {
+                spans.push(Span::raw(" ".repeat(padding)));
+                rendered_width += padding;
+            }
+        }
         if position > 0 {
             let previous = &resolved[visible_indices[position - 1]];
+            let separator = tokens::separator(previous, token);
+            rendered_width += display_width(separator);
             spans.push(Span::styled(
-                tokens::separator(previous, token),
+                separator,
                 Style::default()
                     .fg(palette.overlay0)
                     .add_modifier(Modifier::DIM),
             ));
         }
+        rendered_width += fixed_widths[index] + budgets[index];
         match &token.kind {
             ResolvedTokenKind::StateIcon => spans.push(Span::styled(
                 state_icon.0.to_string(),
@@ -293,4 +336,85 @@ fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) 
         };
     }
     style
+}
+
+#[cfg(test)]
+mod sidebar_alignment_tests {
+    use super::*;
+    use crate::config::SidebarTokenStyle;
+
+    fn render(resolved: &[ResolvedToken], max_width: usize) -> String {
+        let palette = Palette::catppuccin();
+        resolved_token_spans(
+            resolved,
+            ("○", Style::default()),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            Style::default(),
+            &palette,
+            max_width,
+        )
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+    }
+
+    fn right_aligned(kind: ResolvedTokenKind) -> ResolvedToken {
+        ResolvedToken {
+            kind,
+            style: SidebarTokenStyle {
+                align: Some(SidebarTokenAlignment::Right),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn right_aligned_token_stays_at_the_row_edge() {
+        // The row fits with room to spare, so only the padding can push the
+        // state text to the edge — a truncating row would end with it anyway.
+        let rendered = render(
+            &[
+                ResolvedToken::unstyled(ResolvedTokenKind::TerminalTitle("short".into())),
+                right_aligned(ResolvedTokenKind::StateText("idle".into())),
+            ],
+            20,
+        );
+
+        assert!(rendered.starts_with("short"), "rendered: {rendered:?}");
+        assert!(rendered.ends_with("idle"), "rendered: {rendered:?}");
+        assert_eq!(display_width(&rendered), 20);
+    }
+
+    #[test]
+    fn the_right_group_runs_to_the_end_of_the_row() {
+        // `align` opens a trailing group: the state text and everything after
+        // it travel together against the right edge, separators included.
+        let rendered = render(
+            &[
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("claude".into())),
+                right_aligned(ResolvedTokenKind::StateText("idle".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Tab("2".into())),
+            ],
+            24,
+        );
+
+        assert!(rendered.starts_with("claude"), "rendered: {rendered:?}");
+        assert!(rendered.ends_with("idle · 2"), "rendered: {rendered:?}");
+        assert_eq!(display_width(&rendered), 24);
+    }
+
+    #[test]
+    fn an_unaligned_row_is_left_packed_with_no_padding() {
+        let rendered = render(
+            &[
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("claude".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::StateText("idle".into())),
+            ],
+            24,
+        );
+
+        assert_eq!(rendered, "claude · idle");
+    }
 }
