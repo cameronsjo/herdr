@@ -49,6 +49,12 @@ use crate::events::AppEvent;
 
 pub use state::{AppState, Mode, ToastKind, ViewState};
 
+/// The platform this process runs on, in the vocabulary a plugin manifest's
+/// `platforms` list uses.
+pub(crate) fn current_platform() -> crate::api::schema::PluginPlatform {
+    api::plugins::current_platform()
+}
+
 pub(crate) fn load_plugin_manifest(
     path: &str,
     enabled: bool,

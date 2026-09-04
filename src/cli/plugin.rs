@@ -1125,7 +1125,9 @@ fn offline_plugin_list_response(params: &PluginListParams) -> std::io::Result<se
         id: "cli:plugin".into(),
         result: ResponseResult::PluginList {
             plugins,
-            host_platform: None,
+            // Answered locally with no server in play, so this process is
+            // the one whose platform would run these commands.
+            host_platform: Some(crate::app::current_platform()),
         },
     })
     .map_err(std::io::Error::other)

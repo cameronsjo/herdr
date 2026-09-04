@@ -20,7 +20,7 @@ use manifest::{
 
 #[cfg(test)]
 use crate::api::schema::{PluginCommandStatus, PluginInvocationContext};
-pub(crate) use manifest::load_plugin_manifest;
+pub(crate) use manifest::{current_platform, load_plugin_manifest};
 #[cfg(test)]
 use runtime::{read_capped_plugin_output, MAX_PLUGIN_COMMANDS_IN_FLIGHT};
 
