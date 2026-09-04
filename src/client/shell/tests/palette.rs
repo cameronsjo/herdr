@@ -459,6 +459,35 @@ fn the_merge_action_arms_the_navigator_and_a_workspace_row_asks_first() {
 }
 
 #[test]
+fn picking_the_source_row_leaves_the_merge_armed() {
+    let mut state = shell_with_second_workspace();
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    state.compose(106, 24).expect("composed frame");
+    let rows = render::client_navigator_rows(
+        state.snapshot.as_deref().expect("snapshot"),
+        match state.overlay.as_ref() {
+            Some(ClientShellOverlay::Navigator(navigator)) => navigator,
+            _ => panic!("navigator should be open"),
+        },
+    );
+    let own_row = rows
+        .iter()
+        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace(id) if id == "ws_1"))
+        .expect("a row for the armed workspace");
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = own_row;
+    }
+
+    let mut outcome = ClientShellInput::default();
+    state.accept_navigator_selection(&mut outcome);
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "a workspace cannot merge into itself, so the picker stays armed"
+    );
+    assert!(endpoint_methods(&outcome).is_empty());
+}
+
+#[test]
 fn confirming_the_merge_sends_workspace_merge_for_the_picked_target() {
     let mut state = shell_with_second_workspace();
     arm_merge_on_the_second_workspace(&mut state);

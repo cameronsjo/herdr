@@ -1587,6 +1587,12 @@ impl ClientShellState {
         else {
             return false;
         };
+        // The source's own row is a legal thing to land on and a nonsense
+        // destination; the server refuses it either way, so leave the picker
+        // armed rather than confirming a merge that cannot happen.
+        if source_workspace_id == target_workspace_id {
+            return false;
+        }
         let group_key = source
             .worktree
             .as_ref()

@@ -425,6 +425,37 @@ impl App {
             }
         }
 
+        // Three records pair a pane with the workspace id it sat in:
+        // `previous_pane_focus`, a pane-targeted toast, and every pending agent
+        // notification. Their panes are alive in the target now, so leaving the
+        // source id in place would dangle each one at a workspace about to stop
+        // existing — `assert_invariants_for_test` catches exactly that.
+        let merged_workspace_keys = merge_indices
+            .iter()
+            .filter_map(|index| self.state.workspaces.get(*index))
+            .map(|workspace| workspace.id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        if let Some(focus) = self.state.previous_pane_focus.as_mut() {
+            if merged_workspace_keys.contains(&focus.workspace_id) {
+                focus.workspace_id = target_workspace_key.clone();
+            }
+        }
+        if let Some(target) = self
+            .state
+            .toast
+            .as_mut()
+            .and_then(|toast| toast.target.as_mut())
+        {
+            if merged_workspace_keys.contains(&target.workspace_id) {
+                target.workspace_id = target_workspace_key.clone();
+            }
+        }
+        for notification in self.state.pending_agent_notifications.values_mut() {
+            if merged_workspace_keys.contains(&notification.workspace_id) {
+                notification.workspace_id = target_workspace_key.clone();
+            }
+        }
+
         self.state.mark_session_dirty();
         for index in merge_indices.iter().rev() {
             if let Some(workspace) = self.state.workspaces.get(*index) {
@@ -1078,6 +1109,67 @@ mod tests {
                 .active
                 .map(|index| app.state.workspaces[index].id.clone()),
             Some(watched_id)
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Three records name a pane's workspace by id. The panes survive a merge,
+    /// so a record left pointing at the closed source is dangling — and nothing
+    /// in the response says so.
+    #[test]
+    fn api_workspace_merge_repoints_pane_records_off_the_closed_source() {
+        let mut app = merge_test_app(&["source", "target"]);
+        let source_key = app.state.workspaces[0].id.clone();
+        let target_key = app.state.workspaces[1].id.clone();
+        let source_pane = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.previous_pane_focus = Some(crate::app::state::PaneFocusTarget {
+            workspace_id: source_key.clone(),
+            pane_id: source_pane,
+        });
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "waiting".into(),
+            context: String::new(),
+            position: None,
+            target: Some(crate::app::state::ToastTarget {
+                workspace_id: source_key.clone(),
+                pane_id: source_pane,
+            }),
+        });
+        app.state.pending_agent_notifications.insert(
+            source_pane,
+            crate::app::state::PendingAgentNotification {
+                pane_id: source_pane,
+                workspace_id: source_key.clone(),
+                agent_label: "agent".into(),
+                known_agent: None,
+                kind: crate::app::state::ToastKind::NeedsAttention,
+                state: crate::detect::AgentState::Blocked,
+                deadline: std::time::Instant::now(),
+            },
+        );
+
+        let response = merge_request(&mut app, 0, 1, false);
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            app.state
+                .previous_pane_focus
+                .as_ref()
+                .map(|focus| focus.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.target.as_ref())
+                .map(|target| target.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state.pending_agent_notifications[&source_pane].workspace_id,
+            target_key
         );
         app.state.assert_invariants_for_test();
     }
