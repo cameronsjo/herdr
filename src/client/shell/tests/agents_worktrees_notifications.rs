@@ -515,8 +515,16 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
     );
 
     let first = state.hits.agents[0].0;
-    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+    // Focus lands on the release, so the same press can become a drag-move.
+    let press = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
+        column: first.x,
+        row: first.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(press.actions.is_empty());
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
         column: first.x,
         row: first.y,
         modifiers: KeyModifiers::empty(),
@@ -1497,9 +1505,15 @@ fn scrolling_into_a_run_keeps_headers_and_hit_rects_aligned() {
         " beta",
         "the beta header lands where the hit rect says it does"
     );
-    // A click on that header row resolves to the run's first agent.
-    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+    // A click on that header row resolves to the run's first agent, on release.
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
+        column: beta.1.x,
+        row: beta.1.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
         column: beta.1.x,
         row: beta.1.y,
         modifiers: KeyModifiers::empty(),

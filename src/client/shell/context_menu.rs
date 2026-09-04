@@ -6,15 +6,20 @@ impl ClientContextMenuOverlay {
 
         let item = |label, action| ClientContextMenuItem { label, action };
         match &self.target {
-            ClientContextMenuTarget::Workspace { is_git: false, .. } => {
-                vec![item("Rename", Action::Rename), item("Close", Action::Close)]
-            }
+            ClientContextMenuTarget::Workspace { is_git: false, .. } => vec![
+                item("Rename", Action::Rename),
+                item("Move up", Action::MoveWorkspacePrevious),
+                item("Move down", Action::MoveWorkspaceNext),
+                item("Close", Action::Close),
+            ],
             ClientContextMenuTarget::Workspace {
                 is_linked_worktree: false,
                 has_worktree_children: false,
                 ..
             } => vec![
                 item("Rename", Action::Rename),
+                item("Move up", Action::MoveWorkspacePrevious),
+                item("Move down", Action::MoveWorkspaceNext),
                 item("Close", Action::Close),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
@@ -33,6 +38,8 @@ impl ClientContextMenuOverlay {
                 ..
             } => vec![
                 item("Rename", Action::Rename),
+                item("Move group up", Action::MoveWorkspacePrevious),
+                item("Move group down", Action::MoveWorkspaceNext),
                 item("Close group", Action::Close),
                 item("New worktree", Action::NewWorktree),
                 item("Open worktree...", Action::OpenWorktree),
@@ -44,6 +51,10 @@ impl ClientContextMenuOverlay {
             ClientContextMenuTarget::Tab { .. } => vec![
                 item("New tab", Action::NewTab),
                 item("Rename", Action::Rename),
+                item("Move left", Action::MoveTabPrevious),
+                item("Move right", Action::MoveTabNext),
+                item("Move to space...", Action::MoveTabToSpace),
+                item("Move to new space", Action::MoveTabToNewSpace),
                 item("Close", Action::Close),
             ],
             ClientContextMenuTarget::Pane {
@@ -60,6 +71,9 @@ impl ClientContextMenuOverlay {
                     items.push(item("Swap with focused pane", Action::SwapWithFocusedPane));
                 }
                 items.extend([
+                    item("Move to space...", Action::MovePaneToSpace),
+                    item("Move to new space", Action::MovePaneToNewSpace),
+                    item("Move to new tab", Action::MovePaneToNewTab),
                     item("Split right", Action::SplitRight),
                     item("Split down", Action::SplitDown),
                     item("Zoom", Action::Zoom),
@@ -269,6 +283,15 @@ impl ClientShellState {
             ClientContextMenuAction::RemoveWorktree => {
                 self.begin_worktree_action_for(KeybindAction::RemoveWorktree, workspace_id, outcome)
             }
+            ClientContextMenuAction::MoveWorkspacePrevious
+            | ClientContextMenuAction::MoveWorkspaceNext => {
+                if let Some(method) = self.workspace_reorder_method(
+                    &workspace_id,
+                    action == ClientContextMenuAction::MoveWorkspaceNext,
+                ) {
+                    self.push_endpoint_method(method, outcome);
+                }
+            }
             ClientContextMenuAction::ToggleGroup => {
                 let key = self.snapshot.as_deref().and_then(|snapshot| {
                     snapshot
@@ -360,11 +383,104 @@ impl ClientShellState {
                     }));
                 }
             }
+            ClientContextMenuAction::MoveTabPrevious | ClientContextMenuAction::MoveTabNext => {
+                if let Some(method) = self.tab_reorder_method(
+                    &tab_id,
+                    &workspace_id,
+                    action == ClientContextMenuAction::MoveTabNext,
+                ) {
+                    self.push_endpoint_method(method, outcome);
+                }
+            }
+            ClientContextMenuAction::MoveTabToSpace => {
+                self.open_navigator_overlay_for_move(None, Some(tab_id));
+            }
+            ClientContextMenuAction::MoveTabToNewSpace => self.push_endpoint_method(
+                Method::TabMove(crate::api::schema::TabMoveParams {
+                    tab_id,
+                    insert_index: None,
+                    destination: Some(crate::api::schema::TabMoveDestination::NewWorkspace {
+                        label: None,
+                    }),
+                }),
+                outcome,
+            ),
             ClientContextMenuAction::Close => {
                 self.push_endpoint_method(Method::TabClose(TabTarget { tab_id }), outcome);
             }
             _ => {}
         }
+    }
+
+    /// A workspace reorder from the context menu, one slot toward the front or
+    /// the back. It routes through the drag path's own method builder so a menu
+    /// reorder and a sidebar drag treat a worktree group the same way: the
+    /// whole block moves, and a linked worktree inside a group refuses.
+    fn workspace_reorder_method(
+        &self,
+        workspace_id: &str,
+        forward: bool,
+    ) -> Option<crate::api::schema::Method> {
+        let snapshot = self.snapshot.as_deref()?;
+        let roots = snapshot
+            .workspaces
+            .iter()
+            .filter(|workspace| {
+                !workspace
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| worktree.is_linked_worktree)
+            })
+            .collect::<Vec<_>>();
+        if roots.len() <= 1 {
+            return None;
+        }
+        let source = roots
+            .iter()
+            .position(|workspace| workspace.workspace_id == workspace_id)?;
+        // `before_workspace_id` names the root the source lands in front of, so
+        // one slot forward is the root two positions ahead; `None` is the end
+        // of the list, which is also where a wrap backward goes.
+        let before = if forward {
+            if source + 1 >= roots.len() {
+                Some(roots[0].workspace_id.clone())
+            } else {
+                roots
+                    .get(source + 2)
+                    .map(|workspace| workspace.workspace_id.clone())
+            }
+        } else if source == 0 {
+            None
+        } else {
+            Some(roots[source - 1].workspace_id.clone())
+        };
+        self.workspace_move_method(workspace_id, before.as_deref())
+    }
+
+    /// A tab reorder from the context menu, one slot toward the front or the
+    /// back of its own workspace's tab list, wrapping at either end exactly as
+    /// the keyboard reorder does.
+    fn tab_reorder_method(
+        &self,
+        tab_id: &str,
+        workspace_id: &str,
+        forward: bool,
+    ) -> Option<crate::api::schema::Method> {
+        let snapshot = self.snapshot.as_deref()?;
+        let tabs = snapshot
+            .tabs
+            .iter()
+            .filter(|tab| tab.workspace_id == workspace_id)
+            .collect::<Vec<_>>();
+        let source = tabs.iter().position(|tab| tab.tab_id == tab_id)?;
+        let insert_index = super::actions::reorder_insert_index(tabs.len(), source, forward)?;
+        Some(crate::api::schema::Method::TabMove(
+            crate::api::schema::TabMoveParams {
+                tab_id: tab_id.to_owned(),
+                insert_index: Some(insert_index),
+                destination: None,
+            },
+        ))
     }
 
     fn activate_pane_context_action(
@@ -423,6 +539,31 @@ impl ClientShellState {
                     );
                 }
             }
+            ClientContextMenuAction::MovePaneToSpace => {
+                self.open_navigator_overlay_for_move(Some(pane_id), None);
+            }
+            ClientContextMenuAction::MovePaneToNewSpace => self.push_endpoint_method(
+                Method::PaneMove(crate::api::schema::PaneMoveParams {
+                    pane_id,
+                    destination: crate::api::schema::PaneMoveDestination::NewWorkspace {
+                        label: None,
+                        tab_label: None,
+                    },
+                    focus: true,
+                }),
+                outcome,
+            ),
+            ClientContextMenuAction::MovePaneToNewTab => self.push_endpoint_method(
+                Method::PaneMove(crate::api::schema::PaneMoveParams {
+                    pane_id,
+                    destination: crate::api::schema::PaneMoveDestination::NewTab {
+                        workspace_id: Some(workspace_id),
+                        label: None,
+                    },
+                    focus: true,
+                }),
+                outcome,
+            ),
             ClientContextMenuAction::SplitRight | ClientContextMenuAction::SplitDown => {
                 self.push_endpoint_method(
                     Method::PaneSplit(PaneSplitParams {

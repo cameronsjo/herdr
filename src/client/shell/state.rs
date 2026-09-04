@@ -233,6 +233,23 @@ pub(super) struct ClientTabPress {
     pub(super) start_row: u16,
 }
 
+/// A press on an agent sidebar row. The row stands for a pane, so the press is
+/// what a pane drag-move grows out of; releasing without a drag focuses it.
+pub(super) struct ClientAgentPress {
+    pub(super) pane_id: String,
+    pub(super) start_column: u16,
+    pub(super) start_row: u16,
+}
+
+/// Where a dragged pane would land. A workspace row means a new tab in that
+/// space; a tab means a split against that tab, whose direction the picker
+/// asks for on drop.
+#[derive(Clone, Debug)]
+pub(super) enum ClientPaneDropTarget {
+    Workspace(String),
+    Tab(String),
+}
+
 pub(super) enum ClientChromeDrag {
     SidebarWidth,
     SidebarSection,
@@ -255,6 +272,14 @@ pub(super) enum ClientChromeDrag {
         tab_id: String,
         workspace_id: String,
         insert_index: Option<usize>,
+        /// Set while the pointer is over a sidebar workspace row, which moves
+        /// the whole tab to that space instead of reordering it in place.
+        /// Mutually exclusive with `insert_index`.
+        target_workspace_id: Option<String>,
+    },
+    Pane {
+        pane_id: String,
+        target: Option<ClientPaneDropTarget>,
     },
     Workspace {
         source_workspace_id: String,
@@ -589,9 +614,18 @@ pub(super) enum ClientContextMenuAction {
     RemoveWorktree,
     ToggleGroup,
     NewTab,
+    MoveWorkspacePrevious,
+    MoveWorkspaceNext,
+    MoveTabPrevious,
+    MoveTabNext,
+    MoveTabToSpace,
+    MoveTabToNewSpace,
     RenamePane,
     ClearPaneName,
     SwapWithFocusedPane,
+    MovePaneToSpace,
+    MovePaneToNewSpace,
+    MovePaneToNewTab,
     SplitRight,
     SplitDown,
     Zoom,
@@ -928,6 +962,7 @@ pub(crate) struct ClientShellState {
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
     pub(super) tab_press: Option<ClientTabPress>,
+    pub(super) agent_press: Option<ClientAgentPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
@@ -1095,6 +1130,7 @@ impl ClientShellState {
             chrome_drag: None,
             workspace_press: None,
             tab_press: None,
+            agent_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             workspace_scroll: 0,
             agent_scroll: 0,
@@ -1319,6 +1355,7 @@ impl ClientShellState {
             self.chrome_drag = None;
             self.workspace_press = None;
             self.tab_press = None;
+            self.agent_press = None;
             self.workspace_scroll = 0;
             self.agent_scroll = 0;
             self.tab_scroll = 0;
@@ -1615,6 +1652,7 @@ impl ClientShellState {
             self.chrome_drag = None;
             self.workspace_press = None;
             self.tab_press = None;
+            self.agent_press = None;
             if self.pane_mouse_gesture.as_ref().is_some_and(|gesture| {
                 gesture.hit.popup && previous_popup.as_deref() == Some(gesture.hit.pane_id.as_str())
             }) {
