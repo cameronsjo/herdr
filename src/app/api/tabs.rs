@@ -161,13 +161,6 @@ impl App {
         let label = sanitize_label(params.label.clone());
         tab.set_custom_name(label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
-        if self.state.active == Some(ws_idx) {
-            // Reflow the tab bar so the new label width takes effect immediately.
-            // The tab bar renders into cached hit areas; without this refresh the
-            // old geometry lingers until the next refresh (e.g. a tab switch),
-            // leaving the visible label stale. Mirrors handle_tab_move.
-            self.state.refresh_tab_bar_view();
-        }
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
@@ -258,10 +251,6 @@ impl App {
         let tabs = self.tab_list_info(ws_idx);
         if moved {
             self.schedule_session_save();
-            if self.state.active == Some(ws_idx) {
-                self.state.tab_scroll_follow_active = true;
-                self.state.refresh_tab_bar_view();
-            }
             self.emit_event(EventEnvelope {
                 event: EventKind::TabMoved,
                 data: EventData::TabMoved {
@@ -489,10 +478,11 @@ impl App {
 
         self.state.mark_session_dirty();
         self.schedule_session_save();
-        if self.state.active == Some(source_ws_idx) || self.state.active == Some(target_ws_idx) {
-            self.state.tab_scroll_follow_active = true;
-            self.state.refresh_tab_bar_view();
-        }
+        // Tab-bar scroll state used to live on AppState, so this nudged it to
+        // follow the moved tab. It is client presentation state now, and the
+        // `TabMovedAcrossWorkspaces` event emitted immediately below is what
+        // tells the client to rebuild — reaching across from here would be the
+        // server/TUI coupling the client split exists to remove.
 
         self.emit_event(EventEnvelope {
             event: EventKind::TabMovedAcrossWorkspaces,
@@ -657,7 +647,13 @@ mod tests {
     fn api_tab_close_last_tab_closes_workspace_and_emits_both_events() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
         app.state.workspaces = vec![Workspace::test_new("tabs")];
         app.state.active = Some(0);
         app.state.selected = 0;
@@ -704,7 +700,13 @@ mod tests {
     fn api_tab_move_reorders_tabs_in_target_workspace() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
         let mut workspace = Workspace::test_new("tabs");
         workspace.test_add_tab(Some("two"));
         workspace.test_add_tab(Some("three"));
@@ -761,7 +763,7 @@ mod tests {
     fn api_tab_move_to_workspace_reissues_identity_and_keeps_panes() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub.clone());
         seed_two_workspaces(&mut app);
 
         let moved_root = app.state.workspaces[0].tabs[1].root_pane;
@@ -807,7 +809,7 @@ mod tests {
     fn api_tab_move_reissues_tab_number_when_target_already_uses_it() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         // Give the target a tab carrying the same public number as the mover,
         // which is the collision that silently resolved the wrong tab before.
@@ -853,7 +855,7 @@ mod tests {
     fn api_tab_move_rejects_an_out_of_range_workspace_id_without_panicking() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
 
@@ -887,7 +889,7 @@ mod tests {
     fn api_tab_move_rejects_an_out_of_bounds_insert_index_without_detaching() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let target_workspace_id = app.public_workspace_id(1);
@@ -918,7 +920,7 @@ mod tests {
     fn api_tab_move_requires_a_destination_or_an_insert_index() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let moved_root = app.state.workspaces[0].tabs[1].root_pane;
@@ -944,7 +946,7 @@ mod tests {
     fn a_moved_pane_keeps_only_its_most_recent_alias() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         let pane = app.state.workspaces[0].tabs[0].root_pane;
 
@@ -970,7 +972,7 @@ mod tests {
     fn a_live_pane_id_outranks_a_stale_alias_for_the_same_string() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
 
         // Take a real pane id, then forge an alias under that exact string
@@ -997,7 +999,7 @@ mod tests {
     fn api_tab_move_refuses_the_last_tab_in_a_workspace() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         app.state.workspaces = vec![Workspace::test_new("source"), Workspace::test_new("target")];
         app.state.active = Some(0);
 
@@ -1029,7 +1031,7 @@ mod tests {
     fn api_tab_move_to_same_workspace_is_unchanged() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
         let source_workspace_id = app.public_workspace_id(0);
@@ -1059,7 +1061,7 @@ mod tests {
     fn api_tab_move_to_new_workspace_creates_one_and_emits_the_cross_event() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub.clone());
         let mut source = Workspace::test_new("source");
         source.test_add_tab(Some("movable"));
         app.state.workspaces = vec![source];
@@ -1112,7 +1114,7 @@ mod tests {
     fn api_tab_move_without_destination_still_reorders() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(&Config::default(), crate::app::AppPolicy::TEST, None, api_rx, event_hub);
         let mut workspace = Workspace::test_new("tabs");
         workspace.test_add_tab(Some("two"));
         app.state.workspaces = vec![workspace];
@@ -1137,42 +1139,17 @@ mod tests {
         assert_eq!(app.state.workspaces[0].tabs[1].root_pane, moved_root);
     }
 
-    #[test]
-    fn api_tab_rename_reflows_active_tab_bar() {
-        let event_hub = crate::api::EventHub::default();
-        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
-        let workspace = Workspace::test_new("tabs");
-        app.state.workspaces = vec![workspace];
-        app.state.active = Some(0);
-        app.state.selected = 0;
-        app.state.view.tab_bar_rect = ratatui::layout::Rect::new(0, 0, 60, 1);
-        app.state.refresh_tab_bar_view();
-
-        let tab_id = app.public_tab_id(0, 0).unwrap();
-        let width_before = app.state.view.tab_hit_areas[0].width;
-
-        app.handle_tab_rename(
-            "req".into(),
-            TabRenameParams {
-                tab_id,
-                label: "a much longer custom tab label".into(),
-            },
-        );
-
-        let width_after = app.state.view.tab_hit_areas[0].width;
-        assert!(
-            width_after > width_before,
-            "tab bar should reflow to the new label width immediately: \
-             before={width_before}, after={width_after}"
-        );
-    }
-
     #[tokio::test]
     async fn tab_create_follows_cached_focused_pane_cwd_without_runtime() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         app.state.default_shell = exiting_test_command().into();
         app.state.shell_mode = ShellModeConfig::NonLogin;
         let workspace = Workspace::test_new("tabs");

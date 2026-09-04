@@ -23,7 +23,23 @@ pub(super) fn mismatch_response(
         return None;
     }
 
-    let message = if client_protocol > server_protocol {
+    // A restart cannot reconcile a fork build with an upstream one, and telling
+    // the operator to restart a server holding live panes is expensive advice to
+    // get wrong. Name the real cause when only one side carries the fork offset.
+    let message = if crate::protocol::is_fork_protocol(client_protocol)
+        != crate::protocol::is_fork_protocol(server_protocol)
+    {
+        let (fork_side, upstream_side) = if crate::protocol::is_fork_protocol(client_protocol) {
+            ("client", "server")
+        } else {
+            ("server", "client")
+        };
+        format!(
+            "client protocol {client_protocol} and server protocol {server_protocol} are different herdr distributions, not different versions: \
+             the {fork_side} is a fork build and the {upstream_side} is an upstream build. Restarting or upgrading will not reconcile them; \
+             run both from the same distribution."
+        )
+    } else if client_protocol > server_protocol {
         format!(
             "client protocol {client_protocol} is newer than server protocol {server_protocol}; restart the Herdr server before using this command. {restart_guidance}"
         )
