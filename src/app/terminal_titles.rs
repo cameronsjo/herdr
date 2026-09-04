@@ -89,7 +89,13 @@ mod tests {
     async fn sync_keeps_latest_raw_title_and_emits_only_for_stripped_changes() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub.clone());
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
         app.state.workspaces = vec![Workspace::test_new("one")];
         app.state.active = Some(0);
         app.state.ensure_test_terminals();
@@ -162,7 +168,13 @@ mod tests {
     async fn syncing_pending_titles_preserves_sidebar_render_impact() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         app.state.workspaces = vec![Workspace::test_new("one")];
         app.state.active = Some(0);
         app.state.ensure_test_terminals();
@@ -190,7 +202,13 @@ mod tests {
     fn sidebar_redraws_only_for_the_configured_title_form() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         app.state.sidebar_agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
         app.state.sidebar_agents.rows_by_agent.insert(
             "claude".into(),
@@ -220,7 +238,13 @@ mod tests {
     fn sidebar_redraws_for_a_title_token_that_only_appears_in_grouped_rows() {
         let event_hub = crate::api::EventHub::default();
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(&Config::default(), true, None, api_rx, event_hub);
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
         // `rows` and `rows_by_agent` carry no title token at all; only
         // `grouped_rows` does. `terminal_title_sidebar_changed` must still
         // chain it, or a grouped panel would miss redraws for title changes.

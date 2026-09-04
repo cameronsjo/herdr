@@ -67,12 +67,16 @@ run_nextest_filter() {{
 classify_nextest_failures "{log_file}"
 
 echo "STILL_FAILING_COUNT=${{#STILL_FAILING[@]}}"
-for entry in "${{STILL_FAILING[@]}}"; do
+for entry in ${{STILL_FAILING[@]+"${{STILL_FAILING[@]}}"}}; do
   echo "STILL_FAILING_ENTRY=$entry"
 done
 """
+    # /bin/bash explicitly, not whatever `bash` PATH resolves to. The behavior
+    # under test is bash 3.2's treatment of an empty array under `set -u`, and a
+    # developer with Homebrew's bash 5 first on PATH would otherwise exercise the
+    # one shell where the bug cannot reproduce — while CI's macos runner gets 3.2.
     return subprocess.run(
-        ["bash", "-c", script],
+        ["/bin/bash", "-c", script],
         capture_output=True,
         text=True,
         check=False,

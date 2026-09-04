@@ -23,13 +23,37 @@ pub(super) fn mismatch_response(
         return None;
     }
 
+    // Only one side carrying the fork offset is ambiguous, and the ambiguity is
+    // the point: a number below the offset is either an upstream build or a fork
+    // build from before the offset existed. So this augments the usual advice
+    // rather than replacing it — restarting a stale server is still the fix for
+    // the common case, and an operator facing the other case needs to be told
+    // that no amount of restarting will help.
+    let cross_distribution = crate::protocol::is_fork_protocol(client_protocol)
+        != crate::protocol::is_fork_protocol(server_protocol);
+    let distribution_note = if cross_distribution {
+        let (offset_side, plain_side) = if crate::protocol::is_fork_protocol(client_protocol) {
+            ("client", "server")
+        } else {
+            ("server", "client")
+        };
+        format!(
+            " If restarting does not help, these may be different herdr distributions rather than \
+             different versions: the {offset_side} carries this fork's protocol offset and the \
+             {plain_side} does not, which also describes a {plain_side} built before the offset \
+             existed. Run both from the same distribution."
+        )
+    } else {
+        String::new()
+    };
+
     let message = if client_protocol > server_protocol {
         format!(
-            "client protocol {client_protocol} is newer than server protocol {server_protocol}; restart the Herdr server before using this command. {restart_guidance}"
+            "client protocol {client_protocol} is newer than server protocol {server_protocol}; restart the Herdr server before using this command. {restart_guidance}{distribution_note}"
         )
     } else {
         format!(
-            "client protocol {client_protocol} is older than server protocol {server_protocol}; upgrade the Herdr client before using this command"
+            "client protocol {client_protocol} is older than server protocol {server_protocol}; upgrade the Herdr client before using this command{distribution_note}"
         )
     };
 

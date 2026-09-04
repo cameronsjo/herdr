@@ -37,16 +37,13 @@ FORBIDDEN_CALLS = (
 )
 
 
-SIDEBAR_SOURCE = PROJECT_ROOT / "src" / "ui" / "sidebar.rs"
-RENDER_AGENT_DETAIL_RE = re.compile(r"(?m)^fn render_agent_detail\s*\(")
+SIDEBAR_SOURCE = PROJECT_ROOT / "src" / "client" / "shell" / "agent_sidebar.rs"
+RENDER_AGENT_PANEL_RE = re.compile(r"(?m)^(?:pub\(\w+\) )?fn render_agent_panel\s*\(")
 # The row-count floor is the fragment the two height computations shared before
-# they were unified; a reappearance in render_agent_detail means it recomputes
+# they were unified; a reappearance in render_agent_panel means it recomputes
 # height itself again.
 INLINE_ENTRY_HEIGHT_RE = re.compile(r"\.\s*max\s*\(\s*1\s*\)")
-SHARED_ENTRY_HEIGHT_CALLS = (
-    "agent_entry_height_from_rows(",
-    "agent_entry_height_in_body(",
-)
+SHARED_ENTRY_HEIGHT_CALLS = ("agent_entry_height_from_rows(",)
 
 
 def blank_non_newlines(chars: list[str], start: int, end: int) -> None:
@@ -198,32 +195,32 @@ class UiHotPathArchitectureTests(unittest.TestCase):
 
     def test_agent_entry_height_has_one_definition(self) -> None:
         code = production_code(SIDEBAR_SOURCE.read_text(encoding="utf-8"))
-        render = RENDER_AGENT_DETAIL_RE.search(code)
-        self.assertIsNotNone(render, "render_agent_detail was renamed or removed")
+        render = RENDER_AGENT_PANEL_RE.search(code)
+        self.assertIsNotNone(render, "render_agent_panel was renamed or removed")
         body = function_body(code, render.start())
 
         self.assertTrue(
             any(call in body for call in SHARED_ENTRY_HEIGHT_CALLS),
-            "render_agent_detail must take entry heights from a shared height "
+            "render_agent_panel must take entry heights from a shared height "
             f"function (one of {SHARED_ENTRY_HEIGHT_CALLS})",
         )
         self.assertNotRegex(
             body,
             INLINE_ENTRY_HEIGHT_RE,
-            "render_agent_detail must not recompute entry height itself; the "
-            "hit-test and the scroll loops share agent_entry_height_from_rows "
-            "and the two must not drift",
+            "render_agent_panel must not recompute entry height itself; the "
+            "scroll metrics, the hit-test rects and the drawn rows all share "
+            "agent_entry_height_from_rows and must not drift",
         )
 
     def test_function_body_scanner_stops_at_the_closing_brace(self) -> None:
         code = (
-            "fn render_agent_detail() {\n"
+            "pub(super) fn render_agent_panel() {\n"
             "    let a = if x { 1 } else { 2 };\n"
             "    agent_entry_height_from_rows(rows.len(), h, b);\n"
             "}\n"
             "fn after() { rows.len().max(1) }\n"
         )
-        body = function_body(code, RENDER_AGENT_DETAIL_RE.search(code).start())
+        body = function_body(code, RENDER_AGENT_PANEL_RE.search(code).start())
 
         self.assertIn("let a =", body)
         self.assertNotRegex(body, INLINE_ENTRY_HEIGHT_RE)

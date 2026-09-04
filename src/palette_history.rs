@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(not(test))]
 const HISTORY_FILE: &str = "palette-history.json";
 pub(crate) const MAX_RECENT_COMMANDS: usize = 8;
 
@@ -13,6 +14,7 @@ struct PaletteHistoryStore {
     recent_command_ids: Vec<String>,
 }
 
+#[cfg(not(test))]
 pub(crate) fn store_path() -> PathBuf {
     crate::config::state_dir().join(HISTORY_FILE)
 }

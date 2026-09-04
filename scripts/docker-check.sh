@@ -120,19 +120,24 @@ classify_nextest_failures() {
     ' | sort -u
   )
 
+  # The `${arr[@]+"${arr[@]}"}` form, not a bare `"${arr[@]}"`: under `set -u`,
+  # bash 3.2 treats an EMPTY array as unbound and aborts, while bash 4.4+ does
+  # not. macOS ships 3.2 — on a bare host and on GitHub Actions macos-* runners
+  # — and `ACTUAL_FAILURES` is empty on every clean run, so the naive form
+  # breaks the success path on exactly one platform.
   local -a unexpected=()
   local entry binary_id test_name known allowed
-  for entry in "${ACTUAL_FAILURES[@]}"; do
+  for entry in ${ACTUAL_FAILURES[@]+"${ACTUAL_FAILURES[@]}"}; do
     test_name="${entry#*$'\t'}"
     known=false
-    for allowed in "${KNOWN_ENV_FAILURES[@]}"; do
+    for allowed in ${KNOWN_ENV_FAILURES[@]+"${KNOWN_ENV_FAILURES[@]}"}; do
       [[ "$test_name" == "$allowed" ]] && known=true && break
     done
     "$known" || unexpected+=("$entry")
   done
 
   STILL_FAILING=()
-  for entry in "${unexpected[@]}"; do
+  for entry in ${unexpected[@]+"${unexpected[@]}"}; do
     binary_id="${entry%%$'\t'*}"
     test_name="${entry#*$'\t'}"
     echo "note: retrying unexpected failure in isolation: $binary_id $test_name" >&2
@@ -198,7 +203,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [[ "${#STILL_FAILING[@]}" -gt 0 ]]; then
       echo
       echo "error: unexpected test failure(s), not on the known-environment-artifact list and still failing after a retry in isolation:" >&2
-      for entry in "${STILL_FAILING[@]}"; do
+      for entry in ${STILL_FAILING[@]+"${STILL_FAILING[@]}"}; do
         printf '  %s (%s)\n' "${entry#*$'\t'}" "${entry%%$'\t'*}" >&2
       done
       exit 1

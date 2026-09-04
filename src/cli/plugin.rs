@@ -1073,7 +1073,7 @@ fn plugin_list_from_response(
 ) -> std::io::Result<Vec<InstalledPluginInfo>> {
     let parsed: SuccessResponse =
         serde_json::from_value(response).map_err(std::io::Error::other)?;
-    let ResponseResult::PluginList { mut plugins } = parsed.result else {
+    let ResponseResult::PluginList { mut plugins, .. } = parsed.result else {
         return Err(std::io::Error::other("expected plugin_list response"));
     };
     plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
@@ -1123,7 +1123,12 @@ fn offline_plugin_list_response(params: &PluginListParams) -> std::io::Result<se
     plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
     serde_json::to_value(SuccessResponse {
         id: "cli:plugin".into(),
-        result: ResponseResult::PluginList { plugins },
+        result: ResponseResult::PluginList {
+            plugins,
+            // Answered locally with no server in play, so this process is
+            // the one whose platform would run these commands.
+            host_platform: Some(crate::app::current_platform()),
+        },
     })
     .map_err(std::io::Error::other)
 }
@@ -1134,7 +1139,7 @@ fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32>
     }
     let parsed: SuccessResponse =
         serde_json::from_value(response.clone()).map_err(std::io::Error::other)?;
-    let ResponseResult::PluginList { plugins } = parsed.result else {
+    let ResponseResult::PluginList { plugins, .. } = parsed.result else {
         return super::print_response(response);
     };
     if plugins.is_empty() {
