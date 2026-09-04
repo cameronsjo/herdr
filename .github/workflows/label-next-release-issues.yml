@@ -24,11 +24,24 @@ jobs:
       - name: Close issues referenced by pushed commits
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.KANGAL_GITHUB_TOKEN }}
+          # Upstream runs this on its own bot PAT, which this fork does not have —
+          # so every run here died `exit 4` with an empty GH_TOKEN, and no issue
+          # referenced by a `refs #N` line was ever labelled or closed. The job
+          # only writes issues, and the permissions block above already grants
+          # that, so fall back to the run's own token.
+          GH_TOKEN: ${{ secrets.KANGAL_GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
 
-          echo "Using GitHub token for $(gh api user --jq .login)."
+          # Probe with a repo read, not `gh api user`: the default token is an
+          # App installation token, and GET /user requires a user-to-server one,
+          # so identifying the caller would reject the very token that works.
+          # Without this the first real failure surfaces thirty lines down as a
+          # bare `exit 4`.
+          if ! gh api "repos/${GITHUB_REPOSITORY}" --jq .full_name >/dev/null; then
+            echo "::error::No usable GitHub token: set KANGAL_GITHUB_TOKEN, or grant the default token issues: write."
+            exit 1
+          fi
 
           BEFORE="${{ github.event.before }}"
           AFTER="${{ github.sha }}"
