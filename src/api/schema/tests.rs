@@ -124,6 +124,20 @@ fn agent_start_and_prompt_requests_round_trip() {
         prompt
     );
 
+    let type_submit = Request {
+        id: "type-submit".into(),
+        method: Method::AgentTypeSubmit(AgentTypeSubmitParams {
+            target: "reviewer".into(),
+            text: "/compact".into(),
+        }),
+    };
+    let type_submit_json = serde_json::to_value(&type_submit).unwrap();
+    assert_eq!(type_submit_json["method"], "agent.type_submit");
+    assert_eq!(
+        serde_json::from_value::<Request>(type_submit_json).unwrap(),
+        type_submit
+    );
+
     let prompt_and_wait = Request {
         id: "prompt-and-wait".into(),
         method: Method::AgentPrompt(AgentPromptParams {

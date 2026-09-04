@@ -1437,6 +1437,21 @@
           ],
           "type": "object"
         },
+        "AgentTypeSubmitParams": {
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "text"
+          ],
+          "type": "object"
+        },
         "AgentViewBuiltinField": {
           "enum": [
             "status",
@@ -5163,6 +5178,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/AgentSendKeysParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.type_submit",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentTypeSubmitParams"
             }
           },
           "required": [

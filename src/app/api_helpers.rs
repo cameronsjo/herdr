@@ -22,6 +22,10 @@ fn normalize_api_key_alias(key: &str) -> &str {
     }
 }
 
+pub(super) fn validate_api_text(text: &str) -> Result<(), char> {
+    text.chars().find(|ch| ch.is_control()).map_or(Ok(()), Err)
+}
+
 pub(super) fn encode_api_text(runtime: &crate::terminal::TerminalRuntime, text: &str) -> Vec<u8> {
     let bracketed = runtime.bracketed_paste_enabled();
     if bracketed {

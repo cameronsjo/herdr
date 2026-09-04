@@ -23,6 +23,12 @@ pub struct AgentSendKeysParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentTypeSubmitParams {
+    pub target: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentWaitParams {
     pub target: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

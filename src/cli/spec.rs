@@ -346,6 +346,13 @@ fn agent_command() -> Command {
                 .after_help("Use esc as the canonical Escape key name; escape is also accepted."),
         )
         .subcommand(
+            Command::new("type-submit")
+                .about("Type literal text into an agent UI and submit it")
+                .arg(required("target", "TARGET"))
+                .arg(required("text", "TEXT"))
+                .after_help("Use type-submit for interactive UI commands that must be entered as literal text. Use prompt for normal model prompts."),
+        )
+        .subcommand(
             Command::new("prompt")
                 .about("Submit a prompt to an agent")
                 .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")
@@ -1259,6 +1266,9 @@ mod tests {
         assert!(agent
             .get_subcommands()
             .any(|subcommand| subcommand.get_name() == "send-keys"));
+        assert!(agent
+            .get_subcommands()
+            .any(|subcommand| subcommand.get_name() == "type-submit"));
         assert!(agent
             .get_subcommands()
             .any(|subcommand| subcommand.get_name() == "wait"));

@@ -275,6 +275,7 @@ herdr agent list
 herdr agent get <target>
 herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
 herdr agent send-keys <target> <key> [key ...]
+herdr agent type-submit <target> <text>
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent focus <target>
@@ -295,7 +296,7 @@ herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 
 `idle` は入力待ちで、そのタブがフォーカス中の Herdr UI ですでに表示済みの状態です。`done` は同じ基礎的な idle 状態ですが、表示していないバックグラウンド作業が完了したときに使われます。そのタブをフォーカスするか `pane focus` / `agent focus` で対象にすると表示済みになりますが、CLI で読み取るだけでは変わりません。`blocked` は承認または質問 UI を Herdr が認識した状態です。`unknown` はエージェントが存在するものの確実に分類できない状態で、作業の成功を意味しません。
 
-`agent send-keys` は `enter`、`up`、`esc`、`ctrl+c` などの論理キーを送ります。Herdr は 1 バイトも書き込む前に全キーを検証します。`agent read` は解決されたターミナルストリームを読み、`agent rename` は検出済みエージェントに名前を付けます。
+`agent type-submit` はエージェント UI にリテラルテキストと Enter を送ります。`agent send-keys` は `enter`、`up`、`esc`、`ctrl+c` などの論理キーを送ります。Herdr は 1 バイトも書き込む前に全キーを検証します。`agent read` は解決されたターミナルストリームを読み、`agent rename` は検出済みエージェントに名前を付けます。
 
 `agent explain` は、スクリーン検出が使うのと同じ下部バッファの検出スナップショットの分類を実行中のサーバーに依頼します。そのためライブの出力はサーバーのアクティブなマニフェストキャッシュを反映します。これは `agent.explain` ソケットメソッドを使うので、Herdr のアップグレード後にライブ explain を使う前に、サーバーを再起動するか更新済みサーバーへハンドオフしてください。保存済みフィクスチャをローカルで説明するには `--file PATH --agent LABEL` を使います。デフォルトの出力には、エージェント、最終状態、マニフェストのソースとバージョン、リージョンの証拠付きでマッチしたルール、そしてフォールバック・スキップ・警告の理由が表示されます。`--verbose` を付けると、可視の証拠フラグ、キャッシュされたリモートバージョン、ローカルオーバーライドのシャドーイング、リモート更新状況、マッチャーとリージョンの証拠付きの評価済みルール全リストが表示されます。issue の報告やテストには `--json` を付けてください。
 

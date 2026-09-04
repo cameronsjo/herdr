@@ -67,9 +67,10 @@ herdr agent rename w1:p2 reviewer
 | Start a supported agent in an existing pane | `agent start` |
 | Submit a prompt, optionally waiting for it | `agent prompt` |
 | Send keys to an agent's interactive UI | `agent send-keys` |
+| Type and submit an agent UI command | `agent type-submit` |
 | Wait for agent lifecycle state | `agent wait` |
 
-`agent prompt` submits text plus encoded Enter and honors the terminal's live bracketed-paste mode. It can prompt an agent that is already working. If the agent is already `blocked`, it returns `agent_blocked` without sending terminal input; inspect the dialog and use `agent send-keys` for a deliberate response. Use `agent send-keys` for interactions such as `esc`, `up`, `enter`, or `ctrl+c`; `escape` is accepted as an alias for `esc`. Use the pane input commands when you deliberately want raw terminal control.
+`agent prompt` submits text plus encoded Enter and honors the terminal's live bracketed-paste mode. It can prompt an agent that is already working. If the agent is already `blocked`, it returns `agent_blocked` without sending terminal input; inspect the dialog and use `agent send-keys` for a deliberate response. Use `agent type-submit` for slash commands or other harness commands that must be typed into the agent UI instead of sent as model prompts. Unlike `agent prompt`, it does type into a `blocked` agent, so it can answer an interactive prompt. Use `agent send-keys` for interactions such as `esc`, `up`, `enter`, or `ctrl+c`; `escape` is accepted as an alias for `esc`. Use the pane input commands when you deliberately want raw terminal control.
 
 Pane input addresses the terminal regardless of its current occupant. Agent input resolves the live agent and rejects the operation if that agent no longer controls the pane.
 
@@ -110,6 +111,7 @@ Wait for an agent to ask for input, inspect it, and interact with its UI:
 ```bash
 herdr agent wait reviewer --until blocked --timeout 120000
 herdr agent read reviewer --source recent-unwrapped --lines 80
+herdr agent type-submit reviewer "approved"
 herdr agent send-keys reviewer esc
 ```
 
