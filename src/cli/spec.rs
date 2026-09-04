@@ -248,6 +248,12 @@ fn workspace_command() -> Command {
                 .arg(required("label", "LABEL").num_args(1..)),
         )
         .subcommand(
+            Command::new("move")
+                .about("Reorder a workspace")
+                .arg(required("workspace_id", "WORKSPACE_ID"))
+                .arg(option("index", "N").required(true)),
+        )
+        .subcommand(
             Command::new("report-metadata")
                 .about("Report display-only workspace metadata")
                 .arg(required("workspace_id", "WORKSPACE_ID"))
@@ -1181,6 +1187,7 @@ mod tests {
     #[test]
     fn spec_marks_runtime_required_options_as_required() {
         for (path, options) in [
+            (&["workspace", "move"][..], &["index"][..]),
             (&["workspace", "report-metadata"][..], &["source"][..]),
             (&["pane", "neighbor"][..], &["direction"][..]),
             (&["pane", "focus"][..], &["direction"][..]),

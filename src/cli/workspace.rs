@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::schema::{
-    Method, WorkspaceCreateParams, WorkspaceRenameParams, WorkspaceReportMetadataParams,
+    Method, WorkspaceCreateParams, WorkspaceMoveParams, WorkspaceRenameParams,
+    WorkspaceReportMetadataParams,
 };
 
 pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
@@ -16,6 +17,7 @@ pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
         "get" => workspace_get(&args[1..]),
         "focus" => workspace_focus(&args[1..]),
         "rename" => workspace_rename(&args[1..]),
+        "move" => workspace_move(&args[1..]),
         "report-metadata" => workspace_report_metadata(&args[1..]),
         "close" => workspace_close(&args[1..]),
         "help" | "--help" | "-h" => {
@@ -140,6 +142,52 @@ fn workspace_rename(args: &[String]) -> std::io::Result<i32> {
     })
 }
 
+fn workspace_move(args: &[String]) -> std::io::Result<i32> {
+    let Some(raw_workspace_id) = args.first() else {
+        eprintln!("{}", workspace_move_usage());
+        return Ok(2);
+    };
+
+    let mut insert_index = None;
+
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--index" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --index");
+                    return Ok(2);
+                };
+                let Ok(parsed) = value.parse::<usize>() else {
+                    eprintln!("--index must be a non-negative integer");
+                    return Ok(2);
+                };
+                insert_index = Some(parsed);
+                index += 2;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                eprintln!("{}", workspace_move_usage());
+                return Ok(2);
+            }
+        }
+    }
+
+    let Some(insert_index) = insert_index else {
+        eprintln!("{}", workspace_move_usage());
+        return Ok(2);
+    };
+
+    super::runtime::workspace_move(WorkspaceMoveParams {
+        workspace_id: super::normalize_workspace_id(raw_workspace_id),
+        insert_index,
+    })
+}
+
+fn workspace_move_usage() -> String {
+    "usage: herdr workspace move <workspace_id> --index N".into()
+}
+
 fn workspace_report_metadata(args: &[String]) -> std::io::Result<i32> {
     let Some(raw_workspace_id) = args.first() else {
         eprintln!("usage: herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
@@ -248,6 +296,7 @@ fn print_workspace_help() {
     eprintln!("  herdr workspace get <workspace_id>");
     eprintln!("  herdr workspace focus <workspace_id>");
     eprintln!("  herdr workspace rename <workspace_id> <label>");
+    eprintln!("  herdr workspace move <workspace_id> --index N");
     eprintln!("  herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
     eprintln!("  herdr workspace close <workspace_id> [--group]");
 }
