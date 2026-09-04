@@ -3,6 +3,23 @@ use std::io::Write;
 use clap::{Arg, ArgAction, ArgGroup, Command, ValueHint};
 
 pub(super) fn command() -> Command {
+    command_impl(true)
+}
+
+/// The command tree used for shell completions.
+///
+/// `live-handoff` is an internal recovery command driven by `herdr update`,
+/// not something a user should tab-complete or discover via a completion
+/// script — but it must still appear in `herdr server --help`, so it can't
+/// simply be `.hide(true)`'d in the shared spec (`clap_complete`'s shell
+/// generators enumerate `get_subcommands()` directly and do not skip hidden
+/// subcommands the way they skip hidden args). Instead this tree omits the
+/// subcommand entirely.
+pub(super) fn command_for_completions() -> Command {
+    command_impl(false)
+}
+
+fn command_impl(include_live_handoff: bool) -> Command {
     let command = Command::new("herdr")
         .about("terminal workspace manager for AI coding agents")
         .disable_help_flag(true)
@@ -31,7 +48,7 @@ pub(super) fn command() -> Command {
         .subcommand(status_command())
         .subcommand(config_command())
         .subcommand(channel_command())
-        .subcommand(server_command())
+        .subcommand(server_command(include_live_handoff))
         .subcommand(api_command())
         .subcommand(workspace_command())
         .subcommand(worktree_command())
@@ -165,17 +182,22 @@ fn channel_command() -> Command {
         )
 }
 
-fn server_command() -> Command {
-    Command::new("server")
+fn server_command(include_live_handoff: bool) -> Command {
+    let command = Command::new("server")
         .about("Run or control the headless server")
-        .subcommand(Command::new("stop").about("Stop the running server"))
-        .subcommand(
+        .subcommand(Command::new("stop").about("Stop the running server"));
+    let command = if include_live_handoff {
+        command.subcommand(
             Command::new("live-handoff")
                 .about("Hand off live panes to a new local server")
                 .arg(path_option("import-exe", "PATH"))
                 .arg(option("expected-protocol", "N"))
                 .arg(option("expected-version", "VERSION")),
         )
+    } else {
+        command
+    };
+    command
         .subcommand(Command::new("reload-config").about("Reload config in the running server"))
         .subcommand(
             Command::new("agent-manifests")
@@ -1389,6 +1411,32 @@ mod tests {
             let mut output = Vec::new();
             clap_complete::generate(shell, &mut cmd, "herdr", &mut output);
             assert!(!output.is_empty(), "empty {shell:?} completion output");
+        }
+    }
+
+    #[test]
+    fn live_handoff_is_documented_but_not_completed() {
+        let server_help = long_help(&["server"]);
+        assert!(
+            server_help.contains("live-handoff"),
+            "herdr server --help dropped live-handoff: {server_help}"
+        );
+
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Elvish,
+            clap_complete::Shell::Fish,
+            clap_complete::Shell::PowerShell,
+            clap_complete::Shell::Zsh,
+        ] {
+            let mut cmd = super::command_for_completions();
+            let mut output = Vec::new();
+            clap_complete::generate(shell, &mut cmd, "herdr", &mut output);
+            let script = String::from_utf8(output).unwrap();
+            assert!(
+                !script.contains("live-handoff"),
+                "{shell:?} completions should not offer the internal live-handoff command: {script}"
+            );
         }
     }
 }
