@@ -86,13 +86,26 @@ struct AgentNameLedger {
 
 impl AgentNameLedger {
     /// Returns the name to restore, or `None` when the stored name is dropped.
+    ///
+    /// A dropped name is logged individually so an operator can tell which pane
+    /// lost its name, not just how many did. It is escaped first: the whole
+    /// reason this rejects is that the stored name is untrusted, and a raw one
+    /// carries control characters straight into the log.
     fn accept(&mut self, name: String) -> Option<String> {
         if !crate::app::valid_agent_name(&name) {
             self.dropped_invalid += 1;
+            warn!(
+                name = %name.escape_debug(),
+                "dropped a stored agent name that the agent API would refuse"
+            );
             return None;
         }
         if !self.claimed.insert(name.clone()) {
             self.dropped_duplicate += 1;
+            warn!(
+                name = %name.escape_debug(),
+                "dropped a duplicate stored agent name; the first pane claiming it keeps it"
+            );
             return None;
         }
         Some(name)
