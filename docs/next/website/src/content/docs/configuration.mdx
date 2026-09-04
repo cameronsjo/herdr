@@ -434,9 +434,10 @@ without a `workspace` token, since the header already carries that name. A
 `rows_by_agent` override still wins in both modes.
 
 Grouping applies only while the Agent panel is in **grouped** (space) order. It
-turns off under **priority** order and under any agent view that sorts, because
-either can interleave workspaces and leave a header labeling agents from
-somewhere else. When it is off, the panel renders exactly as `group_by = "none"`
+turns off under **priority** order and under any agent view whose order
+interleaves workspaces, because either would leave a header labeling agents from
+somewhere else. A view that only filters keeps space order and stays grouped.
+When it is off, the panel renders exactly as `group_by = "none"`
 does. Scrolling into the middle of a run scrolls past that run's header; Herdr
 does not pin headers.
 

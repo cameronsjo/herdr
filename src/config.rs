@@ -29,7 +29,7 @@ pub use self::{
         UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenAlignment,
+        AgentGroupBy, AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenAlignment,
         SidebarTokenStyle, SpaceSidebarToken, SpacesSidebarConfig,
     },
     sound::SoundConfig,

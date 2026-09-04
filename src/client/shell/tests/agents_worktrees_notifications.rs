@@ -1276,3 +1276,291 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
 }
+
+/// Two workspaces, two agent panes each, in space order.
+fn grouped_agents_snapshot() -> ClientShellSnapshot {
+    let mut projected = snapshot();
+    projected.workspaces[0].label = "alpha".into();
+    projected.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(),
+        active_tab_id: "tab_3".into(),
+        new_workspace_cwd: "/beta".into(),
+        number: 2,
+        label: "beta".into(),
+        custom_label: false,
+        branch: None,
+        git_ahead_behind: None,
+        tokens: Vec::new(),
+        worktree: None,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    for (tab_id, workspace_id, number) in [
+        ("tab_2", "ws_1", 2),
+        ("tab_3", "ws_2", 1),
+        ("tab_4", "ws_2", 2),
+    ] {
+        projected.tabs.push(ClientShellTab {
+            tab_id: tab_id.into(),
+            workspace_id: workspace_id.into(),
+            number,
+            label: number.to_string(),
+            custom_label: false,
+            zoomed: false,
+            focused: false,
+            agent_status: AgentStatus::Idle,
+        });
+    }
+    projected.agents = [
+        ("pane_1", "ws_1", "tab_1", "one"),
+        ("pane_2", "ws_1", "tab_2", "two"),
+        ("pane_3", "ws_2", "tab_3", "three"),
+        ("pane_4", "ws_2", "tab_4", "four"),
+    ]
+    .into_iter()
+    .map(|(pane_id, workspace_id, tab_id, name)| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: tab_id.into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("claude".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: pane_id == "pane_1",
+    })
+    .collect();
+    projected
+}
+
+fn grouped_config() -> Config {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Workspace;
+    config
+}
+
+fn frame_row(frame: &FrameData, rect: ratatui::layout::Rect, offset: u16) -> String {
+    let y = usize::from(rect.y.saturating_add(offset));
+    let start = y * usize::from(frame.width) + usize::from(rect.x);
+    frame.cells[start..start + usize::from(rect.width)]
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect()
+}
+
+#[test]
+fn grouped_agent_sidebar_draws_one_header_per_workspace_run() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&grouped_config()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("grouped agent sidebar");
+
+    let rects = state
+        .hits
+        .agents
+        .iter()
+        .map(|(rect, pane_id)| (pane_id.clone(), *rect))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rects
+            .iter()
+            .map(|(pane_id, rect)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_1", 2), ("pane_2", 1), ("pane_3", 2), ("pane_4", 1)],
+        "only a run's first entry carries a header row"
+    );
+
+    assert_eq!(frame_row(&frame, rects[0].1, 0).trim_end(), " alpha");
+    assert_eq!(frame_row(&frame, rects[2].1, 0).trim_end(), " beta");
+    let names = ["one", "two", "three", "four"];
+    for (index, offset) in [(0usize, 1u16), (1, 0), (2, 1), (3, 0)] {
+        let row = frame_row(&frame, rects[index].1, offset);
+        assert!(
+            row.starts_with("   ") && row.contains(names[index]),
+            "agent rows indent under their header: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn ungrouped_agent_sidebar_keeps_the_workspace_token_and_flush_first_row() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("ungrouped agent sidebar");
+
+    let first = state.hits.agents[0].0;
+    let row = frame_row(&frame, first, 0);
+    assert!(
+        !row.starts_with("   "),
+        "ungrouped first rows stay flush: {row:?}"
+    );
+    assert!(
+        row.contains("alpha"),
+        "ungrouped rows carry the workspace: {row:?}"
+    );
+}
+
+#[test]
+fn grouped_workspace_header_stays_plain_under_the_focused_agent() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&grouped_config()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("grouped agent sidebar");
+
+    let focused = state.hits.agents[0].0;
+    let active_bg = crate::protocol::color_to_u32(state.config.palette.active_row_bg);
+    let row_bgs = |offset: u16| -> Vec<u32> {
+        let y = usize::from(focused.y + offset);
+        let start = y * usize::from(frame.width) + usize::from(focused.x);
+        frame.cells[start..start + usize::from(focused.width)]
+            .iter()
+            .map(|cell| cell.bg)
+            .collect()
+    };
+
+    assert!(
+        row_bgs(1).iter().all(|bg| *bg == active_bg),
+        "the focused agent's own row carries the active highlight"
+    );
+    assert!(
+        row_bgs(0).iter().all(|bg| *bg != active_bg),
+        "the workspace header labels the run, not the focused agent"
+    );
+}
+
+#[test]
+fn grouping_suppresses_the_row_gap_inside_a_workspace_run() {
+    let mut config = grouped_config();
+    config.ui.sidebar.agents.row_gap = 1;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("grouped agent sidebar");
+
+    let tops = state
+        .hits
+        .agents
+        .iter()
+        .map(|(rect, _)| rect.y)
+        .collect::<Vec<_>>();
+    assert_eq!(tops[1], tops[0] + 2, "packed inside the alpha run");
+    assert_eq!(tops[2], tops[1] + 2, "one blank row between runs");
+    assert_eq!(tops[3], tops[2] + 2, "packed inside the beta run");
+}
+
+#[test]
+fn scrolling_into_a_run_keeps_headers_and_hit_rects_aligned() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&grouped_config()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    // Six grouped rows into a shorter body, so scrolling past alpha's header
+    // shifts every later entry up by one row.
+    state.compose(106, 16).expect("short grouped agent sidebar");
+    assert!(
+        state.hits.agent_max_scroll > 0,
+        "the fixture must overflow for this to test anything"
+    );
+
+    let body = state.hits.agent_body;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: body.x,
+        row: body.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let frame = state.compose(106, 16).expect("scrolled grouped sidebar");
+
+    let rects = state
+        .hits
+        .agents
+        .iter()
+        .map(|(rect, pane_id)| (pane_id.clone(), *rect))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rects[0].0, "pane_2",
+        "the scroll lands mid-run, on alpha's second agent"
+    );
+    assert_eq!(rects[0].1.height, 1, "the mid-run entry drops its header");
+    let beta = rects
+        .iter()
+        .find(|(pane_id, _)| pane_id == "pane_3")
+        .expect("beta's first agent stays visible");
+    assert_eq!(beta.1.height, 2, "the beta run start regains its header");
+    assert_eq!(
+        frame_row(&frame, beta.1, 0).trim_end(),
+        " beta",
+        "the beta header lands where the hit rect says it does"
+    );
+    // A click on that header row resolves to the run's first agent.
+    let click = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: beta.1.x,
+        row: beta.1.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &click.actions[..] else {
+        panic!("a header click should focus through the endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+    ));
+}
+
+#[test]
+fn priority_order_and_interleaving_views_suspend_grouping() {
+    let mut priority = grouped_config();
+    priority.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&priority));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("priority agent sidebar");
+    assert!(
+        state.hits.agents.iter().all(|(rect, _)| rect.height == 2),
+        "priority order renders exactly as group_by = \"none\" does"
+    );
+
+    // A view whose order interleaves workspaces would leave a header labeling
+    // agents from somewhere else, so grouping turns off for it too.
+    let mut interleaved = grouped_agents_snapshot();
+    interleaved.agent_view_label = Some("review".into());
+    interleaved.agent_order = vec![
+        "pane_1".into(),
+        "pane_3".into(),
+        "pane_2".into(),
+        "pane_4".into(),
+    ];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&grouped_config()));
+    state.set_snapshot(Box::new(interleaved));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("interleaved view sidebar");
+    assert!(
+        state.hits.agents.iter().all(|(rect, _)| rect.height == 2),
+        "an interleaving view suspends grouping"
+    );
+
+    // A filter-only view keeps space order, so grouping stays on.
+    let mut filtered = grouped_agents_snapshot();
+    filtered.agent_view_label = Some("review".into());
+    filtered.agent_order = vec!["pane_2".into(), "pane_3".into(), "pane_4".into()];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&grouped_config()));
+    state.set_snapshot(Box::new(filtered));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("filtered view sidebar");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, _)| rect.height)
+            .collect::<Vec<_>>(),
+        vec![2, 2, 1],
+        "alpha's survivor starts its own run; beta keeps one header"
+    );
+}

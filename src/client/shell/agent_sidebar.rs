@@ -9,12 +9,78 @@ use ratatui::{
 };
 
 use super::*;
+use crate::protocol::ClientShellAgent;
 
-struct AgentRow {
-    pane_id: String,
+struct AgentRow<'a> {
+    pane_id: &'a str,
+    workspace_id: &'a str,
+    /// Workspace label this entry draws above its own rows, set only when the
+    /// entry starts a workspace run while grouping is on.
+    header: Option<&'a str>,
     status: crate::api::schema::AgentStatus,
     focused: bool,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
+}
+
+impl AgentRow<'_> {
+    fn header_rows(&self) -> u16 {
+        u16::from(self.header.is_some())
+    }
+}
+
+/// The one definition of an entry's height in the panel body.
+///
+/// The scroll-metrics pass and the render loop both go through this, so the
+/// layout the scrollbar and the hit-test rects report cannot drift from the
+/// rows actually drawn. Headers make the two genuinely different arithmetic,
+/// which is why they share a function rather than agreeing by coincidence.
+fn agent_entry_height_from_rows(rows_len: usize, header_rows: u16, body_height: u16) -> u16 {
+    (rows_len
+        .max(1)
+        .saturating_add(usize::from(header_rows))
+        .min(u16::MAX as usize) as u16)
+        .min(body_height)
+}
+
+/// Whether the agent panel draws one workspace header per contiguous run.
+///
+/// One gate drives both the headers and the row layout. `agent_panel_sort` is a
+/// one-click toggle, so gating the header on the live sort while gating the
+/// layout on config would leave a `priority` user with no workspace shown at
+/// all.
+///
+/// A header must never label agents from another workspace, so the order about
+/// to be rendered has to keep each workspace in one run. The endpoint's
+/// snapshot carries an active agent view's resulting order but not the sort
+/// clause that produced it, so the order itself is what gets checked: a
+/// filter-only view keeps space order and stays grouped, while a view that
+/// interleaves workspaces turns grouping off.
+fn agent_grouping_is_effective(
+    entries: &[(&ClientShellAgent, &ClientShellWorkspace)],
+    config: &ClientShellConfig,
+) -> bool {
+    matches!(
+        config.agents.group_by,
+        crate::config::AgentGroupBy::Workspace
+    ) && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
+        && workspaces_are_contiguous(entries)
+}
+
+/// Whether every workspace occupies exactly one run of the ordered entries.
+///
+/// The inner scan runs only at a run boundary, so the cost is bounded by the
+/// number of runs — at most the workspace count — rather than the entry count
+/// squared, and it allocates nothing inside this per-frame path.
+fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
+    entries.iter().enumerate().all(|(index, (agent, _))| {
+        let Some(previous) = index.checked_sub(1) else {
+            return true;
+        };
+        entries[previous].0.workspace_id == agent.workspace_id
+            || !entries[..previous]
+                .iter()
+                .any(|(earlier, _)| earlier.workspace_id == agent.workspace_id)
+    })
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -116,7 +182,7 @@ pub(super) fn render_agent_panel(
             .add_modifier(Modifier::BOLD),
     );
 
-    let rows = agent_rows(snapshot, config);
+    let (rows, grouped) = agent_rows(snapshot, config);
     let body = Rect::new(
         area.x,
         area.y.saturating_add(3),
@@ -143,17 +209,17 @@ pub(super) fn render_agent_panel(
 
     let row_heights = rows
         .iter()
-        .map(|row| row.rows.len().max(1).min(u16::MAX as usize) as u16)
+        .map(|row| agent_entry_height_from_rows(row.rows.len(), row.header_rows(), body.height))
         .collect::<Vec<_>>();
     let gaps = rows
         .iter()
         .enumerate()
-        .map(|(index, _)| {
-            if index + 1 < rows.len() {
-                config.agents.row_gap
-            } else {
-                0
-            }
+        .map(|(index, row)| match rows.get(index + 1) {
+            None => 0,
+            // Grouping packs a workspace run under its shared header, so the
+            // gap separates runs rather than individual agents.
+            Some(next) if grouped && next.workspace_id == row.workspace_id => 0,
+            Some(_) => config.agents.row_gap,
         })
         .collect::<Vec<_>>();
     let metrics =
@@ -167,20 +233,16 @@ pub(super) fn render_agent_panel(
     let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
     let mut y = body.y;
     for (index, row) in rows.iter().enumerate().skip(*agent_scroll) {
-        let height = (row.rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+        let height = row_heights[index];
         if y.saturating_add(height) > body.bottom() {
             break;
         }
+        // The header belongs to the entry that draws it, so a click anywhere in
+        // this rect — header row included — focuses the run's first agent.
         let rect = Rect::new(body.x, y, content_width, height);
-        hits.agents.push((rect, row.pane_id.clone()));
-        render_agent_row(buffer, rect, row, config);
-        y = y
-            .saturating_add(height)
-            .saturating_add(if index + 1 < rows.len() {
-                config.agents.row_gap
-            } else {
-                0
-            });
+        hits.agents.push((rect, row.pane_id.to_string()));
+        render_agent_row(buffer, rect, row, grouped, config);
+        y = y.saturating_add(height).saturating_add(gaps[index]);
     }
 
     if show_scrollbar {
@@ -190,8 +252,11 @@ pub(super) fn render_agent_panel(
     }
 }
 
-fn agent_rows(snapshot: &ClientShellSnapshot, config: &ClientShellConfig) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+fn agent_rows<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    config: &ClientShellConfig,
+) -> (Vec<AgentRow<'a>>, bool) {
+    let entries = ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
         .into_iter()
         .filter_map(|pane_id| {
             let agent = snapshot
@@ -202,6 +267,14 @@ fn agent_rows(snapshot: &ClientShellSnapshot, config: &ClientShellConfig) -> Vec
                 .workspaces
                 .iter()
                 .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
+            Some((agent, workspace))
+        })
+        .collect::<Vec<_>>();
+    let grouped = agent_grouping_is_effective(&entries, config);
+    let rows = entries
+        .iter()
+        .enumerate()
+        .map(|(index, (agent, workspace))| {
             let tab = snapshot.tabs.iter().find(|tab| tab.tab_id == agent.tab_id);
             let pane = snapshot
                 .panes
@@ -251,24 +324,45 @@ fn agent_rows(snapshot: &ClientShellSnapshot, config: &ClientShellConfig) -> Vec
                     tokens: &tokens,
                 },
                 state_text,
-                // The fork's per-workspace agent grouping has not been ported onto
-                // the client-shell sidebar yet, so nothing here renders under a
-                // group header and every row wants the ungrouped token list.
-                // Wiring this to real grouping state is tracked in the port issue.
-                false,
+                grouped,
             );
-            Some(AgentRow {
-                pane_id: agent.pane_id.clone(),
+            // The run's first entry draws the header for everyone behind it, so
+            // no entry of its own is inserted and every position-indexed
+            // consumer — the hit-test, the scroll offset, the scrollbar
+            // metrics — keeps counting agents.
+            let header = (grouped
+                && index
+                    .checked_sub(1)
+                    .is_none_or(|previous| entries[previous].0.workspace_id != agent.workspace_id))
+            .then_some(workspace.label.as_str());
+            AgentRow {
+                pane_id: agent.pane_id.as_str(),
+                workspace_id: agent.workspace_id.as_str(),
+                header,
                 status: agent.agent_status,
                 focused: agent.focused,
                 rows,
-            })
+            }
         })
-        .collect()
+        .collect();
+    (rows, grouped)
 }
 
-fn render_agent_row(buffer: &mut Buffer, rect: Rect, row: &AgentRow, config: &ClientShellConfig) {
+fn render_agent_row(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &AgentRow<'_>,
+    grouped: bool,
+    config: &ClientShellConfig,
+) {
     let palette = &config.palette;
+    // The clamp in `agent_entry_height_from_rows` can leave room for the header
+    // but not the agent rows it labels; the agent row wins that tie.
+    let header_rows = if rect.height > row.header_rows() {
+        row.header_rows()
+    } else {
+        0
+    };
     let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
@@ -305,8 +399,33 @@ fn render_agent_row(buffer: &mut Buffer, rect: Rect, row: &AgentRow, config: &Cl
     } else {
         row.rows.clone()
     };
-    for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
-        let indent = if index == 0 { 1 } else { 3 };
+    if let (1, Some(label)) = (header_rows, row.header) {
+        // The header labels the whole run, so it never carries the active-row
+        // highlight — even though the entry drawing it may be the focused pane.
+        // Doing so would mark two rows for one focused agent, and only ever for
+        // the run's first agent, since a later agent in the run draws no header
+        // of its own. The hit-test still routes a click here to that first
+        // agent; that is unchanged.
+        Paragraph::new(Line::from(vec![
+            ratatui::text::Span::raw(" "),
+            ratatui::text::Span::styled(
+                crate::ui::truncate_end(label, rect.width.saturating_sub(1) as usize),
+                Style::default()
+                    .fg(palette.subtext0)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .render(Rect::new(rect.x, rect.y, rect.width, 1), buffer);
+    }
+
+    let agent_rows = rect.height.saturating_sub(header_rows);
+    for (index, tokens) in rows.iter().take(agent_rows as usize).enumerate() {
+        // Prefix and width budget key off the visual row, not `index`. While
+        // grouping, every agent row sits under a workspace header — including
+        // the rows of later entries in the same run, which draw no header of
+        // their own — so they all take the indented prefix.
+        let visual_row = index as u16 + header_rows;
+        let indent = if grouped || visual_row > 0 { 3 } else { 1 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
@@ -319,7 +438,7 @@ fn render_agent_row(buffer: &mut Buffer, rect: Rect, row: &AgentRow, config: &Cl
             rect.width.saturating_sub(indent as u16) as usize,
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
-            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
+            Rect::new(rect.x, rect.y + visual_row, rect.width, 1),
             buffer,
         );
     }
