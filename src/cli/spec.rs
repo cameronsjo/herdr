@@ -169,6 +169,13 @@ fn server_command() -> Command {
     Command::new("server")
         .about("Run or control the headless server")
         .subcommand(Command::new("stop").about("Stop the running server"))
+        .subcommand(
+            Command::new("live-handoff")
+                .about("Hand off live panes to a new local server")
+                .arg(path_option("import-exe", "PATH"))
+                .arg(option("expected-protocol", "N"))
+                .arg(option("expected-version", "VERSION")),
+        )
         .subcommand(Command::new("reload-config").about("Reload config in the running server"))
         .subcommand(
             Command::new("agent-manifests")
