@@ -386,3 +386,157 @@ fn the_split_buttons_are_hit_where_the_renderer_drew_them() {
         "clicking vertical splits right"
     );
 }
+
+/// Two workspaces, so a merge has somewhere to land.
+fn shell_with_second_workspace() -> ClientShellState {
+    let mut snapshot = snapshot();
+    let mut second = snapshot.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.number = 2;
+    second.label = "second".into();
+    second.focused = false;
+    second.active_tab_id = "tab_2".into();
+    snapshot.workspaces.push(second);
+    let mut tab = snapshot.tabs[0].clone();
+    tab.tab_id = "tab_2".into();
+    tab.workspace_id = "ws_2".into();
+    tab.number = 1;
+    tab.focused = false;
+    snapshot.tabs.push(tab);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    state.compose(106, 24).expect("composed frame");
+    state
+}
+
+fn arm_merge_on_the_second_workspace(state: &mut ClientShellState) {
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    state.compose(106, 24).expect("composed frame");
+    let rows = render::client_navigator_rows(
+        state.snapshot.as_deref().expect("snapshot"),
+        match state.overlay.as_ref() {
+            Some(ClientShellOverlay::Navigator(navigator)) => navigator,
+            _ => panic!("navigator should be open"),
+        },
+    );
+    let target_row = rows
+        .iter()
+        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace(id) if id == "ws_2"))
+        .expect("a row for the other workspace");
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = target_row;
+    }
+}
+
+#[test]
+fn the_merge_action_arms_the_navigator_and_a_workspace_row_asks_first() {
+    let mut state = shell_with_second_workspace();
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::MergeWorkspace),
+        &mut outcome,
+    );
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("merge should open the navigator as a destination picker");
+    };
+    assert_eq!(navigator.pending_workspace_merge.as_deref(), Some("ws_1"));
+    // Merging into a workspace created for the merge is a rename, not a merge,
+    // so the destination-only new-space row stays off.
+    assert!(!navigator.move_armed());
+
+    arm_merge_on_the_second_workspace(&mut state);
+    let mut accept = ClientShellInput::default();
+    state.accept_navigator_selection(&mut accept);
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::ConfirmMerge(_))),
+        "a merge destination is confirmed before anything moves"
+    );
+    assert!(
+        endpoint_methods(&accept).is_empty(),
+        "picking the destination must not merge on its own"
+    );
+}
+
+#[test]
+fn confirming_the_merge_sends_workspace_merge_for_the_picked_target() {
+    let mut state = shell_with_second_workspace();
+    arm_merge_on_the_second_workspace(&mut state);
+    let mut accept = ClientShellInput::default();
+    state.accept_navigator_selection(&mut accept);
+
+    let confirmed = press(&mut state, KeyCode::Enter);
+    assert!(state.overlay.is_none());
+    assert!(
+        endpoint_methods(&confirmed).iter().any(|method| matches!(
+            method,
+            crate::api::schema::Method::WorkspaceMerge(params)
+                if params.source_workspace_id == "ws_1"
+                    && params.target_workspace_id == "ws_2"
+                    // No worktree group here, so the client asks for no group
+                    // intent. The server refuses on its own if it disagrees.
+                    && !params.merge_group
+        )),
+        "confirming merges the armed source into the picked target"
+    );
+}
+
+#[test]
+fn the_merge_confirmation_captures_every_mouse_event_aimed_past_it() {
+    let mut state = shell_with_second_workspace();
+    arm_merge_on_the_second_workspace(&mut state);
+    let mut accept = ClientShellInput::default();
+    state.accept_navigator_selection(&mut accept);
+    state.compose(106, 24).expect("composed frame");
+    let scroll_before = state.workspace_scroll;
+
+    state.handle_raw_events(vec![
+        RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: 5,
+            row: 5,
+            modifiers: KeyModifiers::empty(),
+        }),
+        RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 1,
+            row: 1,
+            modifiers: KeyModifiers::empty(),
+        }),
+    ]);
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::ConfirmMerge(_))),
+        "the confirmation stays open"
+    );
+    assert_eq!(state.workspace_scroll, scroll_before);
+
+    let cancelled = click(&mut state, 0, 0);
+    assert!(state.overlay.is_none());
+    assert!(
+        endpoint_methods(&cancelled).is_empty(),
+        "cancelling merges nothing"
+    );
+}
+
+#[test]
+fn the_merge_confirm_button_is_hit_where_the_renderer_drew_it() {
+    let mut state = shell_with_second_workspace();
+    arm_merge_on_the_second_workspace(&mut state);
+    let mut accept = ClientShellInput::default();
+    state.accept_navigator_selection(&mut accept);
+    state.compose(106, 24).expect("composed frame");
+    let confirm = state.hits.overlay_primary;
+    assert!(!confirm.is_empty(), "the renderer publishes a button rect");
+
+    let merged = click(&mut state, confirm.x + 1, confirm.y);
+    assert!(state.overlay.is_none());
+    assert!(
+        endpoint_methods(&merged).iter().any(|method| matches!(
+            method,
+            crate::api::schema::Method::WorkspaceMerge(params)
+                if params.source_workspace_id == "ws_1"
+                    && params.target_workspace_id == "ws_2"
+        )),
+        "the mouse path merges exactly what the key path does"
+    );
+}

@@ -400,12 +400,13 @@ impl App {
             let tab_count = self.state.workspaces[source_index].tabs.len();
             let previous_tab_ids = (0..tab_count)
                 .map(|tab_idx| {
-                    self.public_tab_id(source_index, tab_idx).unwrap_or_else(|| {
-                        crate::workspace::public_tab_id_for_number(
-                            &self.state.workspaces[source_index].id,
-                            tab_idx + 1,
-                        )
-                    })
+                    self.public_tab_id(source_index, tab_idx)
+                        .unwrap_or_else(|| {
+                            crate::workspace::public_tab_id_for_number(
+                                &self.state.workspaces[source_index].id,
+                                tab_idx + 1,
+                            )
+                        })
                 })
                 .collect::<Vec<_>>();
             // Snapshot before the take: it unregisters these panes from the
@@ -949,7 +950,10 @@ mod tests {
             api_rx,
             crate::api::EventHub::default(),
         );
-        app.state.workspaces = labels.iter().map(|label| Workspace::test_new(label)).collect();
+        app.state.workspaces = labels
+            .iter()
+            .map(|label| Workspace::test_new(label))
+            .collect();
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.ensure_test_terminals();
@@ -1070,7 +1074,9 @@ mod tests {
         let _: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(app.state.workspaces[app.state.selected].id, watched_id);
         assert_eq!(
-            app.state.active.map(|index| app.state.workspaces[index].id.clone()),
+            app.state
+                .active
+                .map(|index| app.state.workspaces[index].id.clone()),
             Some(watched_id)
         );
         app.state.assert_invariants_for_test();

@@ -341,6 +341,7 @@ pub struct Keybinds {
     pub move_pane_to_new_tab: ActionKeybinds,
     pub move_tab_to_space: ActionKeybinds,
     pub move_tab_to_new_space: ActionKeybinds,
+    pub merge_workspace: ActionKeybinds,
     pub previous_agent: ActionKeybinds,
     pub next_agent: ActionKeybinds,
     pub focus_agent: Vec<IndexedKeybind>,
@@ -517,6 +518,7 @@ impl Config {
             move_pane_to_new_tab: empty_action!(),
             move_tab_to_space: empty_action!(),
             move_tab_to_new_space: empty_action!(),
+            merge_workspace: empty_action!(),
             previous_agent: empty_action!(),
             next_agent: empty_action!(),
             focus_agent: Vec::new(),
@@ -669,6 +671,7 @@ impl Config {
                 move_tab_to_new_space,
                 source
             );
+            apply_action!(keybinds.merge_workspace, merge_workspace, source);
             apply_action!(keybinds.previous_agent, previous_agent, source);
             apply_action!(keybinds.next_agent, next_agent, source);
             apply_indexed!(

@@ -202,6 +202,22 @@ impl ClientShellState {
         pending_pane_move: Option<String>,
         pending_tab_move: Option<String>,
     ) {
+        self.open_navigator_overlay_armed(pending_pane_move, pending_tab_move, None);
+    }
+
+    /// Opens the navigator to pick the workspace that absorbs `source`'s tabs.
+    /// Accepting a workspace row raises the confirmation dialog rather than
+    /// merging straight away.
+    pub(super) fn open_navigator_overlay_for_merge(&mut self, source_workspace_id: String) {
+        self.open_navigator_overlay_armed(None, None, Some(source_workspace_id));
+    }
+
+    fn open_navigator_overlay_armed(
+        &mut self,
+        pending_pane_move: Option<String>,
+        pending_tab_move: Option<String>,
+        pending_workspace_merge: Option<String>,
+    ) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
@@ -219,6 +235,7 @@ impl ClientShellState {
             expanded_workspaces,
             pending_pane_move,
             pending_tab_move,
+            pending_workspace_merge,
         };
         let rows = render::client_navigator_rows(snapshot, &navigator);
         navigator.selected = rows.iter().position(|row| row.current).unwrap_or(0);
@@ -703,19 +720,30 @@ impl ClientShellState {
             Some(ClientShellOverlay::Navigator(navigator)) => (
                 navigator.pending_pane_move.clone(),
                 navigator.pending_tab_move.clone(),
+                navigator.pending_workspace_merge.clone(),
             ),
-            _ => (None, None),
+            _ => (None, None, None),
         };
         match pending {
-            (_, Some(tab_id)) => {
+            (_, _, Some(source_workspace_id)) => {
+                // A row that resolves to no workspace leaves the merge armed,
+                // the way a mis-aimed enter does for the move pickers.
+                if let Some(target_workspace_id) = self.navigator_row_workspace(&target) {
+                    if self.open_confirm_merge_overlay(source_workspace_id, target_workspace_id) {
+                        outcome.repaint = true;
+                    }
+                }
+                return;
+            }
+            (_, Some(tab_id), None) => {
                 self.complete_pending_tab_move(tab_id, target, outcome);
                 return;
             }
-            (Some(pane_id), None) => {
+            (Some(pane_id), None, None) => {
                 self.complete_pending_pane_move(pane_id, target, outcome);
                 return;
             }
-            (None, None) => {}
+            (None, None, None) => {}
         }
         self.overlay = None;
         let method = match target {
@@ -1368,6 +1396,16 @@ impl ClientShellState {
             return;
         }
 
+        if matches!(self.overlay, Some(ClientShellOverlay::ConfirmMerge(_))) {
+            if key.code == KeyCode::Enter {
+                self.confirm_pending_merge(outcome);
+            } else if key.code == KeyCode::Esc {
+                self.overlay = None;
+                outcome.repaint = true;
+            }
+            return;
+        }
+
         if matches!(self.overlay, Some(ClientShellOverlay::ConfirmClose(_))) {
             if key.code == KeyCode::Enter {
                 let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
@@ -1518,6 +1556,107 @@ impl ClientShellState {
         if let Some(method) = method {
             self.push_endpoint_method(method, outcome);
         }
+        outcome.repaint = true;
+    }
+
+    /// Raises the merge confirmation for a picked target.
+    ///
+    /// `merge_group` mirrors what the server will be told, and it is derived
+    /// from the same fact the server checks — the source owning linked worktree
+    /// workspaces — so the dialog names the real scope. The server refuses the
+    /// group merge on its own if this client ever gets that wrong.
+    fn open_confirm_merge_overlay(
+        &mut self,
+        source_workspace_id: String,
+        target_workspace_id: String,
+    ) -> bool {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let Some(source) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == source_workspace_id)
+        else {
+            return false;
+        };
+        let Some(target) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == target_workspace_id)
+        else {
+            return false;
+        };
+        let group_key = source
+            .worktree
+            .as_ref()
+            .filter(|worktree| !worktree.is_linked_worktree)
+            .map(|worktree| worktree.key.as_str());
+        let group = group_key
+            .map(|key| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .filter(|member| {
+                        member
+                            .worktree
+                            .as_ref()
+                            .is_some_and(|worktree| worktree.key == key)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![source]);
+        let merge_group = group.len() > 1;
+        let tab_count = group
+            .iter()
+            .map(|member| {
+                snapshot
+                    .tabs
+                    .iter()
+                    .filter(|tab| tab.workspace_id == member.workspace_id)
+                    .count()
+            })
+            .sum::<usize>();
+        let tabs = if tab_count == 1 {
+            "1 tab".to_owned()
+        } else {
+            format!("{tab_count} tabs")
+        };
+        let scope = if merge_group {
+            format!("{} workspaces, {tabs}", group.len())
+        } else {
+            tabs
+        };
+        self.overlay = Some(ClientShellOverlay::ConfirmMerge(
+            ClientConfirmMergeOverlay {
+                source_workspace_id,
+                target_workspace_id,
+                merge_group,
+                title: if merge_group {
+                    "Merge worktree group into workspace?".to_owned()
+                } else {
+                    "Merge workspace?".to_owned()
+                },
+                detail: format!("{} — {scope} → {}", source.label, target.label),
+            },
+        ));
+        true
+    }
+
+    /// Sends the confirmed merge. Shared by the key and mouse paths so the
+    /// button and the Enter key cannot drift apart.
+    pub(super) fn confirm_pending_merge(&mut self, outcome: &mut ClientShellInput) {
+        let Some(ClientShellOverlay::ConfirmMerge(confirm)) = self.overlay.take() else {
+            return;
+        };
+        self.push_endpoint_method(
+            crate::api::schema::Method::WorkspaceMerge(crate::api::schema::WorkspaceMergeParams {
+                source_workspace_id: confirm.source_workspace_id,
+                target_workspace_id: confirm.target_workspace_id,
+                merge_group: confirm.merge_group,
+            }),
+            outcome,
+        );
         outcome.repaint = true;
     }
 

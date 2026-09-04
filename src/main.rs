@@ -163,6 +163,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # move_pane_to_new_tab = ""    # optional, unset by default
 # move_tab_to_space = ""       # optional, unset by default; opens the destination picker
 # move_tab_to_new_space = ""   # optional, unset by default
+# merge_workspace = ""         # optional, unset by default; picks the workspace to merge into
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"

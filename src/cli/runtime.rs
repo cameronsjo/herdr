@@ -47,6 +47,12 @@ pub(super) fn workspace_move(params: WorkspaceMoveParams) -> std::io::Result<i32
     print_method_response("cli:workspace:move", Method::WorkspaceMove(params))
 }
 
+pub(super) fn workspace_merge(
+    params: crate::api::schema::WorkspaceMergeParams,
+) -> std::io::Result<i32> {
+    print_method_response("cli:workspace:merge", Method::WorkspaceMerge(params))
+}
+
 pub(super) fn workspace_close(params: WorkspaceCloseParams) -> std::io::Result<i32> {
     print_method_response("cli:workspace:close", Method::WorkspaceClose(params))
 }
