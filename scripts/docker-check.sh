@@ -50,56 +50,97 @@ KNOWN_ENV_FAILURES=(
   "terminal::state::metadata::tests::metadata_clear_only_without_ttl_does_not_extend_old_ttl"
 )
 
-# run_nextest_filter FILTER_EXPR
-# Runs `cargo nextest run` inside the check container, scoped to the given
-# nextest filter expression (e.g. `test(=cases::hooks::some_test)`), and
-# returns its exit status. This is the real implementation; it's only
-# installed when nothing has already defined the function, which is what
-# lets a test source this file (skipping execution — see the BASH_SOURCE
-# guard below) after supplying its own stand-in, and exercise
-# classify_nextest_failures below without Docker or a real nextest run.
-if ! declare -F run_nextest_filter >/dev/null; then
-  run_nextest_filter() {
-    local filter="$1"
-    docker run --rm \
-      -v "$ROOT_DIR:/work" \
-      -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
-      -w /work \
-      "$IMAGE_TAG" \
-      bash -c 'cargo nextest run --locked -E "$1" --no-fail-fast --status-level fail --final-status-level fail --failure-output final --success-output never' _ "$filter"
-  }
-fi
+# run_nextest_filter BINARY_ID TEST_NAME
+# Runs `cargo nextest run` inside the check container, scoped to exactly one
+# test: `binary_id(=BINARY_ID) and test(=TEST_NAME)`. Scoping by binary as
+# well as test name matters because nextest's `test()` predicate matches by
+# name across the whole workspace — two binaries defining a test with the
+# same fully-qualified name would otherwise let a real regression in one
+# retry-pass against the other's healthy copy.
+#
+# Passes `--no-tests=fail` and treats its NO_TESTS_RUN exit (4) like any
+# other nonzero exit: a real failure, never a flake. Without it, a filter
+# that (through an extraction bug, a renamed test, or ANSI pollution) fails
+# to match the test it names would run zero tests and nextest would exit 0
+# by default — read here as "passed on retry" on a failure that was never
+# actually retried.
+#
+# This is the real implementation, installed unconditionally: a test that
+# wants a stand-in must `source` this file first and then redefine the
+# function afterward, so a stray `export -f run_nextest_filter` picked up
+# from a CI wrapper or shell profile can never silently shadow the real
+# check by loading first.
+run_nextest_filter() {
+  local binary_id="$1"
+  local test_name="$2"
+  docker run --rm \
+    -v "$ROOT_DIR:/work" \
+    -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
+    -w /work \
+    "$IMAGE_TAG" \
+    bash -c 'cargo nextest run --locked -E "binary_id(=$1) and test(=$2)" --no-tests=fail --color=never --no-fail-fast --status-level fail --final-status-level fail --failure-output final --success-output never' _ "$binary_id" "$test_name"
+}
 
 # classify_nextest_failures LOG_FILE
 # Reads the FAIL lines out of a completed nextest run's log, drops anything
-# on KNOWN_ENV_FAILURES, then retries each remaining (unexpected) failure
-# once in isolation via run_nextest_filter with an exact-match filter — a
-# load-contention flake passes alone; a genuine regression fails again.
-# Populates the global arrays ACTUAL_FAILURES and STILL_FAILING (the subset
-# of unexpected failures that failed twice).
+# on KNOWN_ENV_FAILURES (matched on test name only — nextest's own dedup
+# already collapses the live-status and summary copies of each line, and no
+# entry in that allowlist needs binary scoping today), then retries each
+# remaining (unexpected) failure once in isolation via run_nextest_filter —
+# a load-contention flake passes alone; a genuine regression fails again.
+# Populates the global arrays ACTUAL_FAILURES and STILL_FAILING (tab-joined
+# "binary_id<TAB>test_name" entries; the subset of unexpected failures that
+# failed twice).
 classify_nextest_failures() {
   local log_file="$1"
 
-  mapfile -t ACTUAL_FAILURES < <(command grep -E '^ *FAIL ' "$log_file" | awk '{print $NF}' | sort -u)
+  # Each FAIL line looks like:
+  #   FAIL [   0.019s] (1/1) herdr::cli app::state::tests::some_test
+  # Field 5 is the binary id (never contains whitespace); everything after
+  # it is the test name, which proc-macro-generated tests can pad with
+  # spaces — so it must not be truncated to the last field ($NF), only to
+  # what actually follows the binary id.
+  #
+  # A `while read` loop rather than `mapfile` — this function also runs
+  # under whatever bash sources scripts/test_docker_check.py's fixture, and
+  # macOS ships bash 3.2 (no `mapfile`) on both a bare host and GitHub
+  # Actions macos-* runners unless Homebrew's bash is first on PATH.
+  ACTUAL_FAILURES=()
+  local fail_line
+  while IFS= read -r fail_line; do
+    ACTUAL_FAILURES+=("$fail_line")
+  done < <(
+    command grep -E '^ *FAIL ' "$log_file" | awk '
+      {
+        binary = $5
+        $1 = $2 = $3 = $4 = $5 = ""
+        sub(/^[ \t]+/, "")
+        print binary "\t" $0
+      }
+    ' | sort -u
+  )
 
   local -a unexpected=()
-  local failure known allowed
-  for failure in "${ACTUAL_FAILURES[@]}"; do
+  local entry binary_id test_name known allowed
+  for entry in "${ACTUAL_FAILURES[@]}"; do
+    test_name="${entry#*$'\t'}"
     known=false
     for allowed in "${KNOWN_ENV_FAILURES[@]}"; do
-      [[ "$failure" == "$allowed" ]] && known=true && break
+      [[ "$test_name" == "$allowed" ]] && known=true && break
     done
-    "$known" || unexpected+=("$failure")
+    "$known" || unexpected+=("$entry")
   done
 
   STILL_FAILING=()
-  for failure in "${unexpected[@]}"; do
-    echo "note: retrying unexpected failure in isolation: $failure" >&2
-    if run_nextest_filter "test(=$failure)"; then
-      echo "note: $failure passed on retry — treated as a flake, not reported" >&2
+  for entry in "${unexpected[@]}"; do
+    binary_id="${entry%%$'\t'*}"
+    test_name="${entry#*$'\t'}"
+    echo "note: retrying unexpected failure in isolation: $binary_id $test_name" >&2
+    if run_nextest_filter "$binary_id" "$test_name"; then
+      echo "note: $binary_id $test_name passed on retry — treated as a flake, not reported" >&2
     else
-      echo "note: $failure failed again on retry — real failure" >&2
-      STILL_FAILING+=("$failure")
+      echo "note: $binary_id $test_name failed again on retry — real failure" >&2
+      STILL_FAILING+=("$entry")
     fi
   done
 }
@@ -157,7 +198,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [[ "${#STILL_FAILING[@]}" -gt 0 ]]; then
       echo
       echo "error: unexpected test failure(s), not on the known-environment-artifact list and still failing after a retry in isolation:" >&2
-      printf '  %s\n' "${STILL_FAILING[@]}" >&2
+      for entry in "${STILL_FAILING[@]}"; do
+        printf '  %s (%s)\n' "${entry#*$'\t'}" "${entry%%$'\t'*}" >&2
+      done
       exit 1
     fi
 
