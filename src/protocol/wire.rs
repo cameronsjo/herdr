@@ -18,9 +18,14 @@ use serde::{Deserialize, Serialize};
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
 ///
-/// This fork numbers its protocol `FORK_PROTOCOL_OFFSET + <upstream version>`,
-/// plus a fork increment for each incompatible change the fork makes on its own.
-/// So `1022` reads as "upstream 22, fork revision 0".
+/// This fork numbers its protocol
+/// `FORK_PROTOCOL_OFFSET + <upstream version> * FORK_REVISION_SPAN + <fork revision>`,
+/// so `1220` decomposes as "upstream 22, fork revision 0".
+///
+/// The upstream number is multiplied rather than merely offset so the two parts
+/// cannot overlap. Adding them directly would reproduce the same ambiguity one
+/// level up: fork revision 1 on upstream 22 and fork revision 0 on upstream 23
+/// would both total `1023`.
 ///
 /// The offset exists because the obvious scheme — keep counting from upstream's
 /// number — collided silently. The fork bumped 20 -> 21 in `67d36eaa`; upstream
@@ -29,20 +34,38 @@ use serde::{Deserialize, Serialize};
 /// under one number. The handshake check that exists to catch exactly that could
 /// not see it.
 ///
-/// When syncing upstream, recompute from upstream's new number rather than
-/// incrementing this one, and reset the fork revision to 0 unless the fork still
-/// carries its own incompatible change.
+/// When syncing upstream, set `UPSTREAM_PROTOCOL_VERSION` to upstream's new
+/// number rather than incrementing the total, and reset `FORK_REVISION` to 0
+/// unless the fork still carries its own incompatible change.
 ///
 /// Consequence worth knowing: a `palette.4` client (protocol `21`) cannot attach
-/// to a `palette.5` server (`1022`). `server live-handoff` is unaffected unless
+/// to a `palette.5` server (`1220`). `server live-handoff` is unaffected unless
 /// `--expected-protocol` is supplied — `src/server/handoff.rs` only enforces it
 /// when the flag is present.
 pub const FORK_PROTOCOL_OFFSET: u32 = 1000;
 
+/// Fork revisions reserved per upstream version. Bounds `FORK_REVISION`.
+pub const FORK_REVISION_SPAN: u32 = 10;
+
 /// Upstream's protocol version this fork is built on.
 pub const UPSTREAM_PROTOCOL_VERSION: u32 = 22;
 
-pub const PROTOCOL_VERSION: u32 = FORK_PROTOCOL_OFFSET + UPSTREAM_PROTOCOL_VERSION;
+/// Incompatible wire changes the fork has made on top of `UPSTREAM_PROTOCOL_VERSION`.
+///
+/// Reset to 0 at each upstream sync. Must stay below `FORK_REVISION_SPAN`; past
+/// that it carries into the upstream digits and makes the decomposition
+/// ambiguous again, which is the collision this whole scheme exists to prevent.
+pub const FORK_REVISION: u32 = 0;
+
+// Compile-time, not a test: a revision that has overflowed its span should stop
+// the build outright rather than wait for someone to run the suite.
+const _: () = assert!(
+    FORK_REVISION < FORK_REVISION_SPAN,
+    "FORK_REVISION has carried into the upstream digits; the protocol version can no longer be decomposed"
+);
+
+pub const PROTOCOL_VERSION: u32 =
+    FORK_PROTOCOL_OFFSET + UPSTREAM_PROTOCOL_VERSION * FORK_REVISION_SPAN + FORK_REVISION;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -1732,30 +1755,36 @@ pub fn check_client_version(client_version: u32) -> VersionCheck {
         return VersionCheck::Compatible;
     }
 
-    // Only one side carrying the fork offset means these are different builds of
-    // herdr, not different versions of one. Saying "please upgrade your client"
-    // there sends the operator looking for an upgrade that does not exist, and a
-    // correct refusal that reads as a stale build is one an operator works around.
-    if is_fork_protocol(client_version) != is_fork_protocol(PROTOCOL_VERSION) {
-        let (fork_side, upstream_side) = if is_fork_protocol(client_version) {
-            ("client", "server")
+    // Only one side carrying the fork offset is ambiguous, deliberately: a number
+    // below the offset is either an upstream build or a fork build from before the
+    // offset existed. So this augments the upgrade advice rather than replacing
+    // it — upgrading is still the fix for the common stale-build case, and an
+    // operator facing the other case needs to know that upgrading cannot help,
+    // because a correct refusal that reads as a stale build is one they work around.
+    let distribution_note =
+        if is_fork_protocol(client_version) != is_fork_protocol(PROTOCOL_VERSION) {
+            let (offset_side, plain_side) = if is_fork_protocol(client_version) {
+                ("client", "server")
+            } else {
+                ("server", "client")
+            };
+            format!(
+            ". If upgrading does not help, these may be different herdr distributions rather than \
+             different versions: the {offset_side} carries this fork's protocol offset and the \
+             {plain_side} does not, which also describes a {plain_side} built before the offset \
+             existed"
+        )
         } else {
-            ("server", "client")
+            String::new()
         };
-        return VersionCheck::Incompatible(format!(
-            "client version {client_version} and server version {PROTOCOL_VERSION} are different herdr distributions, not different versions: \
-             the {fork_side} is a fork build and the {upstream_side} is an upstream build. Upgrading will not reconcile them; \
-             run both from the same distribution."
-        ));
-    }
 
     if client_version < PROTOCOL_VERSION {
         VersionCheck::Incompatible(format!(
-            "client version {client_version} is older than server version {PROTOCOL_VERSION}; please upgrade your herdr client"
+            "client version {client_version} is older than server version {PROTOCOL_VERSION}; please upgrade your herdr client{distribution_note}"
         ))
     } else {
         VersionCheck::Incompatible(format!(
-            "client version {client_version} is newer than server version {PROTOCOL_VERSION}; please upgrade the herdr server"
+            "client version {client_version} is newer than server version {PROTOCOL_VERSION}; please upgrade the herdr server{distribution_note}"
         ))
     }
 }
@@ -1769,6 +1798,22 @@ mod tests {
     use super::*;
     use ratatui::style::{Color, Modifier};
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn the_protocol_version_decomposes_back_to_its_parts() {
+        let fork_part = PROTOCOL_VERSION - FORK_PROTOCOL_OFFSET;
+        assert_eq!(fork_part / FORK_REVISION_SPAN, UPSTREAM_PROTOCOL_VERSION);
+        assert_eq!(fork_part % FORK_REVISION_SPAN, FORK_REVISION);
+    }
+
+    #[test]
+    fn an_upstream_numbered_peer_is_not_mistaken_for_a_fork_build() {
+        // Upstream's own numbers are far below the offset, so no upstream release
+        // can be read as a fork build no matter how far upstream counts.
+        assert!(!is_fork_protocol(UPSTREAM_PROTOCOL_VERSION));
+        assert!(!is_fork_protocol(FORK_PROTOCOL_OFFSET - 1));
+        assert!(is_fork_protocol(PROTOCOL_VERSION));
+    }
 
     fn encoded_sha256(value: &impl Serialize) -> String {
         let encoded = bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap();

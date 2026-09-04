@@ -23,29 +23,37 @@ pub(super) fn mismatch_response(
         return None;
     }
 
-    // A restart cannot reconcile a fork build with an upstream one, and telling
-    // the operator to restart a server holding live panes is expensive advice to
-    // get wrong. Name the real cause when only one side carries the fork offset.
-    let message = if crate::protocol::is_fork_protocol(client_protocol)
-        != crate::protocol::is_fork_protocol(server_protocol)
-    {
-        let (fork_side, upstream_side) = if crate::protocol::is_fork_protocol(client_protocol) {
+    // Only one side carrying the fork offset is ambiguous, and the ambiguity is
+    // the point: a number below the offset is either an upstream build or a fork
+    // build from before the offset existed. So this augments the usual advice
+    // rather than replacing it — restarting a stale server is still the fix for
+    // the common case, and an operator facing the other case needs to be told
+    // that no amount of restarting will help.
+    let cross_distribution = crate::protocol::is_fork_protocol(client_protocol)
+        != crate::protocol::is_fork_protocol(server_protocol);
+    let distribution_note = if cross_distribution {
+        let (offset_side, plain_side) = if crate::protocol::is_fork_protocol(client_protocol) {
             ("client", "server")
         } else {
             ("server", "client")
         };
         format!(
-            "client protocol {client_protocol} and server protocol {server_protocol} are different herdr distributions, not different versions: \
-             the {fork_side} is a fork build and the {upstream_side} is an upstream build. Restarting or upgrading will not reconcile them; \
-             run both from the same distribution."
+            " If restarting does not help, these may be different herdr distributions rather than \
+             different versions: the {offset_side} carries this fork's protocol offset and the \
+             {plain_side} does not, which also describes a {plain_side} built before the offset \
+             existed. Run both from the same distribution."
         )
-    } else if client_protocol > server_protocol {
+    } else {
+        String::new()
+    };
+
+    let message = if client_protocol > server_protocol {
         format!(
-            "client protocol {client_protocol} is newer than server protocol {server_protocol}; restart the Herdr server before using this command. {restart_guidance}"
+            "client protocol {client_protocol} is newer than server protocol {server_protocol}; restart the Herdr server before using this command. {restart_guidance}{distribution_note}"
         )
     } else {
         format!(
-            "client protocol {client_protocol} is older than server protocol {server_protocol}; upgrade the Herdr client before using this command"
+            "client protocol {client_protocol} is older than server protocol {server_protocol}; upgrade the Herdr client before using this command{distribution_note}"
         )
     };
 
