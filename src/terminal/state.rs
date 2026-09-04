@@ -1886,8 +1886,30 @@ impl TerminalState {
         self.manual_label = None;
     }
 
+    /// Sets the agent routing key, rejecting anything `valid_agent_name` refuses.
+    ///
+    /// The check runs on the *raw* argument, before `sanitize_label`, and it
+    /// lives here rather than at each call site because per-call-site checking
+    /// is what left the session-restore path unfiltered (see `crate::label`).
+    /// Post-sanitize validation would be worse than none: `sanitize_label`
+    /// strips zero-width format characters, so a stored `rev\u{200b}iewer`
+    /// would launder into `reviewer` and pass.
+    ///
+    /// An empty name clears the routing key; any other rejected name is
+    /// dropped the same way, so a caller cannot store a name it could not
+    /// have set through `agent.start` or `agent.rename`.
     pub fn set_agent_name(&mut self, name: String) {
-        let name = crate::label::sanitize_label(name).trim().to_string();
+        let name = if name.is_empty() || crate::app::valid_agent_name(&name) {
+            // Redundant by construction — a valid name is already lowercase
+            // ASCII — but kept so the setter stays safe if the rule widens.
+            crate::label::sanitize_label(name).trim().to_string()
+        } else {
+            tracing::warn!(
+                terminal = %self.id,
+                "rejected agent name that does not match the agent name rules"
+            );
+            String::new()
+        };
         self.agent_name = (!name.is_empty()).then_some(name);
         self.agent_name_owner = self.agent_name.as_ref().and_then(|_| {
             self.hook_authority
@@ -2231,11 +2253,42 @@ mod tests {
     }
 
     #[test]
-    fn set_agent_name_strips_control_characters() {
-        let mut terminal = test_terminal();
-        terminal.set_agent_name("rev\u{1b}[31miewer".into());
+    fn set_agent_name_rejects_names_the_agent_api_would_refuse() {
+        for name in [
+            "rev\u{1b}[31miewer",
+            "Reviewer",
+            "9lives",
+            "rev iewer",
+            "revi/ewer",
+        ] {
+            let mut terminal = test_terminal();
+            terminal.set_agent_name(name.into());
+            assert_eq!(
+                terminal.agent_name, None,
+                "expected {name:?} to be rejected"
+            );
+            assert!(terminal.agent_name_owner.is_none());
+        }
+    }
 
-        assert_eq!(terminal.agent_name.as_deref(), Some("rev[31miewer"));
+    #[test]
+    fn set_agent_name_rejects_a_zero_width_name_before_it_can_launder() {
+        // `sanitize_label` strips U+200B, so validating the sanitized form
+        // would accept this as "reviewer" and let the pane impersonate another
+        // pane's routing key across a restore.
+        let mut terminal = test_terminal();
+        terminal.set_agent_name("rev\u{200b}iewer".into());
+
+        assert_eq!(terminal.agent_name, None);
+        assert!(terminal.agent_name_owner.is_none());
+    }
+
+    #[test]
+    fn set_agent_name_keeps_a_valid_name() {
+        let mut terminal = test_terminal();
+        terminal.set_agent_name("rev-iewer_2".into());
+
+        assert_eq!(terminal.agent_name.as_deref(), Some("rev-iewer_2"));
     }
 
     #[test]

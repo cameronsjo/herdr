@@ -12,7 +12,15 @@ const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
 
-fn valid_agent_name(name: &str) -> bool {
+/// Whether `name` is usable as an agent routing key.
+///
+/// Applied by `TerminalState::set_agent_name` to the *raw* input, before any
+/// sanitizing runs: `crate::label::sanitize_label` strips zero-width format
+/// characters, so validating the sanitized form would accept a stored
+/// `rev\u{200b}iewer` as `reviewer` and let one pane impersonate another.
+///
+/// The length bound is in bytes, not chars, so a short multibyte name fails.
+pub(crate) fn valid_agent_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('a'..='z'))
         && name.len() <= 32

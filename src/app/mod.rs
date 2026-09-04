@@ -8,7 +8,7 @@ pub(crate) mod actions;
 mod agent_resume;
 pub(crate) mod agent_view;
 mod agents;
-pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
+pub(crate) use agents::{valid_agent_name, AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
 mod api;
 pub(crate) use api::plugins::{palette_plugin_actions, palette_plugin_panes};
 mod api_helpers;
