@@ -1621,6 +1621,64 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::Palette(_))) {
+            let row_hit = self
+                .hits
+                .palette_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .copied();
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let Some((_, index)) = row_hit {
+                        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+                            palette.selected = index;
+                        }
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some((_, index)) = row_hit {
+                        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+                            palette.selected = index;
+                        }
+                        self.run_palette_selection(outcome);
+                    } else if !super::contains(self.hits.palette_popup, point) {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => self.move_palette_selection(-3),
+                MouseEventKind::ScrollDown => self.move_palette_selection(3),
+                _ => {}
+            }
+            if matches!(
+                mouse.kind,
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+            ) {
+                outcome.repaint = true;
+            }
+            return;
+        }
+        // Every event is consumed here, not just the button hits: without this
+        // branch a click, right-click or scroll aimed past the picker reaches
+        // the pane and sidebar underneath it.
+        if matches!(
+            self.overlay,
+            Some(ClientShellOverlay::PaneSplitDirection(_))
+        ) {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if super::contains(self.hits.pane_split_vertical, point) {
+                    self.complete_pane_split(crate::api::schema::SplitDirection::Right, outcome);
+                } else if super::contains(self.hits.pane_split_horizontal, point) {
+                    self.complete_pane_split(crate::api::schema::SplitDirection::Down, outcome);
+                } else {
+                    self.overlay = None;
+                    outcome.repaint = true;
+                }
+            }
+            return;
+        }
         if self.overlay.is_some() {
             if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
                 return;

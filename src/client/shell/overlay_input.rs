@@ -191,6 +191,17 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
+        self.open_navigator_overlay_for_move(None, None);
+    }
+
+    /// Opens the navigator as a destination picker. With a pane or tab armed,
+    /// accepting a row moves that pane or tab there instead of focusing it,
+    /// and a destination-only "new space" row is offered.
+    pub(super) fn open_navigator_overlay_for_move(
+        &mut self,
+        pending_pane_move: Option<String>,
+        pending_tab_move: Option<String>,
+    ) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
@@ -206,10 +217,339 @@ impl ClientShellState {
             scroll: 0,
             filter: None,
             expanded_workspaces,
+            pending_pane_move,
+            pending_tab_move,
         };
         let rows = render::client_navigator_rows(snapshot, &navigator);
         navigator.selected = rows.iter().position(|row| row.current).unwrap_or(0);
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
+    }
+
+    pub(super) fn open_palette_overlay(&mut self, outcome: &mut ClientShellInput) {
+        self.overlay = Some(ClientShellOverlay::Palette(ClientPaletteOverlay {
+            recent_command_ids: self.recent_command_ids.clone(),
+            ..ClientPaletteOverlay::default()
+        }));
+        self.chrome_drag = None;
+        // Plugin actions and panes are server-owned facts; ask for them once
+        // per open rather than caching a list that goes stale on plugin
+        // enable/disable. The palette renders its core rows meanwhile.
+        let list = crate::api::schema::Method::PluginList(crate::api::schema::PluginListParams {
+            plugin_id: None,
+        });
+        // An endpoint too old to list plugins simply has no plugin rows to
+        // offer; that is not worth an "action unavailable" notice over a
+        // palette the operator opened for its core commands.
+        if self.supports_endpoint_method(&list) {
+            self.push_endpoint_method_with_kind(
+                list,
+                PendingEndpointKind::PalettePluginList,
+                outcome,
+            );
+        }
+    }
+
+    pub(super) fn receive_palette_plugins(
+        &mut self,
+        plugins: Vec<crate::api::schema::InstalledPluginInfo>,
+    ) -> bool {
+        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
+            return false;
+        };
+        palette.plugins = plugins;
+        palette.selected = 0;
+        palette.scroll = 0;
+        true
+    }
+
+    pub(super) fn filtered_palette_commands(&self) -> Vec<super::palette::PaletteCommand> {
+        let (Some(snapshot), Some(ClientShellOverlay::Palette(palette))) =
+            (self.snapshot.as_deref(), self.overlay.as_ref())
+        else {
+            return Vec::new();
+        };
+        super::palette::filtered_palette_commands(
+            &palette.query,
+            &palette.recent_command_ids,
+            &self.config.keybinds,
+            &palette.plugins,
+            snapshot,
+        )
+    }
+
+    fn palette_body_height(&self) -> usize {
+        self.last_composed_size
+            .and_then(|(cols, rows)| super::palette::palette_geometry(Rect::new(0, 0, cols, rows)))
+            .map(|(_, _, body)| usize::from(body.height.max(1)))
+            .unwrap_or(1)
+    }
+
+    fn palette_max_scroll(&self) -> usize {
+        self.filtered_palette_commands()
+            .len()
+            .saturating_sub(self.palette_body_height())
+    }
+
+    fn ensure_palette_selection_visible(&mut self) {
+        let viewport = self.palette_body_height();
+        let max_scroll = self.palette_max_scroll();
+        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
+            return;
+        };
+        let adjusted = if palette.selected < palette.scroll {
+            palette.selected
+        } else if palette.selected >= palette.scroll + viewport {
+            palette.selected + 1 - viewport
+        } else {
+            return;
+        };
+        palette.scroll = adjusted.min(max_scroll);
+    }
+
+    pub(super) fn move_palette_selection(&mut self, delta: isize) {
+        let count = self.filtered_palette_commands().len();
+        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
+            return;
+        };
+        if count == 0 {
+            palette.selected = 0;
+            palette.scroll = 0;
+            return;
+        }
+        let current = palette.selected.min(count - 1) as isize;
+        palette.selected = (current + delta).rem_euclid(count as isize) as usize;
+        self.ensure_palette_selection_visible();
+    }
+
+    fn reset_palette_selection(&mut self) {
+        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+            palette.selected = 0;
+            palette.scroll = 0;
+        }
+    }
+
+    /// Runs the highlighted palette row. A query matching nothing leaves the
+    /// palette open, so an empty enter is not a silent dismissal.
+    pub(super) fn run_palette_selection(&mut self, outcome: &mut ClientShellInput) {
+        let selected = match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Palette(palette)) => palette.selected,
+            _ => return,
+        };
+        let commands = self.filtered_palette_commands();
+        let Some(command) = commands.into_iter().nth(selected) else {
+            return;
+        };
+        self.overlay = None;
+        self.remember_palette_command(command.id);
+        self.run_palette_action(command.action, outcome);
+        outcome.repaint = true;
+    }
+
+    fn remember_palette_command(&mut self, command_id: String) {
+        crate::palette_history::remember(&mut self.recent_command_ids, command_id);
+        self.persist_palette_history();
+    }
+
+    #[cfg(not(test))]
+    fn persist_palette_history(&self) {
+        if let Err(error) = crate::palette_history::save(&self.recent_command_ids) {
+            tracing::warn!(
+                path = %crate::palette_history::store_path().display(),
+                error = %error,
+                "Failed to save command palette history; the command still ran"
+            );
+        }
+    }
+
+    /// Tests must not write the operator's real history file.
+    #[cfg(test)]
+    fn persist_palette_history(&self) {}
+
+    fn run_palette_action(
+        &mut self,
+        action: super::palette::PaletteAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        match action {
+            super::palette::PaletteAction::Keybind(action) => {
+                self.record_binding(crate::input::KeybindMatch::Action(action), outcome);
+            }
+            super::palette::PaletteAction::PluginAction {
+                plugin_id,
+                action_id,
+            } => {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::PluginActionInvoke(
+                        crate::api::schema::PluginActionInvokeParams {
+                            action_id,
+                            plugin_id: Some(plugin_id),
+                            // The server merges the focused workspace, tab and
+                            // pane into the context itself, and it is the only
+                            // side that can see them authoritatively.
+                            context: None,
+                        },
+                    ),
+                    outcome,
+                );
+            }
+            super::palette::PaletteAction::PluginPane {
+                plugin_id,
+                entrypoint,
+            } => {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::PluginPaneOpen(
+                        crate::api::schema::PluginPaneOpenParams {
+                            plugin_id,
+                            entrypoint,
+                            placement: None,
+                            width: None,
+                            height: None,
+                            workspace_id: None,
+                            target_pane_id: None,
+                            direction: None,
+                            cwd: None,
+                            focus: true,
+                            env: Default::default(),
+                        },
+                    ),
+                    outcome,
+                );
+            }
+        }
+    }
+
+    pub(super) fn route_palette_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crossterm::event::KeyModifiers;
+
+        let text_character = crate::input::keybind_help_text_char(key);
+        let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+        match code {
+            KeyCode::Esc => {
+                self.overlay = None;
+            }
+            KeyCode::Enter => {
+                self.run_palette_selection(outcome);
+                return;
+            }
+            KeyCode::Up | KeyCode::BackTab => self.move_palette_selection(-1),
+            KeyCode::Down | KeyCode::Tab => self.move_palette_selection(1),
+            KeyCode::PageUp => self.move_palette_selection(-8),
+            KeyCode::PageDown => self.move_palette_selection(8),
+            KeyCode::Backspace => {
+                if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+                    palette.query.pop();
+                }
+                self.reset_palette_selection();
+            }
+            KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+                    palette.query.clear();
+                }
+                self.reset_palette_selection();
+            }
+            _ => {
+                if let Some(character) = text_character {
+                    if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+                        palette.query.push(character);
+                    }
+                    self.reset_palette_selection();
+                }
+            }
+        }
+        outcome.repaint = true;
+    }
+
+    pub(super) fn open_pane_split_direction_overlay(
+        &mut self,
+        pane_id: String,
+        tab_id: String,
+        target_pane_id: Option<String>,
+    ) {
+        self.overlay = Some(ClientShellOverlay::PaneSplitDirection(
+            ClientPaneSplitOverlay {
+                pane_id,
+                tab_id,
+                target_pane_id,
+                direction: crate::api::schema::SplitDirection::Right,
+            },
+        ));
+        self.chrome_drag = None;
+    }
+
+    fn toggle_pane_split_direction(&mut self) {
+        use crate::api::schema::SplitDirection;
+        if let Some(ClientShellOverlay::PaneSplitDirection(pending)) = self.overlay.as_mut() {
+            pending.direction = if pending.direction == SplitDirection::Right {
+                SplitDirection::Down
+            } else {
+                SplitDirection::Right
+            };
+        }
+    }
+
+    /// Runs the move the picker was armed for, once the user has chosen which
+    /// way the pane splits into the destination tab.
+    pub(super) fn complete_pane_split(
+        &mut self,
+        split: crate::api::schema::SplitDirection,
+        outcome: &mut ClientShellInput,
+    ) {
+        let Some(ClientShellOverlay::PaneSplitDirection(pending)) = self.overlay.take() else {
+            return;
+        };
+        self.push_endpoint_method(
+            crate::api::schema::Method::PaneMove(crate::api::schema::PaneMoveParams {
+                pane_id: pending.pane_id,
+                destination: crate::api::schema::PaneMoveDestination::Tab {
+                    tab_id: pending.tab_id,
+                    target_pane_id: pending.target_pane_id,
+                    split,
+                    ratio: Some(0.5),
+                },
+                focus: true,
+            }),
+            outcome,
+        );
+        outcome.repaint = true;
+    }
+
+    pub(super) fn route_pane_split_direction_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crate::api::schema::SplitDirection;
+
+        match key.code {
+            KeyCode::Esc => self.overlay = None,
+            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                self.toggle_pane_split_direction()
+            }
+            KeyCode::Char('v') => {
+                self.complete_pane_split(SplitDirection::Right, outcome);
+                return;
+            }
+            KeyCode::Char('h') => {
+                self.complete_pane_split(SplitDirection::Down, outcome);
+                return;
+            }
+            KeyCode::Enter => {
+                let direction = match self.overlay.as_ref() {
+                    Some(ClientShellOverlay::PaneSplitDirection(pending)) => {
+                        pending.direction.clone()
+                    }
+                    _ => return,
+                };
+                self.complete_pane_split(direction, outcome);
+                return;
+            }
+            _ => {}
+        }
+        outcome.repaint = true;
     }
 
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
@@ -228,6 +568,122 @@ impl ClientShellState {
             .clamp(0, rows.len().saturating_sub(1) as isize) as usize;
     }
 
+    /// The workspace a navigator row lands a move in — a tab or pane row names
+    /// the workspace it lives in.
+    fn navigator_row_workspace(&self, target: &ClientNavigatorTarget) -> Option<String> {
+        let snapshot = self.snapshot.as_deref()?;
+        match target {
+            ClientNavigatorTarget::Workspace(workspace_id) => Some(workspace_id.clone()),
+            ClientNavigatorTarget::Tab(tab_id) => snapshot
+                .tabs
+                .iter()
+                .find(|tab| &tab.tab_id == tab_id)
+                .map(|tab| tab.workspace_id.clone()),
+            ClientNavigatorTarget::Pane(pane_id) => snapshot
+                .panes
+                .iter()
+                .find(|pane| &pane.pane_id == pane_id)
+                .map(|pane| pane.workspace_id.clone()),
+            ClientNavigatorTarget::NewWorkspace => None,
+        }
+    }
+
+    /// The tab a navigator row lands a pane move in, with the pane it splits
+    /// against. A workspace row has no tab to split into, so the pane gets a
+    /// new tab there instead.
+    fn navigator_row_tab(
+        &self,
+        target: &ClientNavigatorTarget,
+    ) -> Option<(String, Option<String>)> {
+        let snapshot = self.snapshot.as_deref()?;
+        match target {
+            ClientNavigatorTarget::Tab(tab_id) => Some((tab_id.clone(), None)),
+            ClientNavigatorTarget::Pane(pane_id) => snapshot
+                .panes
+                .iter()
+                .find(|pane| &pane.pane_id == pane_id)
+                .map(|pane| (pane.tab_id.clone(), Some(pane.pane_id.clone()))),
+            ClientNavigatorTarget::Workspace(_) | ClientNavigatorTarget::NewWorkspace => None,
+        }
+    }
+
+    /// Completes an armed pane move against the selected row. Returns false
+    /// when nothing resolved, which deliberately leaves the move armed so the
+    /// pane id survives a mis-aimed enter.
+    fn complete_pending_pane_move(
+        &mut self,
+        pane_id: String,
+        target: ClientNavigatorTarget,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        use crate::api::schema::{Method, PaneMoveDestination, PaneMoveParams};
+
+        // A tab destination is a split against an existing pane, so ask which
+        // way it splits instead of guessing; every other destination has no
+        // direction to choose.
+        if let Some((tab_id, target_pane_id)) = self.navigator_row_tab(&target) {
+            self.open_pane_split_direction_overlay(pane_id, tab_id, target_pane_id);
+            outcome.repaint = true;
+            return true;
+        }
+        let destination = match target {
+            ClientNavigatorTarget::NewWorkspace => PaneMoveDestination::NewWorkspace {
+                label: None,
+                tab_label: None,
+            },
+            ClientNavigatorTarget::Workspace(workspace_id) => PaneMoveDestination::NewTab {
+                workspace_id: Some(workspace_id),
+                label: None,
+            },
+            ClientNavigatorTarget::Tab(_) | ClientNavigatorTarget::Pane(_) => return false,
+        };
+        self.overlay = None;
+        self.push_endpoint_method(
+            Method::PaneMove(PaneMoveParams {
+                pane_id,
+                destination,
+                focus: true,
+            }),
+            outcome,
+        );
+        outcome.repaint = true;
+        true
+    }
+
+    /// Completes an armed tab move. Unlike a pane, a tab has no split
+    /// direction to ask about — it lands in the destination workspace whole.
+    fn complete_pending_tab_move(
+        &mut self,
+        tab_id: String,
+        target: ClientNavigatorTarget,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        use crate::api::schema::{Method, TabMoveDestination, TabMoveParams};
+
+        let destination = if matches!(target, ClientNavigatorTarget::NewWorkspace) {
+            TabMoveDestination::NewWorkspace { label: None }
+        } else {
+            let Some(workspace_id) = self.navigator_row_workspace(&target) else {
+                return false;
+            };
+            TabMoveDestination::Workspace {
+                workspace_id,
+                insert_index: None,
+            }
+        };
+        self.overlay = None;
+        self.push_endpoint_method(
+            Method::TabMove(TabMoveParams {
+                tab_id,
+                insert_index: None,
+                destination: Some(destination),
+            }),
+            outcome,
+        );
+        outcome.repaint = true;
+        true
+    }
+
     pub(super) fn accept_navigator_selection(&mut self, outcome: &mut ClientShellInput) {
         let target = {
             let Some(snapshot) = self.snapshot.as_deref() else {
@@ -243,8 +699,27 @@ impl ClientShellState {
         let Some(target) = target else {
             return;
         };
+        let pending = match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Navigator(navigator)) => (
+                navigator.pending_pane_move.clone(),
+                navigator.pending_tab_move.clone(),
+            ),
+            _ => (None, None),
+        };
+        match pending {
+            (_, Some(tab_id)) => {
+                self.complete_pending_tab_move(tab_id, target, outcome);
+                return;
+            }
+            (Some(pane_id), None) => {
+                self.complete_pending_pane_move(pane_id, target, outcome);
+                return;
+            }
+            (None, None) => {}
+        }
         self.overlay = None;
         let method = match target {
+            ClientNavigatorTarget::NewWorkspace => return,
             ClientNavigatorTarget::Workspace(workspace_id) => {
                 crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
                     workspace_id,
@@ -430,6 +905,14 @@ impl ClientShellState {
                 help.scroll = 0;
                 true
             }
+            Some(ClientShellOverlay::Palette(palette)) => {
+                palette
+                    .query
+                    .extend(text.chars().filter(|character| !character.is_control()));
+                palette.selected = 0;
+                palette.scroll = 0;
+                true
+            }
             Some(ClientShellOverlay::Navigator(navigator)) if navigator.search_focused => {
                 navigator.query.push_str(text);
                 navigator.filter = None;
@@ -562,6 +1045,19 @@ impl ClientShellState {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::Palette(_))) {
+            self.route_palette_key(key, outcome);
+            return;
+        }
+
+        if matches!(
+            self.overlay,
+            Some(ClientShellOverlay::PaneSplitDirection(_))
+        ) {
+            self.route_pane_split_direction_key(key, outcome);
             return;
         }
 

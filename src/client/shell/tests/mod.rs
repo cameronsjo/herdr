@@ -6,7 +6,7 @@ use crate::protocol::{
 };
 use crossterm::event::MouseEvent;
 
-fn snapshot() -> ClientShellSnapshot {
+pub(super) fn snapshot() -> ClientShellSnapshot {
     ClientShellSnapshot {
         boot_id: "boot-1".into(),
         revision: 1,
@@ -216,5 +216,6 @@ mod input_domain;
 mod keybindings_settings;
 mod mobile;
 mod mouse_selection;
+mod palette;
 mod popup_focus_projection;
 mod startup_overlays;

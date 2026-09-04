@@ -86,6 +86,8 @@ fn modal_paste_target_requires_a_focused_editable_client_field() {
         scroll: 0,
         filter: None,
         expanded_workspaces: HashSet::new(),
+        pending_pane_move: None,
+        pending_tab_move: None,
     }));
     assert!(!state.modal_paste_target_active());
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {

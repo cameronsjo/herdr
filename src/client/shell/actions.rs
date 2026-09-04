@@ -33,6 +33,33 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if action == crate::input::KeybindAction::OpenCommandPalette {
+                    self.open_palette_overlay(outcome);
+                    outcome.repaint = true;
+                    return;
+                }
+                if action == crate::input::KeybindAction::MovePaneToSpace {
+                    if let Some(pane_id) = self
+                        .snapshot
+                        .as_deref()
+                        .and_then(|snapshot| snapshot.focused_pane_id.clone())
+                    {
+                        self.open_navigator_overlay_for_move(Some(pane_id), None);
+                        outcome.repaint = true;
+                    }
+                    return;
+                }
+                if action == crate::input::KeybindAction::MoveTabToSpace {
+                    if let Some(tab_id) = self
+                        .snapshot
+                        .as_deref()
+                        .and_then(|snapshot| snapshot.focused_tab_id.clone())
+                    {
+                        self.open_navigator_overlay_for_move(None, Some(tab_id));
+                        outcome.repaint = true;
+                    }
+                    return;
+                }
                 if action == crate::input::KeybindAction::Help {
                     self.overlay = Some(ClientShellOverlay::Help(ClientHelpOverlay {
                         query: String::new(),
@@ -823,6 +850,16 @@ impl ClientShellState {
                 self.complete_copy_operation(session_generation, continue_queue, &mut outcome);
                 return (repaint || outcome.repaint, outcome.actions);
             }
+            PendingEndpointKind::PalettePluginList => {
+                return match result {
+                    Ok(crate::api::schema::ResponseResult::PluginList { plugins }) => {
+                        (self.receive_palette_plugins(plugins), Vec::new())
+                    }
+                    // The palette keeps its core rows either way; a failed or
+                    // unexpected plugin list only costs the plugin rows.
+                    Ok(_) | Err(_) => (false, Vec::new()),
+                };
+            }
             PendingEndpointKind::ReloadConfig => {
                 let repaint = match result {
                     Ok(crate::api::schema::ResponseResult::ConfigReload { .. }) => false,
@@ -868,9 +905,10 @@ impl ClientShellState {
         action: crate::input::KeybindAction,
     ) -> Option<crate::api::schema::Method> {
         use crate::api::schema::{
-            Method, PaneDirection, PaneFocusDirectionParams, PaneResizeParams, PaneSplitParams,
-            PaneSwapParams, PaneTarget, PaneZoomMode, PaneZoomParams, SplitDirection,
-            TabCreateParams, TabMoveParams, TabTarget, WorkspaceTarget,
+            Method, PaneDirection, PaneFocusDirectionParams, PaneMoveDestination, PaneMoveParams,
+            PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomMode,
+            PaneZoomParams, SplitDirection, TabCreateParams, TabMoveDestination, TabMoveParams,
+            TabTarget, WorkspaceTarget,
         };
         use crate::input::KeybindAction;
 
@@ -1067,6 +1105,27 @@ impl ClientShellState {
                     env: Default::default(),
                 }))
             }
+            KeybindAction::MoveTabToNewSpace => Some(Method::TabMove(TabMoveParams {
+                tab_id: focused_tab?,
+                insert_index: None,
+                destination: Some(TabMoveDestination::NewWorkspace { label: None }),
+            })),
+            KeybindAction::MovePaneToNewSpace => Some(Method::PaneMove(PaneMoveParams {
+                pane_id: focused_pane?,
+                destination: PaneMoveDestination::NewWorkspace {
+                    label: None,
+                    tab_label: None,
+                },
+                focus: true,
+            })),
+            KeybindAction::MovePaneToNewTab => Some(Method::PaneMove(PaneMoveParams {
+                pane_id: focused_pane?,
+                destination: PaneMoveDestination::NewTab {
+                    workspace_id: None,
+                    label: None,
+                },
+                focus: true,
+            })),
             KeybindAction::CloseTab => Some(Method::TabClose(TabTarget {
                 tab_id: focused_tab?,
             })),

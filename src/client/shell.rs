@@ -13,6 +13,7 @@ mod mobile;
 mod mouse;
 mod notifications;
 mod overlay_input;
+mod palette;
 mod preferences;
 mod render;
 mod scroll;

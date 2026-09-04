@@ -28,6 +28,12 @@ pub(crate) enum KeybindAction {
     SwitchTab(usize),
     FocusAgent(usize),
     WorkspacePicker,
+    OpenCommandPalette,
+    MovePaneToSpace,
+    MovePaneToNewSpace,
+    MovePaneToNewTab,
+    MoveTabToSpace,
+    MoveTabToNewSpace,
     PreviousWorkspace,
     NextWorkspace,
     PreviousAgent,
@@ -71,6 +77,75 @@ pub(crate) enum KeybindAction {
     OpenNavigator,
 }
 
+impl KeybindAction {
+    /// Stable identity for the command palette: what a remembered recent
+    /// command is keyed by, and what the compact default list names. `None`
+    /// means the action is not offered as a palette row — either because it
+    /// carries an index (so no single id describes it) or because offering it
+    /// from the palette would be circular or meaningless there.
+    pub(crate) const fn palette_id(self) -> Option<&'static str> {
+        match self {
+            Self::NewWorkspace => Some("core:new-workspace"),
+            Self::NewWorktree => Some("core:new-worktree"),
+            Self::OpenWorktree => Some("core:open-worktree"),
+            Self::RemoveWorktree => Some("core:remove-worktree"),
+            Self::RenameWorkspace => Some("core:rename-workspace"),
+            Self::CloseWorkspace => Some("core:close-workspace"),
+            Self::WorkspacePicker => Some("core:workspace-picker"),
+            Self::MovePaneToSpace => Some("core:move-pane-to-space"),
+            Self::MovePaneToNewSpace => Some("core:move-pane-to-new-space"),
+            Self::MovePaneToNewTab => Some("core:move-pane-to-new-tab"),
+            Self::MoveTabToSpace => Some("core:move-tab-to-space"),
+            Self::MoveTabToNewSpace => Some("core:move-tab-to-new-space"),
+            Self::PreviousWorkspace => Some("core:previous-workspace"),
+            Self::NextWorkspace => Some("core:next-workspace"),
+            Self::PreviousAgent => Some("core:previous-agent"),
+            Self::NextAgent => Some("core:next-agent"),
+            Self::NewTab => Some("core:new-tab"),
+            Self::RenameTab => Some("core:rename-tab"),
+            Self::PreviousTab => Some("core:previous-tab"),
+            Self::NextTab => Some("core:next-tab"),
+            Self::MoveTabPrevious => Some("core:move-tab-previous"),
+            Self::MoveTabNext => Some("core:move-tab-next"),
+            Self::CloseTab => Some("core:close-tab"),
+            Self::RenamePane => Some("core:rename-pane"),
+            Self::FocusPaneLeft => Some("core:focus-pane-left"),
+            Self::FocusPaneDown => Some("core:focus-pane-down"),
+            Self::FocusPaneUp => Some("core:focus-pane-up"),
+            Self::FocusPaneRight => Some("core:focus-pane-right"),
+            Self::SplitVertical => Some("core:split-vertical"),
+            Self::SplitHorizontal => Some("core:split-horizontal"),
+            Self::ClosePane => Some("core:close-pane"),
+            Self::Zoom => Some("core:zoom-pane"),
+            Self::EnterResizeMode => Some("core:resize-mode"),
+            Self::ResizePaneLeft => Some("core:resize-pane-left"),
+            Self::ResizePaneDown => Some("core:resize-pane-down"),
+            Self::ResizePaneUp => Some("core:resize-pane-up"),
+            Self::ResizePaneRight => Some("core:resize-pane-right"),
+            Self::ToggleSidebar => Some("core:toggle-sidebar"),
+            Self::CyclePaneNext => Some("core:cycle-pane-next"),
+            Self::CyclePanePrevious => Some("core:cycle-pane-previous"),
+            Self::LastPane => Some("core:last-pane"),
+            Self::Settings => Some("core:settings"),
+            Self::ReloadConfig => Some("core:reload-config"),
+            Self::OpenNotificationTarget => Some("core:open-notification-target"),
+            Self::Detach => Some("core:detach"),
+            Self::OpenNavigator => Some("core:session-navigator"),
+            Self::OpenCommandPalette
+            | Self::SwitchWorkspace(_)
+            | Self::SwitchTab(_)
+            | Self::FocusAgent(_)
+            | Self::SwapPaneLeft
+            | Self::SwapPaneDown
+            | Self::SwapPaneUp
+            | Self::SwapPaneRight
+            | Self::EditScrollback
+            | Self::CopyMode
+            | Self::Help => None,
+        }
+    }
+}
+
 pub(crate) fn resolve_direct_binding(
     keybinds: &Keybinds,
     key: &TerminalKey,
@@ -98,6 +173,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.help, KeybindAction::Help),
         (&keybinds.settings, KeybindAction::Settings),
         (&keybinds.workspace_picker, KeybindAction::WorkspacePicker),
+        (&keybinds.command_palette, KeybindAction::OpenCommandPalette),
         (&keybinds.new_workspace, KeybindAction::NewWorkspace),
         (&keybinds.new_worktree, KeybindAction::NewWorktree),
         (&keybinds.open_worktree, KeybindAction::OpenWorktree),

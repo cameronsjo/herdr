@@ -165,6 +165,12 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, usize)>,
+    pub(super) palette_popup: Rect,
+    pub(super) palette_rows: Vec<(Rect, usize)>,
+    pub(super) palette_max_scroll: usize,
+    pub(super) pane_split_popup: Rect,
+    pub(super) pane_split_vertical: Rect,
+    pub(super) pane_split_horizontal: Rect,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
     pub(super) help_popup: Rect,
@@ -324,6 +330,8 @@ pub(super) enum ClientShellOverlayKind {
     ContextMenu,
     GlobalMenu,
     Settings,
+    Palette,
+    PaneSplitDirection,
 }
 
 #[derive(Debug)]
@@ -371,6 +379,8 @@ pub(super) enum ClientNavigatorTarget {
     Workspace(String),
     Tab(String),
     Pane(String),
+    /// Destination-only row, offered while a pane or tab move is armed.
+    NewWorkspace,
 }
 
 #[derive(Clone, Debug)]
@@ -391,6 +401,43 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
     pub(super) expanded_workspaces: HashSet<String>,
+    /// While set, accepting a navigator row moves that pane instead of
+    /// focusing it.
+    pub(super) pending_pane_move: Option<String>,
+    /// While set, accepting a navigator row moves that whole tab instead of
+    /// focusing it. Mutually exclusive with `pending_pane_move`.
+    pub(super) pending_tab_move: Option<String>,
+}
+
+impl ClientNavigatorOverlay {
+    /// True while the navigator is picking a destination rather than a thing
+    /// to focus. Both move kinds add a destination-only "new space" row.
+    pub(super) fn move_armed(&self) -> bool {
+        self.pending_pane_move.is_some() || self.pending_tab_move.is_some()
+    }
+}
+
+/// The command palette. `recent_command_ids` and `plugins` are copied in at
+/// open: the recents are the durable client-side list, and the plugin registry
+/// is fetched from the endpoint once per open rather than read per frame.
+#[derive(Debug, Default)]
+pub(super) struct ClientPaletteOverlay {
+    pub(super) query: String,
+    /// Index into the filtered command list; a match is always selected.
+    pub(super) selected: usize,
+    pub(super) scroll: usize,
+    pub(super) recent_command_ids: Vec<String>,
+    pub(super) plugins: Vec<crate::api::schema::InstalledPluginInfo>,
+}
+
+/// A pane move that landed on an existing tab, waiting on the user to pick
+/// which way it splits against that tab's focused pane before the move runs.
+#[derive(Debug)]
+pub(super) struct ClientPaneSplitOverlay {
+    pub(super) pane_id: String,
+    pub(super) tab_id: String,
+    pub(super) target_pane_id: Option<String>,
+    pub(super) direction: crate::api::schema::SplitDirection,
 }
 
 #[derive(Debug)]
@@ -609,6 +656,8 @@ pub(super) enum ClientShellOverlay {
     ContextMenu(ClientContextMenuOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
+    Palette(ClientPaletteOverlay),
+    PaneSplitDirection(ClientPaneSplitOverlay),
 }
 
 impl ClientShellOverlay {
@@ -627,6 +676,8 @@ impl ClientShellOverlay {
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
+            Self::Palette(_) => ClientShellOverlayKind::Palette,
+            Self::PaneSplitDirection(_) => ClientShellOverlayKind::PaneSplitDirection,
         }
     }
 }
@@ -641,6 +692,8 @@ pub(super) enum PendingEndpointKind {
     ReleaseNotesDismiss,
     PopupCommand,
     ReloadConfig,
+    /// The plugin registry the open command palette is waiting on.
+    PalettePluginList,
     IntegrationList,
     IntegrationInstall,
     PrepareWorktreeCreate {
@@ -936,6 +989,31 @@ pub(crate) struct ClientShellState {
     pub(super) config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
+    /// Command palette history, most recent first. Client presentation state:
+    /// it records what this operator reaches for, not anything the server owns.
+    pub(super) recent_command_ids: Vec<String>,
+}
+
+#[cfg(not(test))]
+fn load_palette_history() -> Vec<String> {
+    match crate::palette_history::load() {
+        Ok(recent_command_ids) => recent_command_ids,
+        Err(error) => {
+            tracing::warn!(
+                path = %crate::palette_history::store_path().display(),
+                error = %error,
+                "Failed to load command palette history; continuing without remembered commands"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Tests must not read the operator's real history file, and a client built
+/// in a test has no history to remember.
+#[cfg(test)]
+fn load_palette_history() -> Vec<String> {
+    Vec::new()
 }
 
 pub(super) fn product_announcement_state(
@@ -1075,6 +1153,7 @@ impl ClientShellState {
             local_config_diagnostic,
             endpoint_error: None,
             dismissed_product_announcement: None,
+            recent_command_ids: load_palette_history(),
         }
     }
 
@@ -1711,6 +1790,8 @@ impl ClientShellState {
                     | ClientShellOverlay::WorktreeRemove(_)
                     | ClientShellOverlay::ContextMenu(_)
                     | ClientShellOverlay::GlobalMenu(_)
+                    | ClientShellOverlay::Palette(_)
+                    | ClientShellOverlay::PaneSplitDirection(_)
             );
         }
         matches!(

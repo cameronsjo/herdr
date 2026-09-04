@@ -440,6 +440,12 @@ impl ClientShellState {
                 self.hits.navigator_popup = rendered.navigator_popup;
                 self.hits.navigator_search = rendered.navigator_search;
                 self.hits.navigator_rows = rendered.navigator_rows;
+                self.hits.palette_popup = rendered.palette_popup;
+                self.hits.palette_rows = rendered.palette_rows;
+                self.hits.palette_max_scroll = rendered.palette_max_scroll;
+                self.hits.pane_split_popup = rendered.pane_split_popup;
+                self.hits.pane_split_vertical = rendered.pane_split_vertical;
+                self.hits.pane_split_horizontal = rendered.pane_split_horizontal;
                 self.hits.worktree_search = rendered.worktree_search;
                 self.hits.worktree_rows = rendered.worktree_rows;
                 self.hits.help_popup = rendered.help_popup;
@@ -463,6 +469,9 @@ impl ClientShellState {
         }
         if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
             help.scroll = help.scroll.min(self.hits.help_max_scroll);
+        }
+        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+            palette.scroll = palette.scroll.min(self.hits.palette_max_scroll);
         }
         if let Some(ClientShellOverlay::ProductAnnouncement(announcement)) = self.overlay.as_mut() {
             announcement.scroll = announcement

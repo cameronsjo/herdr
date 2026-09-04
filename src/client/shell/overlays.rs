@@ -11,6 +11,12 @@ pub(crate) struct OverlayRender {
     pub(crate) navigator_popup: Rect,
     pub(crate) navigator_search: Rect,
     pub(crate) navigator_rows: Vec<(Rect, usize)>,
+    pub(crate) palette_popup: Rect,
+    pub(crate) palette_rows: Vec<(Rect, usize)>,
+    pub(crate) palette_max_scroll: usize,
+    pub(crate) pane_split_popup: Rect,
+    pub(crate) pane_split_vertical: Rect,
+    pub(crate) pane_split_horizontal: Rect,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
@@ -59,6 +65,8 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
         ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p),
+        ClientShellOverlay::Palette(v) => render_palette_overlay(b, v, s, k, p),
+        ClientShellOverlay::PaneSplitDirection(v) => render_pane_split_direction_overlay(b, v, p),
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
@@ -684,6 +692,18 @@ pub(crate) fn client_navigator_rows(
     let text = |v: &str| q.is_empty() || v.to_lowercase().contains(&q);
     let filtering = n.filter.is_some() || !q.is_empty();
     let mut out = Vec::new();
+    // While armed the navigator is picking a destination, and "a new space" is
+    // a destination no existing row can name.
+    if n.move_armed() {
+        out.push(ClientNavigatorRow {
+            depth: 0,
+            label: "new space".to_owned(),
+            meta: "move into a space created for it".to_owned(),
+            status: crate::api::schema::AgentStatus::Unknown,
+            current: false,
+            target: ClientNavigatorTarget::NewWorkspace,
+        });
+    }
     for w in &s.workspaces {
         let mut children = Vec::new();
         for t in s.tabs.iter().filter(|t| t.workspace_id == w.workspace_id) {
@@ -869,25 +889,52 @@ fn render_navigator_overlay(
     }
     let dy = i.bottom() - 2;
     if let Some(r) = rows.get(n.selected) {
+        // While armed, the row's own identity matters less than what accepting
+        // it does, and nothing else on screen says which destination a depth
+        // implies.
+        let detail = if n.pending_tab_move.is_some() {
+            match r.target {
+                ClientNavigatorTarget::NewWorkspace => " moves this tab to a new space".to_owned(),
+                _ => " moves this tab here".to_owned(),
+            }
+        } else if n.pending_pane_move.is_some() {
+            match r.target {
+                ClientNavigatorTarget::NewWorkspace => " moves this pane to a new space".to_owned(),
+                ClientNavigatorTarget::Workspace(_) => {
+                    " moves this pane to a new tab here".to_owned()
+                }
+                ClientNavigatorTarget::Tab(_) | ClientNavigatorTarget::Pane(_) => {
+                    " splits this pane into this tab".to_owned()
+                }
+            }
+        } else {
+            format!(" {} · {}", r.label, r.meta)
+        };
         put_text(
             b,
             i.x,
             dy,
             i.width,
-            &format!(" {} · {}", r.label, r.meta),
+            &detail,
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         )
     }
+    // Enter relocates instead of switching while a move is armed, so the
+    // footer has to say which one it is.
+    let footer = match (n.move_armed(), n.search_focused) {
+        (true, true) => " search type · move ↑↓/ctrl+n/p · move here enter · cancel esc",
+        (true, false) => " move j/k · expand space · search / · move here enter · cancel esc",
+        (false, true) => " search type · move ↑↓/ctrl+n/p · open enter · back esc",
+        (false, false) => {
+            " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
+        }
+    };
     put_text(
         b,
         i.x,
         i.bottom() - 1,
         i.width,
-        if n.search_focused {
-            " search type · move ↑↓/ctrl+n/p · open enter · back esc"
-        } else {
-            " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
-        },
+        footer,
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     Some(OverlayRender {
@@ -909,6 +956,221 @@ fn render_navigator_overlay(
     })
 }
 
+fn render_palette_overlay(
+    b: &mut Buffer,
+    v: &ClientPaletteOverlay,
+    s: &ClientShellSnapshot,
+    k: &LiveKeybindConfig,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let (popup, inner, body) = super::super::palette::palette_geometry(b.area)?;
+    panel(b, popup, p.accent, p.panel_bg)?;
+
+    let base = Style::default()
+        .bg(p.panel_bg)
+        .remove_modifier(Modifier::DIM);
+    put_text(
+        b,
+        inner.x,
+        inner.y,
+        inner.width,
+        " commands",
+        base.fg(p.text).add_modifier(Modifier::BOLD),
+    );
+    let close =
+        crate::ui::release_notes_close_button_rect(Rect::new(inner.x, inner.y, inner.width, 1));
+    button(
+        b,
+        close,
+        " esc close ",
+        base.fg(contrast(p))
+            .bg(p.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    let (query_text, query_style) = if v.query.is_empty() {
+        (
+            "recent first · type to search all".to_owned(),
+            base.fg(p.overlay0),
+        )
+    } else {
+        (
+            v.query.clone(),
+            base.fg(p.text).add_modifier(Modifier::BOLD),
+        )
+    };
+    let query_row = inner.y.saturating_add(1);
+    put_text(b, inner.x, query_row, 3, " > ", base.fg(p.accent));
+    put_text(
+        b,
+        inner.x.saturating_add(3),
+        query_row,
+        inner.width.saturating_sub(3),
+        &query_text,
+        query_style,
+    );
+
+    let commands = super::super::palette::filtered_palette_commands(
+        &v.query,
+        &v.recent_command_ids,
+        k,
+        &v.plugins,
+        s,
+    );
+    let viewport = usize::from(body.height.max(1));
+    let max_scroll = commands.len().saturating_sub(viewport);
+    let scroll = v.scroll.min(max_scroll);
+    let metrics = crate::pane::ScrollMetrics {
+        offset_from_bottom: max_scroll.saturating_sub(scroll),
+        max_offset_from_bottom: max_scroll,
+        viewport_rows: viewport,
+    };
+    let track = crate::ui::release_notes_scrollbar_rect(body, metrics);
+    let text_area = track
+        .map(|_| Rect::new(body.x, body.y, body.width.saturating_sub(1), body.height))
+        .unwrap_or(body);
+
+    let mut rows = Vec::new();
+    if commands.is_empty() {
+        put_text(
+            b,
+            text_area.x,
+            text_area.y,
+            text_area.width,
+            " no matching commands",
+            base.fg(p.overlay1),
+        );
+    } else {
+        for (visible, (index, command)) in commands
+            .iter()
+            .enumerate()
+            .skip(scroll)
+            .take(viewport)
+            .enumerate()
+        {
+            let rect = Rect::new(
+                text_area.x,
+                text_area.y.saturating_add(visible as u16),
+                text_area.width,
+                1,
+            );
+            rows.push((rect, index));
+            let selected = index == v.selected;
+            let style = if selected {
+                base.fg(contrast(p))
+                    .bg(p.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                base.fg(p.text)
+            };
+            b.set_style(rect, style);
+            put_text(
+                b,
+                rect.x,
+                rect.y,
+                rect.width,
+                &format!(" {}", command.name),
+                style,
+            );
+            if !command.key.is_empty() {
+                let key_style = if selected { style } else { base.fg(p.overlay1) };
+                put_right_text(b, rect, rect.y, &format!("{} ", command.key), key_style);
+            }
+        }
+    }
+    if let Some(track) = track {
+        crate::ui::render_scrollbar_buffer(b, metrics, track, p.overlay0, p.overlay1, "▐");
+    }
+
+    put_text(
+        b,
+        inner.x,
+        inner.bottom().saturating_sub(1),
+        inner.width,
+        " run enter · move ↑↓ · close esc",
+        base.fg(p.overlay0),
+    );
+
+    Some(OverlayRender {
+        cancel: close,
+        palette_popup: popup,
+        palette_rows: rows,
+        palette_max_scroll: max_scroll,
+        cursor: Some(crate::protocol::CursorState {
+            x: (inner.x + 3 + display_width(&v.query)).min(inner.right().saturating_sub(1)),
+            y: query_row,
+            visible: true,
+            shape: 0,
+        }),
+        ..OverlayRender::default()
+    })
+}
+
+fn render_pane_split_direction_overlay(
+    b: &mut Buffer,
+    v: &ClientPaneSplitOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let (popup, inner, vertical, horizontal) =
+        super::super::palette::pane_split_direction_geometry(b.area)?;
+    panel(b, popup, p.accent, p.panel_bg)?;
+
+    let base = Style::default()
+        .bg(p.panel_bg)
+        .remove_modifier(Modifier::DIM);
+    put_text(
+        b,
+        inner.x,
+        inner.y,
+        inner.width,
+        " split into tab",
+        base.fg(p.text).add_modifier(Modifier::BOLD),
+    );
+
+    let selected_vertical = v.direction == crate::api::schema::SplitDirection::Right;
+    let selected_style = base
+        .fg(contrast(p))
+        .bg(p.accent)
+        .add_modifier(Modifier::BOLD);
+    let unselected_style = base.fg(p.text).bg(p.surface0).add_modifier(Modifier::BOLD);
+    let (vertical_label, horizontal_label) = super::super::palette::split_button_labels();
+    button(
+        b,
+        vertical,
+        vertical_label,
+        if selected_vertical {
+            selected_style
+        } else {
+            unselected_style
+        },
+    );
+    button(
+        b,
+        horizontal,
+        horizontal_label,
+        if selected_vertical {
+            unselected_style
+        } else {
+            selected_style
+        },
+    );
+
+    put_text(
+        b,
+        inner.x,
+        inner.bottom().saturating_sub(1),
+        inner.width,
+        " ←→ choose · enter confirm · esc cancel",
+        base.fg(p.overlay0),
+    );
+
+    Some(OverlayRender {
+        pane_split_popup: popup,
+        pane_split_vertical: vertical,
+        pane_split_horizontal: horizontal,
+        ..OverlayRender::default()
+    })
+}
+
 fn help_lines(
     keybinds: &LiveKeybindConfig,
     query: &str,
@@ -922,7 +1184,7 @@ fn help_lines(
     );
     let key_width = groups
         .iter()
-        .flat_map(|(_, entries)| entries.iter().map(|(key, _)| key.chars().count()))
+        .flat_map(|(_, entries)| entries.iter().map(|entry| entry.key.chars().count()))
         .max()
         .unwrap_or(8);
     if groups.is_empty() {
@@ -948,7 +1210,8 @@ fn help_lines(
                     .add_modifier(Modifier::BOLD),
             )),
         ));
-        for (key, label) in entries {
+        for entry in entries {
+            let (key, label) = (entry.key, entry.label);
             let padded_key = format!(" {key:<key_width$} ");
             let width = padded_key.chars().count() + label.chars().count();
             lines.push((
