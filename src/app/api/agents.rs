@@ -335,6 +335,18 @@ impl App {
         if !super::super::agents::runtime_hosts_agent(runtime, expected_agent) {
             return agent_not_ready(id, &params.target);
         }
+        // Unlike `agent prompt`, this deliberately does not refuse a blocked agent:
+        // answering a blocked interactive prompt is the primitive's whole purpose.
+        if expected_agent == crate::detect::Agent::GithubCopilot {
+            // Copilot ignores synthetic Enter after focus loss until it receives focus gained.
+            let focus = match crate::ghostty::encode_focus(crate::ghostty::FocusEvent::Gained) {
+                Ok(focus) => focus,
+                Err(err) => return encode_error(id, "agent_type_submit_failed", err.to_string()),
+            };
+            if let Err(err) = runtime.try_send_bytes(Bytes::from(focus)) {
+                return encode_error(id, "agent_type_submit_failed", err.to_string());
+            }
+        }
         let bytes = super::super::api_helpers::encode_api_submission(runtime, &params.text);
         if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
             return encode_error(id, "agent_type_submit_failed", err.to_string());
@@ -610,6 +622,34 @@ mod tests {
         );
         let success: SuccessResponse = serde_json::from_str(&sent).unwrap();
         assert!(matches!(success.result, ResponseResult::Ok {}));
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"/compact\r"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn agent_type_submit_sends_focus_gained_to_copilot_first() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_agent_name("reviewer".into());
+        terminal.set_detected_state(Some(Agent::GithubCopilot), AgentState::Idle);
+        let (runtime, mut rx) = crate::terminal::TerminalRuntime::test_with_channel(80, 24);
+        app.state.insert_test_runtime(pane_id, runtime);
+
+        let sent = app.handle_agent_type_submit(
+            "req-submit".into(),
+            AgentTypeSubmitParams {
+                target: "reviewer".into(),
+                text: "/compact".into(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&sent).unwrap();
+        assert!(matches!(success.result, ResponseResult::Ok {}));
+        let focus = crate::ghostty::encode_focus(crate::ghostty::FocusEvent::Gained).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from(focus));
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"/compact\r"));
         assert!(rx.try_recv().is_err());
     }
