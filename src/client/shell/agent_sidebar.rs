@@ -59,10 +59,8 @@ fn agent_grouping_is_effective(
     entries: &[(&ClientShellAgent, &ClientShellWorkspace)],
     config: &ClientShellConfig,
 ) -> bool {
-    matches!(
-        config.agents.group_by,
-        crate::config::AgentGroupBy::Workspace
-    ) && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
+    config.agents.group_by == crate::config::AgentGroupBy::Workspace
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
         && workspaces_are_contiguous(entries)
 }
 
