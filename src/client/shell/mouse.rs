@@ -1638,7 +1638,13 @@ impl ClientShellState {
                     }
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
-                    if let Some((_, index)) = row_hit {
+                    // The close button sits inside the popup, so it has to be
+                    // tested before the click-outside branch or it falls
+                    // between the two and is silently swallowed.
+                    if super::contains(self.hits.overlay_cancel, point) {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    } else if let Some((_, index)) = row_hit {
                         if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
                             palette.selected = index;
                         }

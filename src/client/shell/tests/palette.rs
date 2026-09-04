@@ -183,6 +183,30 @@ fn clicking_a_palette_row_runs_it_and_clicking_outside_closes_the_palette() {
     );
 }
 
+// The button sits inside the popup, so it satisfies neither the row hit nor
+// the click-outside test. Before it was wired, a click on it was swallowed and
+// the palette just sat there — a drawn affordance that did nothing.
+#[test]
+fn clicking_the_rendered_esc_close_button_closes_the_palette() {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    let close = state.hits.overlay_cancel;
+    assert!(
+        !close.is_empty(),
+        "the renderer must publish the close button rect"
+    );
+    assert!(
+        super::super::contains(state.hits.palette_popup, (close.x, close.y)),
+        "the button is inside the popup, which is what makes this reachable \
+         only through overlay_cancel"
+    );
+
+    let closed = click(&mut state, close.x + 1, close.y);
+    assert!(state.overlay.is_none());
+    assert!(endpoint_methods(&closed).is_empty(), "closing runs nothing");
+}
+
 #[test]
 fn move_pane_to_space_arms_the_navigator_and_a_workspace_row_moves_the_pane() {
     let mut state = shell();
