@@ -253,6 +253,19 @@ mod tests {
         digests
     }
 
+    /// The fixture is the fork's contract, not upstream's.
+    ///
+    /// It differs from upstream on exactly one method: `tab.move`, which this
+    /// fork extended with an optional `destination` so a tab can move to another
+    /// space, and whose `insert_index` became optional in the same change. Both
+    /// fields carry `#[serde(default, skip_serializing_if = "Option::is_none")]`,
+    /// which is this guard's own "explicitly gate new fields" escape — an older
+    /// caller omitting them still parses, and a request that omits them still
+    /// serializes to the previous shape.
+    ///
+    /// If a sync makes this fail again, check *which* method moved before
+    /// regenerating: a digest change on any other method is upstream's contract
+    /// shifting under the fork, not the fork's own divergence.
     #[test]
     fn advertised_client_shell_method_shapes_stay_at_the_v1_contract() {
         let expected: BTreeMap<String, String> = serde_json::from_str(include_str!(concat!(
