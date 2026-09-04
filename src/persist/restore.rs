@@ -61,6 +61,56 @@ type RestoredTab = (
 );
 type RestoreFailures<T> = (T, usize);
 
+/// Decides which stored agent names survive a restore.
+///
+/// The session file is writable by anything that can reach the socket, and an
+/// agent name is the routing key for `agent.prompt`, `agent.read`, and
+/// `agent.send-keys`. Two rules apply, both absent before:
+///
+/// - The name must satisfy `crate::app::valid_agent_name`, the same rule
+///   `agent.start` and `agent.rename` enforce. `TerminalState::set_agent_name`
+///   is the enforcing boundary; this ledger only reports what it dropped.
+/// - The first pane to claim a name keeps it. `valid_agent_name` says nothing
+///   about duplicates, so two panes named `reviewer` would otherwise restore
+///   and make every target lookup for that name ambiguous.
+///
+/// Migration: names stored before this check — uppercase, non-ASCII, or over
+/// 32 bytes — are dropped rather than renamed, and reported once as a summary
+/// at the end of the restore.
+#[derive(Default)]
+struct AgentNameLedger {
+    claimed: HashSet<String>,
+    dropped_invalid: usize,
+    dropped_duplicate: usize,
+}
+
+impl AgentNameLedger {
+    /// Returns the name to restore, or `None` when the stored name is dropped.
+    fn accept(&mut self, name: String) -> Option<String> {
+        if !crate::app::valid_agent_name(&name) {
+            self.dropped_invalid += 1;
+            return None;
+        }
+        if !self.claimed.insert(name.clone()) {
+            self.dropped_duplicate += 1;
+            return None;
+        }
+        Some(name)
+    }
+
+    fn report(&self) {
+        if self.dropped_invalid == 0 && self.dropped_duplicate == 0 {
+            return;
+        }
+        warn!(
+            invalid = self.dropped_invalid,
+            duplicate = self.dropped_duplicate,
+            "dropped stored agent names during session restore; \
+             affected panes keep their agent but lose the name"
+        );
+    }
+}
+
 /// Restore workspaces from a snapshot. Each pane gets a fresh shell in its saved cwd.
 pub fn restore(
     snapshot: &SessionSnapshot,
@@ -271,6 +321,7 @@ fn restore_with_imports_and_failures(
     let mut terminals = HashMap::new();
     let mut terminal_runtimes = HashMap::new();
     let mut resumed_agent_sessions = HashSet::new();
+    let mut agent_names = AgentNameLedger::default();
     let mut failed_imports = 0;
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
         let runtime_context = RestoreRuntimeContext {
@@ -288,6 +339,7 @@ fn restore_with_imports_and_failures(
             cols,
             &runtime_context,
             &mut resumed_agent_sessions,
+            &mut agent_names,
             imported_panes,
         );
         failed_imports += workspace_failed_imports;
@@ -299,6 +351,7 @@ fn restore_with_imports_and_failures(
             workspaces.push(workspace);
         }
     }
+    agent_names.report();
     crate::workspace::reserve_workspace_ids(&workspaces);
     ((workspaces, terminals, terminal_runtimes), failed_imports)
 }
@@ -310,6 +363,7 @@ fn restore_workspace(
     cols: u16,
     runtime_context: &RestoreRuntimeContext<'_>,
     resumed_agent_sessions: &mut HashSet<String>,
+    agent_names: &mut AgentNameLedger,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
 ) -> RestoreFailures<Option<RestoredWorkspace>> {
     let mut tabs = Vec::new();
@@ -364,6 +418,7 @@ fn restore_workspace(
             cols,
             runtime_context,
             resumed_agent_sessions,
+            agent_names,
             imported_panes,
             &public_pane_ids_by_old_raw,
         );
@@ -452,6 +507,7 @@ fn restore_tab(
     cols: u16,
     runtime_context: &RestoreRuntimeContext<'_>,
     resumed_agent_sessions: &mut HashSet<String>,
+    agent_names: &mut AgentNameLedger,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
     public_pane_ids_by_old_raw: &HashMap<u32, String>,
 ) -> RestoreFailures<Option<RestoredTab>> {
@@ -545,6 +601,11 @@ fn restore_tab(
             }
             match (saved_agent_name, saved_managed_agent) {
                 (Some(agent_name), Some(agent)) => {
+                    // A rejected name still restores the managed-agent record:
+                    // skipping the call would leave a non-managed pane, which
+                    // changes resume, respawn, and detection authority. An
+                    // empty name clears the routing key on its own.
+                    let agent_name = agent_names.accept(agent_name).unwrap_or_default();
                     terminal.restore_managed_agent(agent_name, agent)
                 }
                 (Some(_), None) => {}
@@ -642,10 +703,17 @@ fn restore_tab(
                 }
                 match (saved_agent_name, saved_managed_agent) {
                     (Some(agent_name), Some(agent)) if was_imported => {
+                        let agent_name = agent_names.accept(agent_name).unwrap_or_default();
                         terminal.restore_managed_agent(agent_name, agent)
                     }
                     (Some(_), Some(_)) => {}
-                    (Some(agent_name), None) if was_imported => terminal.set_agent_name(agent_name),
+                    (Some(agent_name), None) if was_imported => {
+                        // No managed-agent record rides on this one, so a
+                        // rejected name can simply be skipped.
+                        if let Some(agent_name) = agent_names.accept(agent_name) {
+                            terminal.set_agent_name(agent_name);
+                        }
+                    }
                     (Some(_), None) => {}
                     (None, _) => {}
                 }
@@ -1245,6 +1313,130 @@ mod tests {
         assert_eq!(session.source, "herdr:opencode");
         assert_eq!(session.agent, "opencode");
         assert_eq!(session.session_ref.value, "opencode-session");
+    }
+
+    fn resumable_agent_pane(
+        agent_name: &str,
+        session_file: &str,
+    ) -> super::super::snapshot::PaneSnapshot {
+        super::super::snapshot::PaneSnapshot {
+            cwd: std::env::current_dir().unwrap(),
+            label: None,
+            agent_name: Some(agent_name.into()),
+            managed_agent_kind: Some("pi".into()),
+            agent_session: Some(super::super::snapshot::PaneAgentSessionSnapshot {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                kind: crate::agent_resume::AgentSessionRefKind::Path,
+                value: test_session_path(session_file),
+            }),
+            launch_argv: None,
+        }
+    }
+
+    fn restore_agent_name_snapshot(
+        panes: HashMap<u32, super::super::snapshot::PaneSnapshot>,
+        layout: LayoutSnapshot,
+    ) -> SessionSnapshot {
+        SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: vec![WorkspaceSnapshot {
+                id: Some("workspace".into()),
+                custom_name: None,
+                identity_cwd: std::env::current_dir().unwrap(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: vec![TabSnapshot {
+                    custom_name: None,
+                    layout,
+                    panes,
+                    zoomed: false,
+                    focused: Some(0),
+                    root_pane: Some(0),
+                }],
+                active_tab: 0,
+            }],
+            active: Some(0),
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        }
+    }
+
+    fn restore_with_agent_resume(snapshot: &SessionSnapshot) -> HashMap<TerminalId, TerminalState> {
+        let (events, _event_rx) = mpsc::channel(4);
+        let (_workspaces, terminals, _runtimes) = restore(
+            snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            true,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+        terminals
+    }
+
+    #[tokio::test]
+    async fn restore_drops_a_zero_width_agent_name_but_keeps_the_managed_agent() {
+        // `sanitize_label` strips U+200B, so an unvalidated restore turns this
+        // stored name into "reviewer" and lets the pane answer for another
+        // pane's routing key.
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([(0, resumable_agent_pane("rev\u{200b}iewer", "pi-a.jsonl"))]),
+            LayoutSnapshot::Pane(0),
+        );
+
+        let terminals = restore_with_agent_resume(&snapshot);
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+
+        assert_eq!(terminal.agent_name, None);
+        // The pane stays managed: skipping `restore_managed_agent` would change
+        // resume, respawn, and detection authority.
+        assert!(terminal.managed_agent_interactive_ready());
+        assert_eq!(
+            terminal.managed_agent_kind(),
+            Some(crate::detect::Agent::Pi)
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_keeps_the_first_of_two_identical_agent_names() {
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([
+                (0, resumable_agent_pane("reviewer", "pi-a.jsonl")),
+                (1, resumable_agent_pane("reviewer", "pi-b.jsonl")),
+            ]),
+            LayoutSnapshot::Split {
+                direction: super::super::snapshot::DirectionSnapshot::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutSnapshot::Pane(0)),
+                second: Box::new(LayoutSnapshot::Pane(1)),
+            },
+        );
+
+        let terminals = restore_with_agent_resume(&snapshot);
+        assert_eq!(terminals.len(), 2);
+
+        let named = terminals
+            .values()
+            .filter(|terminal| terminal.agent_name.as_deref() == Some("reviewer"))
+            .count();
+        assert_eq!(named, 1, "a duplicate stored name must not restore twice");
+        assert!(terminals
+            .values()
+            .all(|terminal| terminal.managed_agent_interactive_ready()));
     }
 
     #[tokio::test]
