@@ -81,6 +81,13 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if action == crate::input::KeybindAction::MergeWorkspace {
+                    if let Some(workspace_id) = self.workspace_action_id() {
+                        self.open_navigator_overlay_for_merge(workspace_id);
+                        outcome.repaint = true;
+                    }
+                    return;
+                }
                 if action == crate::input::KeybindAction::Help {
                     self.overlay = Some(ClientShellOverlay::Help(ClientHelpOverlay {
                         query: String::new(),

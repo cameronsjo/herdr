@@ -981,6 +981,27 @@ impl Workspace {
         Some(TakenTab { tab, pane_ids })
     }
 
+    /// Detaches every tab, in order, so another workspace can adopt them whole.
+    ///
+    /// This is the one path that empties a workspace, which `take_tab_for_move`
+    /// refuses to do: `Workspace` derefs through its active tab, so an empty one
+    /// panics on next access. The caller MUST remove this workspace from
+    /// `AppState::workspaces` before anything else reads it — `workspace.merge`
+    /// is the only caller, and it removes the drained source in the same
+    /// request.
+    pub(crate) fn take_all_tabs_for_move(&mut self) -> Vec<TakenTab> {
+        let mut taken = Vec::with_capacity(self.tabs.len());
+        for tab in std::mem::take(&mut self.tabs) {
+            let pane_ids = tab.layout.pane_ids();
+            for pane_id in &pane_ids {
+                self.unregister_pane(*pane_id);
+            }
+            taken.push(TakenTab { tab, pane_ids });
+        }
+        self.active_tab = 0;
+        taken
+    }
+
     /// Adopts a tab detached by `take_tab_for_move`, reissuing its public tab
     /// number and every contained pane number from this workspace's id space.
     pub(crate) fn insert_moved_tab(&mut self, taken: TakenTab, insert_idx: usize) -> usize {

@@ -347,6 +347,7 @@ pub(super) enum ClientShellOverlayKind {
     ReleaseNotes,
     Rename,
     ConfirmClose,
+    ConfirmMerge,
     Help,
     Navigator,
     WorktreeCreate,
@@ -432,6 +433,11 @@ pub(super) struct ClientNavigatorOverlay {
     /// While set, accepting a navigator row moves that whole tab instead of
     /// focusing it. Mutually exclusive with `pending_pane_move`.
     pub(super) pending_tab_move: Option<String>,
+    /// While set, accepting a navigator workspace row merges this workspace
+    /// into the picked one. Mutually exclusive with both move fields, and it
+    /// does not arm the destination-only "new space" row: merging into a
+    /// workspace that has just been created is a rename, not a merge.
+    pub(super) pending_workspace_merge: Option<String>,
 }
 
 impl ClientNavigatorOverlay {
@@ -668,6 +674,18 @@ pub(super) struct ClientContextMenuItem {
     pub(super) action: ClientContextMenuAction,
 }
 
+/// The second layer over `workspace.merge`'s own explicit-intent gate. The
+/// server refuses a worktree-group merge without `merge_group` whatever the
+/// client does, so this dialog buys deliberation, never authority.
+#[derive(Debug)]
+pub(super) struct ClientConfirmMergeOverlay {
+    pub(super) source_workspace_id: String,
+    pub(super) target_workspace_id: String,
+    pub(super) merge_group: bool,
+    pub(super) title: String,
+    pub(super) detail: String,
+}
+
 #[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
     pub(super) workspace_id: String,
@@ -682,6 +700,7 @@ pub(super) enum ClientShellOverlay {
     ReleaseNotes(crate::app::state::ReleaseNotesState),
     Rename(ClientRenameOverlay),
     ConfirmClose(ClientConfirmCloseOverlay),
+    ConfirmMerge(ClientConfirmMergeOverlay),
     Help(ClientHelpOverlay),
     Navigator(ClientNavigatorOverlay),
     WorktreeCreate(ClientWorktreeCreateOverlay),
@@ -702,6 +721,7 @@ impl ClientShellOverlay {
             Self::ReleaseNotes(_) => ClientShellOverlayKind::ReleaseNotes,
             Self::Rename(_) => ClientShellOverlayKind::Rename,
             Self::ConfirmClose(_) => ClientShellOverlayKind::ConfirmClose,
+            Self::ConfirmMerge(_) => ClientShellOverlayKind::ConfirmMerge,
             Self::Help(_) => ClientShellOverlayKind::Help,
             Self::Navigator(_) => ClientShellOverlayKind::Navigator,
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
@@ -1823,6 +1843,7 @@ impl ClientShellState {
             return matches!(
                 overlay,
                 ClientShellOverlay::ConfirmClose(_)
+                    | ClientShellOverlay::ConfirmMerge(_)
                     | ClientShellOverlay::Help(_)
                     | ClientShellOverlay::Navigator(_)
                     | ClientShellOverlay::WorktreeRemove(_)

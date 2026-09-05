@@ -1008,6 +1008,9 @@ impl App {
             Method::WorkspaceReportMetadata(params) => {
                 return self.handle_workspace_report_metadata(request.id, params);
             }
+            Method::WorkspaceMerge(params) => {
+                return self.handle_workspace_merge(request.id, params);
+            }
             Method::WorkspaceClose(target) => {
                 return self.handle_workspace_close(request.id, target)
             }

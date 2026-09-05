@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
-    WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceCreateParams, WorkspaceMergeParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
+    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -309,6 +309,221 @@ impl App {
             self.emit_workspace_token_updated(index);
         }
         encode_success(id, ResponseResult::Ok {})
+    }
+
+    /// Relocates every tab of the source workspace into the target, then closes
+    /// the emptied source.
+    ///
+    /// The gate is `workspace.close`'s, unchanged: a source that owns linked
+    /// worktree workspaces refuses without explicit group intent. The socket is
+    /// reachable by every process running inside a pane — `HERDR_SOCKET_PATH` is
+    /// in their environment — so a merge without this gate would be a one-call
+    /// way around a control `workspace.close` enforces. A TUI confirmation is a
+    /// second layer over this one, never a substitute for it.
+    ///
+    /// With group intent the whole worktree group merges: every member's tabs
+    /// land in the target and every member closes, so merge never destroys a
+    /// tab the way a group close does.
+    pub(super) fn handle_workspace_merge(
+        &mut self,
+        id: String,
+        params: WorkspaceMergeParams,
+    ) -> String {
+        // `parse_workspace_id` falls back to positional parsing without bounds
+        // checking, so a bare numeric id yields an index past the end.
+        let Some(source_index) = self
+            .parse_workspace_id(&params.source_workspace_id)
+            .filter(|index| *index < self.state.workspaces.len())
+        else {
+            return workspace_not_found(id, &params.source_workspace_id);
+        };
+        let Some(target_index) = self
+            .parse_workspace_id(&params.target_workspace_id)
+            .filter(|index| *index < self.state.workspaces.len())
+        else {
+            return workspace_not_found(id, &params.target_workspace_id);
+        };
+        if source_index == target_index {
+            return encode_error(
+                id,
+                "workspace_merge_failed",
+                "source and target must be different workspaces",
+            );
+        }
+
+        let merge_indices = self.state.workspace_close_indices(source_index);
+        if merge_indices.len() >= 2 && !params.merge_group {
+            return encode_error(
+                id,
+                "workspace_group_merge_required",
+                "workspace has linked worktree workspaces; use --group (merge_group=true in the API) to merge the group",
+            );
+        }
+        if merge_indices.contains(&target_index) {
+            return encode_error(
+                id,
+                "workspace_merge_failed",
+                "target workspace belongs to the source's worktree group",
+            );
+        }
+
+        // Snapshot every closing workspace before its tabs leave: a drained
+        // workspace derefs through an active tab it no longer has.
+        let closed_workspaces = merge_indices
+            .iter()
+            .map(|index| {
+                (
+                    self.public_workspace_id(*index),
+                    self.workspace_info(*index),
+                )
+            })
+            .collect::<Vec<_>>();
+        // Follow the operator's own view by id, not by index. `workspace.close`
+        // sets `selected` to the closing workspace, which would yank the view
+        // to the target on every merge; restoring it keeps a merge of two
+        // background workspaces invisible to the operator.
+        let selected_workspace_id = self
+            .state
+            .workspaces
+            .get(self.state.selected)
+            .map(|workspace| workspace.id.clone());
+        let active_workspace_id = self
+            .state
+            .active
+            .and_then(|index| self.state.workspaces.get(index))
+            .map(|workspace| workspace.id.clone());
+        let target_workspace_key = self.state.workspaces[target_index].id.clone();
+
+        let mut moved_tabs = Vec::new();
+        for source_index in merge_indices.iter().copied() {
+            let source_workspace_id = self.public_workspace_id(source_index);
+            let tab_count = self.state.workspaces[source_index].tabs.len();
+            let previous_tab_ids = (0..tab_count)
+                .map(|tab_idx| {
+                    self.public_tab_id(source_index, tab_idx)
+                        .unwrap_or_else(|| {
+                            crate::workspace::public_tab_id_for_number(
+                                &self.state.workspaces[source_index].id,
+                                tab_idx + 1,
+                            )
+                        })
+                })
+                .collect::<Vec<_>>();
+            // Snapshot before the take: it unregisters these panes from the
+            // source's per-workspace public id space.
+            let previous_pane_ids = (0..tab_count)
+                .flat_map(|tab_idx| self.public_pane_ids_in_tab(source_index, tab_idx))
+                .collect::<Vec<_>>();
+
+            let taken = self.state.workspaces[source_index].take_all_tabs_for_move();
+            self.alias_moved_pane_ids(previous_pane_ids);
+            for (tab, previous_tab_id) in taken.into_iter().zip(previous_tab_ids) {
+                let insert_index = self.state.workspaces[target_index].tabs.len();
+                let target_tab_idx =
+                    self.state.workspaces[target_index].insert_moved_tab(tab, insert_index);
+                moved_tabs.push((previous_tab_id, source_workspace_id.clone(), target_tab_idx));
+            }
+        }
+
+        // Three records pair a pane with the workspace id it sat in:
+        // `previous_pane_focus`, a pane-targeted toast, and every pending agent
+        // notification. Their panes are alive in the target now, so leaving the
+        // source id in place would dangle each one at a workspace about to stop
+        // existing — `assert_invariants_for_test` catches exactly that.
+        let merged_workspace_keys = merge_indices
+            .iter()
+            .filter_map(|index| self.state.workspaces.get(*index))
+            .map(|workspace| workspace.id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        if let Some(focus) = self.state.previous_pane_focus.as_mut() {
+            if merged_workspace_keys.contains(&focus.workspace_id) {
+                focus.workspace_id = target_workspace_key.clone();
+            }
+        }
+        if let Some(target) = self
+            .state
+            .toast
+            .as_mut()
+            .and_then(|toast| toast.target.as_mut())
+        {
+            if merged_workspace_keys.contains(&target.workspace_id) {
+                target.workspace_id = target_workspace_key.clone();
+            }
+        }
+        for notification in self.state.pending_agent_notifications.values_mut() {
+            if merged_workspace_keys.contains(&notification.workspace_id) {
+                notification.workspace_id = target_workspace_key.clone();
+            }
+        }
+
+        self.state.mark_session_dirty();
+        for index in merge_indices.iter().rev() {
+            if let Some(workspace) = self.state.workspaces.get(*index) {
+                crate::logging::workspace_closed(&workspace.id);
+            }
+            self.state.workspaces.remove(*index);
+        }
+        let target_index = self
+            .state
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == target_workspace_key)
+            .unwrap_or(0);
+        self.state.selected = selected_workspace_id
+            .and_then(|id| {
+                self.state
+                    .workspaces
+                    .iter()
+                    .position(|workspace| workspace.id == id)
+            })
+            .unwrap_or(target_index);
+        if let Some(id) = active_workspace_id {
+            self.state.active = Some(
+                self.state
+                    .workspaces
+                    .iter()
+                    .position(|workspace| workspace.id == id)
+                    .unwrap_or(target_index),
+            );
+        }
+        self.schedule_session_save();
+
+        let target_workspace_id = self.public_workspace_id(target_index);
+        let tabs = self.tab_list_info(target_index);
+        for (previous_tab_id, source_workspace_id, target_tab_idx) in moved_tabs {
+            let Some(tab_id) = self.public_tab_id(target_index, target_tab_idx) else {
+                continue;
+            };
+            self.emit_event(EventEnvelope {
+                event: EventKind::TabMovedAcrossWorkspaces,
+                data: EventData::TabMovedAcrossWorkspaces {
+                    tab_id,
+                    previous_tab_id,
+                    workspace_id: target_workspace_id.clone(),
+                    source_workspace_id,
+                    insert_index: target_tab_idx,
+                    tabs: tabs.clone(),
+                    // The source is gone, so it has no remaining tabs to report.
+                    source_tabs: Vec::new(),
+                },
+            });
+        }
+        for (workspace_id, workspace) in closed_workspaces {
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceClosed,
+                data: EventData::WorkspaceClosed {
+                    workspace_id,
+                    workspace: Some(workspace),
+                },
+            });
+        }
+
+        encode_success(
+            id,
+            ResponseResult::WorkspaceInfo {
+                workspace: self.workspace_info(target_index),
+            },
+        )
     }
 
     pub(super) fn handle_workspace_close(
@@ -755,6 +970,248 @@ mod tests {
                         .is_some_and(|worktree| worktree.is_linked_worktree)
             )
         }));
+    }
+
+    fn merge_test_app(labels: &[&str]) -> App {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = labels
+            .iter()
+            .map(|label| Workspace::test_new(label))
+            .collect();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        app
+    }
+
+    fn merge_request(app: &mut App, source: usize, target: usize, merge_group: bool) -> String {
+        let source_workspace_id = app.public_workspace_id(source);
+        let target_workspace_id = app.public_workspace_id(target);
+        app.handle_workspace_merge(
+            "req".into(),
+            WorkspaceMergeParams {
+                source_workspace_id,
+                target_workspace_id,
+                merge_group,
+            },
+        )
+    }
+
+    /// The socket is reachable from inside every pane, so this gate — not the
+    /// TUI confirmation — is what keeps merge from being a one-call way around
+    /// the explicit intent `workspace.close` requires for a worktree group.
+    #[test]
+    fn api_workspace_merge_group_source_requires_explicit_group_intent() {
+        let mut app = app_with_worktree_group();
+        app.state.workspaces.push(Workspace::test_new("target"));
+        app.state.ensure_test_terminals();
+        let workspace_ids = app
+            .state
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.clone())
+            .collect::<Vec<_>>();
+
+        let response = merge_request(&mut app, 0, 2, false);
+
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "workspace_group_merge_required");
+        assert_eq!(
+            app.state
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.id.clone())
+                .collect::<Vec<_>>(),
+            workspace_ids
+        );
+        assert!(app.event_hub.events_after(0).is_empty());
+    }
+
+    #[test]
+    fn api_workspace_merge_group_proceeds_with_explicit_group_intent() {
+        let mut app = app_with_worktree_group();
+        app.state.workspaces.push(Workspace::test_new("target"));
+        app.state.ensure_test_terminals();
+        let target_id = app.state.workspaces[2].id.clone();
+
+        let response = merge_request(&mut app, 0, 2, true);
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].id, target_id);
+        // Merge relocates tabs rather than destroying them: the target keeps
+        // its own tab plus one from each merged group member.
+        assert_eq!(app.state.workspaces[0].tabs.len(), 3);
+        app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_workspace_merge_moves_every_tab_in_order_and_closes_the_source() {
+        let mut app = merge_test_app(&["source", "target"]);
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.workspaces[0].test_add_tab(Some("three"));
+        app.state.ensure_test_terminals();
+        let source_id = app.state.workspaces[0].id.clone();
+        let source_root_panes = app.state.workspaces[0]
+            .tabs
+            .iter()
+            .map(|tab| tab.root_pane)
+            .collect::<Vec<_>>();
+        assert_eq!(source_root_panes.len(), 3);
+        let target_root_pane = app.state.workspaces[1].tabs[0].root_pane;
+
+        let response = merge_request(&mut app, 0, 1, false);
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceInfo { workspace } = success.result else {
+            panic!("expected the merged target workspace");
+        };
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert!(
+            !app.state
+                .workspaces
+                .iter()
+                .any(|candidate| candidate.id == source_id),
+            "merged source workspace should be gone"
+        );
+        assert_eq!(workspace.workspace_id, app.public_workspace_id(0));
+        let merged_root_panes = app.state.workspaces[0]
+            .tabs
+            .iter()
+            .map(|tab| tab.root_pane)
+            .collect::<Vec<_>>();
+        let mut expected = vec![target_root_pane];
+        expected.extend(source_root_panes);
+        assert_eq!(merged_root_panes, expected);
+        app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_workspace_merge_keeps_the_operators_selected_workspace() {
+        let mut app = merge_test_app(&["source", "target", "watching"]);
+        app.state.selected = 2;
+        app.state.active = Some(2);
+        let watched_id = app.state.workspaces[2].id.clone();
+
+        let response = merge_request(&mut app, 0, 1, false);
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(app.state.workspaces[app.state.selected].id, watched_id);
+        assert_eq!(
+            app.state
+                .active
+                .map(|index| app.state.workspaces[index].id.clone()),
+            Some(watched_id)
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Three records name a pane's workspace by id. The panes survive a merge,
+    /// so a record left pointing at the closed source is dangling — and nothing
+    /// in the response says so.
+    #[test]
+    fn api_workspace_merge_repoints_pane_records_off_the_closed_source() {
+        let mut app = merge_test_app(&["source", "target"]);
+        let source_key = app.state.workspaces[0].id.clone();
+        let target_key = app.state.workspaces[1].id.clone();
+        let source_pane = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.previous_pane_focus = Some(crate::app::state::PaneFocusTarget {
+            workspace_id: source_key.clone(),
+            pane_id: source_pane,
+        });
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "waiting".into(),
+            context: String::new(),
+            position: None,
+            target: Some(crate::app::state::ToastTarget {
+                workspace_id: source_key.clone(),
+                pane_id: source_pane,
+            }),
+        });
+        app.state.pending_agent_notifications.insert(
+            source_pane,
+            crate::app::state::PendingAgentNotification {
+                pane_id: source_pane,
+                workspace_id: source_key.clone(),
+                agent_label: "agent".into(),
+                known_agent: None,
+                kind: crate::app::state::ToastKind::NeedsAttention,
+                state: crate::detect::AgentState::Blocked,
+                deadline: std::time::Instant::now(),
+            },
+        );
+
+        let response = merge_request(&mut app, 0, 1, false);
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            app.state
+                .previous_pane_focus
+                .as_ref()
+                .map(|focus| focus.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.target.as_ref())
+                .map(|target| target.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state.pending_agent_notifications[&source_pane].workspace_id,
+            target_key
+        );
+        app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_workspace_merge_refuses_a_workspace_into_itself() {
+        let mut app = merge_test_app(&["only", "other"]);
+        let workspace_id = app.public_workspace_id(0);
+
+        let response = app.handle_workspace_merge(
+            "req".into(),
+            WorkspaceMergeParams {
+                source_workspace_id: workspace_id.clone(),
+                target_workspace_id: workspace_id,
+                merge_group: false,
+            },
+        );
+
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "workspace_merge_failed");
+        // Assert the reason, not just the refusal: every other guard here
+        // returns the same code, so a code-only assertion passes even when the
+        // self-merge check is gone.
+        assert!(
+            error.error.message.contains("different workspaces"),
+            "unexpected refusal reason: {}",
+            error.error.message
+        );
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert!(app.event_hub.events_after(0).is_empty());
+    }
+
+    #[test]
+    fn api_workspace_merge_refuses_a_target_inside_the_source_group() {
+        let mut app = app_with_worktree_group();
+        app.state.ensure_test_terminals();
+
+        let response = merge_request(&mut app, 0, 1, true);
+
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "workspace_merge_failed");
+        assert_eq!(app.state.workspaces.len(), 2);
     }
 
     #[test]

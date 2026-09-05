@@ -390,6 +390,8 @@ pub struct KeysConfig {
     pub move_tab_to_space: BindingConfig,
     /// Move the active tab to a new workspace. Unset by default.
     pub move_tab_to_new_space: BindingConfig,
+    /// Merge another workspace's tabs into a chosen workspace. Unset by default.
+    pub merge_workspace: BindingConfig,
     /// Focus the previous agent shown in the agent panel. Unset by default.
     pub previous_agent: BindingConfig,
     /// Focus the next agent shown in the agent panel. Unset by default.
@@ -538,6 +540,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     move_tab_to_new_space: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    merge_workspace: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_agent: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_agent: Option<BindingConfig>,
@@ -670,6 +674,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(move_pane_to_new_tab);
         apply_field!(move_tab_to_space);
         apply_field!(move_tab_to_new_space);
+        apply_field!(merge_workspace);
         apply_field!(previous_agent);
         apply_field!(next_agent);
         apply_field!(focus_agent);
@@ -782,6 +787,7 @@ impl KeysConfig {
         copy_effective_action_field!(move_pane_to_new_tab, keybinds.move_pane_to_new_tab);
         copy_effective_action_field!(move_tab_to_space, keybinds.move_tab_to_space);
         copy_effective_action_field!(move_tab_to_new_space, keybinds.move_tab_to_new_space);
+        copy_effective_action_field!(merge_workspace, keybinds.merge_workspace);
         copy_effective_action_field!(previous_agent, keybinds.previous_agent);
         copy_effective_action_field!(next_agent, keybinds.next_agent);
         copy_effective_indexed_field!(focus_agent, keybinds.focus_agent);
@@ -1100,6 +1106,7 @@ impl Default for KeysConfig {
             move_pane_to_new_tab: BindingConfig::empty(),
             move_tab_to_space: BindingConfig::empty(),
             move_tab_to_new_space: BindingConfig::empty(),
+            merge_workspace: BindingConfig::empty(),
             previous_agent: BindingConfig::empty(),
             next_agent: BindingConfig::empty(),
             focus_agent: BindingConfig::empty(),

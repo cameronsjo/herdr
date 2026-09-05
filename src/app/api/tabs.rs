@@ -428,7 +428,7 @@ impl App {
 
     /// Snapshots the public ids of every pane in a tab, before a move
     /// unregisters them from the source workspace's id space.
-    fn public_pane_ids_in_tab(
+    pub(super) fn public_pane_ids_in_tab(
         &self,
         ws_idx: usize,
         tab_idx: usize,
@@ -453,7 +453,7 @@ impl App {
 
     /// Keeps the moved panes' old public ids resolving after the workspace
     /// change, matching what `pane.move` does for a single pane.
-    fn alias_moved_pane_ids(&mut self, previous: Vec<(String, crate::layout::PaneId)>) {
+    pub(super) fn alias_moved_pane_ids(&mut self, previous: Vec<(String, crate::layout::PaneId)>) {
         for (previous_public_id, pane_id) in previous {
             self.state
                 .record_moved_pane_alias(previous_public_id, pane_id);
@@ -608,7 +608,7 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
-    fn tab_list_info(&self, ws_idx: usize) -> Vec<crate::api::schema::TabInfo> {
+    pub(super) fn tab_list_info(&self, ws_idx: usize) -> Vec<crate::api::schema::TabInfo> {
         self.state
             .workspaces
             .get(ws_idx)

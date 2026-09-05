@@ -214,6 +214,16 @@ pub(crate) fn keybind_help_groups(
                     "close workspace",
                     KeybindAction::CloseWorkspace,
                 ),
+                action_entry_kw(
+                    binding_label(&keybinds.merge_workspace),
+                    "merge workspace into...",
+                    KeybindAction::MergeWorkspace,
+                    &[
+                        "combine workspaces",
+                        "merge space",
+                        "move all tabs to another space",
+                    ],
+                ),
                 action_entry(
                     binding_label(&keybinds.previous_workspace),
                     "previous workspace",

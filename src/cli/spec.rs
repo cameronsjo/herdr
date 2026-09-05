@@ -263,6 +263,13 @@ fn workspace_command() -> Command {
                 .arg(option("seq", "N"))
                 .arg(option("ttl-ms", "N")),
         )
+        .subcommand(
+            Command::new("merge")
+                .about("Move every tab of one workspace into another and close the source")
+                .arg(required("source_workspace_id", "SOURCE_WORKSPACE_ID"))
+                .arg(required("target_workspace_id", "TARGET_WORKSPACE_ID"))
+                .arg(flag("group")),
+        )
         .subcommand(id_command("close", "workspace_id", "Close a workspace"))
 }
 

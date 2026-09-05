@@ -19,6 +19,7 @@ pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
         "rename" => workspace_rename(&args[1..]),
         "move" => workspace_move(&args[1..]),
         "report-metadata" => workspace_report_metadata(&args[1..]),
+        "merge" => workspace_merge(&args[1..]),
         "close" => workspace_close(&args[1..]),
         "help" | "--help" | "-h" => {
             print_workspace_help();
@@ -273,6 +274,30 @@ fn workspace_report_metadata(args: &[String]) -> std::io::Result<i32> {
     ))
 }
 
+/// `--group` is the same explicit intent `workspace close --group` requires. A
+/// source workspace with linked worktree workspaces refuses without it, so a
+/// merge cannot quietly do what a close would have asked about.
+fn workspace_merge(args: &[String]) -> std::io::Result<i32> {
+    let (raw_source_id, raw_target_id, merge_group) = match args {
+        [source, target] => (source, target, false),
+        [source, target, flag] if flag == "--group" => (source, target, true),
+        _ => {
+            eprintln!("{}", workspace_merge_usage());
+            return Ok(2);
+        }
+    };
+
+    super::runtime::workspace_merge(crate::api::schema::WorkspaceMergeParams {
+        source_workspace_id: super::normalize_workspace_id(raw_source_id),
+        target_workspace_id: super::normalize_workspace_id(raw_target_id),
+        merge_group,
+    })
+}
+
+fn workspace_merge_usage() -> String {
+    "usage: herdr workspace merge <source_workspace_id> <target_workspace_id> [--group]".into()
+}
+
 fn workspace_close(args: &[String]) -> std::io::Result<i32> {
     let (raw_workspace_id, close_group) = match args {
         [workspace_id] => (workspace_id, false),
@@ -298,5 +323,6 @@ fn print_workspace_help() {
     eprintln!("  herdr workspace rename <workspace_id> <label>");
     eprintln!("  herdr workspace move <workspace_id> --index N");
     eprintln!("  herdr workspace report-metadata <workspace_id> --source ID [--token NAME=VALUE] [--clear-token NAME] [--seq N] [--ttl-ms N]");
+    eprintln!("  herdr workspace merge <source_workspace_id> <target_workspace_id> [--group]");
     eprintln!("  herdr workspace close <workspace_id> [--group]");
 }

@@ -570,6 +570,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn merge_workspace_command_reaches_the_palette() {
+        let snapshot = super::super::tests::snapshot();
+        let commands = palette_commands(&keybinds(), &no_plugins(), &snapshot);
+
+        let merge = commands
+            .iter()
+            .find(|command| command.action == PaletteAction::Keybind(KeybindAction::MergeWorkspace))
+            .expect("merge workspace is missing from the palette");
+        // Unbound by default, so the palette is the only way to reach it.
+        assert!(
+            merge
+                .keywords
+                .iter()
+                .any(|keyword| keyword.contains("combine")),
+            "merge workspace should be findable by combine vocabulary"
+        );
+    }
+
     // The context menu and the sidebar say "move pane"; the API says "swap".
     // Without the keyword bridge the palette answers nothing to the wording a
     // user arrives with.

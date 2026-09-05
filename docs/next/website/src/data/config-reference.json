@@ -650,6 +650,12 @@
           "description": "Move the active tab to a new workspace. Unset by default."
         },
         {
+          "key": "keys.merge_workspace",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Merge another workspace's tabs into a chosen workspace. Unset by default."
+        },
+        {
           "key": "keys.previous_agent",
           "type": "keybinding",
           "default": "unset",

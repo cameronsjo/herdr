@@ -63,6 +63,7 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
+        ClientShellOverlay::ConfirmMerge(v) => render_confirm_merge_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
         ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p),
         ClientShellOverlay::Palette(v) => render_palette_overlay(b, v, s, k, p),
@@ -892,7 +893,12 @@ fn render_navigator_overlay(
         // While armed, the row's own identity matters less than what accepting
         // it does, and nothing else on screen says which destination a depth
         // implies.
-        let detail = if n.pending_tab_move.is_some() {
+        let detail = if n.pending_workspace_merge.is_some() {
+            match r.target {
+                ClientNavigatorTarget::NewWorkspace => " pick an existing space".to_owned(),
+                _ => " merges this space into here".to_owned(),
+            }
+        } else if n.pending_tab_move.is_some() {
             match r.target {
                 ClientNavigatorTarget::NewWorkspace => " moves this tab to a new space".to_owned(),
                 _ => " moves this tab here".to_owned(),
@@ -1369,9 +1375,31 @@ fn render_help_overlay(
         ..OverlayRender::default()
     })
 }
+/// The merge confirmation, shaped like the close confirmation because it has
+/// the same consequence — a workspace stops existing. Both call
+/// `render_confirm_overlay`, whose returned `primary`/`cancel` rects are the
+/// ones the hit map stores, so the button the operator sees and the button a
+/// click resolves to cannot disagree.
+fn render_confirm_merge_overlay(
+    b: &mut Buffer,
+    c: &ClientConfirmMergeOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    render_confirm_overlay(b, &c.title, &c.detail, p)
+}
+
 fn render_confirm_close_overlay(
     b: &mut Buffer,
     c: &ClientConfirmCloseOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    render_confirm_overlay(b, &c.title, &c.detail, p)
+}
+
+fn render_confirm_overlay(
+    b: &mut Buffer,
+    title: &str,
+    detail: &str,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 64, 6)?;
@@ -1381,7 +1409,7 @@ fn render_confirm_close_overlay(
         i.x,
         i.y,
         i.width,
-        &format!(" {}", c.title),
+        &format!(" {title}"),
         Style::default()
             .fg(p.red)
             .bg(p.panel_bg)
@@ -1392,7 +1420,7 @@ fn render_confirm_close_overlay(
         i.x,
         i.y + 1,
         i.width,
-        &format!(" {}", c.detail),
+        &format!(" {detail}"),
         Style::default().fg(p.text).bg(p.panel_bg),
     );
     let rs = row(i, &[13, 12], 2, 3);

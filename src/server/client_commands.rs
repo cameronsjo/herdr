@@ -43,6 +43,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "workspace.close",
     "workspace.create",
     "workspace.focus",
+    "workspace.merge",
     "workspace.move",
     "workspace.move_block",
     "workspace.rename",
@@ -255,13 +256,18 @@ mod tests {
 
     /// The fixture is the fork's contract, not upstream's.
     ///
-    /// It differs from upstream on exactly one method: `tab.move`, which this
-    /// fork extended with an optional `destination` so a tab can move to another
-    /// space, and whose `insert_index` became optional in the same change. Both
-    /// fields carry `#[serde(default, skip_serializing_if = "Option::is_none")]`,
-    /// which is this guard's own "explicitly gate new fields" escape — an older
-    /// caller omitting them still parses, and a request that omits them still
+    /// It differs from upstream on exactly one *existing* method: `tab.move`,
+    /// which this fork extended with an optional `destination` so a tab can move
+    /// to another space, and whose `insert_index` became optional in the same
+    /// change. Both fields carry
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]`, which is
+    /// this guard's own "explicitly gate new fields" escape — an older caller
+    /// omitting them still parses, and a request that omits them still
     /// serializes to the previous shape.
+    ///
+    /// It also carries one fork-added method, `workspace.merge`. A new method is
+    /// additive: it adds a key here and changes no existing digest, which is why
+    /// it needed no wire-protocol bump.
     ///
     /// If a sync makes this fail again, check *which* method moved before
     /// regenerating: a digest change on any other method is upstream's contract
