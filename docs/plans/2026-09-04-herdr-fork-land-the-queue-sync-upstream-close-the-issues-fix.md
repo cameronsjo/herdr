@@ -1,9 +1,10 @@
 ---
-status: "in-flight"
-updated: "2026-09-04"
+status: "done"
+updated: "2026-09-05"
 branch: "master"
 body_sha256: "ed963b62c5deeacd53ff2146f6b89c53956eb4d0652295f411f5b5692087c4c8"
 session: "woven-reed"
+next: "none — every step shipped; follow-ups are filed as herdr issues"
 session_id: "38b44176-e85a-4ede-9097-197a709ce939"
 machine: "cf6e768835c7"
 approved_in: "keen-chisel"
@@ -447,3 +448,67 @@ Every commit carries the producer tuple, `refs #<issue-number>` in the body, no 
   `valid_agent_name`'s charset is a fixed point of the sanitizer and runs first.
   Restore is the only reachable laundering path — which is exactly why the fix
   belongs in the setter and not in `restore.rs`.
+
+## Outcome
+
+Every step shipped.
+
+| Step | Result |
+|---|---|
+| 0 security review | 1 Critical, 7 Important; fed #18 and the sync |
+| 1 land the queue | #26 `24fbe8f7`, #27 `f86879ad` (Copilot focus-gained bug fixed before merge) |
+| 2 release | `v0.8.2-palette.4` |
+| 3 sync + #17 | #43 `c8137c07`; protocol `1220`; #17 closed |
+| 4 issue slate | #18, #19, #23, #24, #25 closed |
+| 5 reshuffle | #45 `37d77d55`, #47 `b2e00d95`, #50 `a4e39963` |
+| 6 release | `v0.8.2-palette.5`, tap bumped |
+
+closed 6 · filed 20 · net −14.
+
+Filed: #31, #34, #35, #36, #38, #39, #40, #41, #42, #44, #46, #48, #49, #51, #52, #53,
+plus #28/#29 (the CI-token fix) as PRs.
+
+### What the plan got wrong
+
+- **The sync was a port, not a merge.** Upstream's `refactor: render the shell in the
+  client` rewrote 203 files under `src/` with **zero renames detected even at 30%
+  similarity**, deleted 11 of the 61 files the fork had modified, and cut
+  `src/ui/sidebar.rs` from 3,178 lines to 296. The plan's "47 files overlap, against 3
+  conflicts last time" framing did not describe it. Resequenced with Cameron's call:
+  step 4 first (none of its files were in the restructure), then the port, then step 5
+  on the new architecture — so nothing was built twice.
+- **`refs #N` did not close issues.** The plan recorded it as a constraint. The workflow
+  read `secrets.KANGAL_GITHUB_TOKEN`, an upstream bot credential the fork does not have,
+  and had died `exit 4` on every run since the fork was cut. Fixed in #29 and verified
+  live on #23.
+- **`scripts/changelog.py` was dropped from #17's site list** as carrying no literal. It
+  reads the literal by regex, so making `PROTOCOL_VERSION` a computed expression broke
+  the release tooling.
+- **`just check` does run on this Mac** — `DEVELOPER_DIR=/Library/Developer/CommandLineTools`
+  avoids the Zig-vs-macOS-26-SDK link wall. A targeted `cargo test` is ~30s against
+  `docker-check.sh`'s ~12 minutes.
+
+### Controls the merge silently dropped
+
+Both restored; neither had a test, and nothing failed.
+
+- `WorktreeOpenEntry::display_name()` sanitized the worktree-picker label. Upstream
+  deleted that file and the replacement rebuilt the label raw, so a git branch name
+  reached `Buffer::set_stringn` verbatim — `git branch $'main\e]52;c;<b64>\a'` fires
+  OSC 52 from any pane when the operator opens the picker.
+- The fork's repo guard on `website.yml`. Upstream replaced that file with
+  `distribution.yml` and `website-deploy.yml`, which arrived unguarded.
+
+Taking upstream's `justfile` wholesale would also have dropped #25's test registration,
+because upstream extracted the list into a new `maintenance-test` recipe.
+
+### Three failures this machine cannot see
+
+Each cost a red CI run.
+
+- `tests/cli/` is `#[cfg(not(target_os = "macos"))]`.
+- The unit test binary dies on SIGPIPE before printing results (#39), so a whole-binary
+  run reports nothing at all.
+- `bash` on PATH here is Homebrew 5.3; CI's macOS runner is `/bin/bash` 3.2. A bash-3.2
+  portability fix was verified on bash 5 and the same bug shipped twice. The test now
+  pins `/bin/bash`.
