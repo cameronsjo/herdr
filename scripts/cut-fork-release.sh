@@ -6,9 +6,16 @@
 #
 # Usage:
 #   scripts/cut-fork-release.sh v0.9.0-palette.1     # cut a release
+#   scripts/cut-fork-release.sh --dry-run v0.9.0-palette.1
+#                                                    # run every precondition,
+#                                                    # tag and push nothing
 #   scripts/cut-fork-release.sh --watch v0.9.0-palette.1
 #                                                    # resume watching one
 #                                                    # already pushed
+#
+# There is no confirmation prompt: the bare form tags and pushes. Use --dry-run
+# to exercise the guards. (Written after a session ran the bare form intending
+# to test them and cut a real release.)
 #
 # Tag shape is v<upstream-version>-palette.<n>: upstream's version from
 # Cargo.toml, unchanged, plus the fork's build counter. The counter resets on
@@ -59,13 +66,21 @@ step() {
 }
 
 WATCH_ONLY=""
-if [ "${1:-}" = "--watch" ]; then
-  WATCH_ONLY="yes"
-  shift
-fi
+DRY_RUN=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --watch) WATCH_ONLY="yes"; shift ;;
+    --dry-run) DRY_RUN="yes"; shift ;;
+    --) shift; break ;;
+    -*) die "unknown option '$1'; expected --watch or --dry-run" ;;
+    *) break ;;
+  esac
+done
 
 TAG="${1:-}"
-[ -n "$TAG" ] || die "usage: scripts/cut-fork-release.sh [--watch] vMAJOR.MINOR.PATCH-palette.N"
+[ -n "$TAG" ] || die "usage: scripts/cut-fork-release.sh [--watch|--dry-run] vMAJOR.MINOR.PATCH-palette.N"
+[ -z "$WATCH_ONLY" ] || [ -z "$DRY_RUN" ] \
+  || die "--watch and --dry-run are mutually exclusive"
 
 # ---------------------------------------------------------------------------
 # 1. Tag shape. Stricter than an unanchored grep: [[ =~ ]] matches the whole
@@ -195,6 +210,12 @@ step "Checking tap visibility"
 gh api "repos/$TAP_REPO" >/dev/null 2>&1 \
   || die "cannot read $TAP_REPO -- the post-release verification needs read access to it. Fix access before cutting, or the release will publish with no way to confirm it landed."
 printf 'OK    %s readable\n' "$TAP_REPO"
+
+if [ -n "$DRY_RUN" ]; then
+  printf '\nPASS  every precondition for %s holds. Nothing was tagged or pushed.\n' "$TAG"
+  printf '      Cut it for real with: scripts/cut-fork-release.sh %s\n' "$TAG"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 6. Tag fork/master explicitly. Never HEAD: this script may be run from a
