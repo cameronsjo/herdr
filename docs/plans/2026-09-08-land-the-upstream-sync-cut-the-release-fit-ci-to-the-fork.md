@@ -1,5 +1,5 @@
 ---
-status: "in-flight"
+status: "done"
 updated: "2026-09-08"
 branch: "master"
 body_sha256: "acdde59b2200dc179b264397148404b25d588443f2397991dd08e5d93a2f674e"
@@ -8,6 +8,7 @@ session_id: "55259bb0-df0c-4587-9f13-89894903c400"
 machine: "cf6e768835c7"
 approved_in: "frost-lantern"
 approved_session_id: "221fb45e-f1d3-4262-b275-df9dd396ab8e"
+next: "none — sync, release, and CI fitting all landed; herdr server restart is the only residue, tracked on the desk"
 ---
 
 # Land the upstream sync, cut the release, fit CI to the fork
