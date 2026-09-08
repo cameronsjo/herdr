@@ -1,6 +1,6 @@
 # Sync upstream into the fork
 
-Codex will merge upstream `herdrdev/herdr` master at `792b2baa` into the fork based on `c8e54868`, preserve fork behavior, validate, and open a PR against `cameronsjo/herdr:master`. Cameron approved this approach and the merge subject `chore: sync upstream master into the fork`.
+Codex merged upstream `herdrdev/herdr` master at `792b2baa` into the fork based on `c8e54868`, preserved fork behavior, validated, and opened a PR against `cameronsjo/herdr:master`. Cameron approved this approach and the merge subject `chore: sync upstream master into the fork`.
 
 Use an isolated worktree. Preserve the fork README, palette, grouped sidebar and trailing tokens, workspace merge/move operations, integration behavior, and fork-only distribution gates. No upstream writes or release actions. Merge rather than reset/rebase so existing fork history survives.
 
@@ -10,11 +10,14 @@ This is release-risk integration across client state, input projection, and API 
 - [x] Merge and resolve conflicts, inspect behavior overlap.
 - [x] Review correctness and simplification; fix findings.
 - [x] Run `just check` and applicable scaling validation.
-- [x] Prepare the validated merge for fork PR delivery.
+- [x] Publish PR #56, verify CI, and merge with Cameron's approval.
+- [x] Fast-forward the shared checkout and remove the completed task worktree and branches.
 
-Delivery target: `cameronsjo/herdr:master`, branch `chore/sync-upstream-20260907`. Codex will push this merge and open the PR; GitHub records publication and check status.
+Status: complete. Cameron authorized merging PR #56; GitHub records merge `e839cf59` on `cameronsjo/herdr:master`. The shared checkout has been fast-forwarded to that merge.
 
-Validation results and deviations will be recorded below.
+Next action: none required for this sync; choose the next task from `master`.
+
+Validation results and deviations follow.
 
 Cameron additionally authorized simplifying fork features to reduce future sync cost. Codex is reusing upstream navigation and generic agent-list rendering, isolating palette input in its own module, and composing token alignment with upstream conditional styles. Fork moves remain server-local.
 
@@ -29,3 +32,11 @@ The final independent read-only review found no remaining actionable correctness
 `just bench-render-scale` passed (2 profiles). At fixed 120x40 geometry, grouped-agent client composition for 1 to 15 background panes measured 230 to 251 microseconds median (+9%), 243 to 305 microseconds p95 (+26%). Active panes measured 225 to 232 microseconds median (+3%), 235 to 240 microseconds p95 (+2%). Ungrouped medians were 224 to 261 microseconds background and 230 to 237 microseconds active. These are ARM Linux VM samples with SIMD disabled, not native macOS or release throughput measurements.
 
 Draft PR: https://github.com/cameronsjo/herdr/pull/56. Initial GitHub Linux, macOS, Nix, Windows packaging, and ARM64 installer checks passed. Windows passed 2,972 Rust tests then exposed the Unix-only Docker harness tests being invoked on Windows; those tests now declare their POSIX host requirement, matching the Unix installer tests. Codex verified the maintenance suite on macOS before updating the merge; no runtime code changed after the full local validation. CodeRabbit skipped the draft.
+
+Session closeout:
+
+- `gh pr view 56 --repo cameronsjo/herdr --json state,mergeCommit,mergedAt` confirmed the merge. `gh pr checks 56 --repo cameronsjo/herdr` confirmed Linux, macOS, Windows, Nix, packaging, and installer checks passed on `098d7491`.
+- CodeRabbit did not perform a review: it initially skipped the draft, then skipped the ready PR because 359 files exceeded its 150-file limit. The independent Codex review and test evidence above remain the review record; no bot verdict is claimed.
+- The disposable validation VM, task worktree, and local/remote task branches were removed. Unrelated `.pi/tasks/` work remains untouched.
+- The ARM Linux SIMD build issue is retained here as a validation-environment limitation; the platform CI checks passed. Manual installation, interactive smoke testing, and release publication were outside this sync and are not pending session work.
+- All requested sync and simplification work is complete; no follow-up issue or deferred implementation remains.
