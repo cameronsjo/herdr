@@ -24,6 +24,10 @@ concurrency:
 jobs:
   installer:
     name: installer
+    # This fork ships no Windows installer -- its one artifact is an arm64 macOS
+    # binary via cameronsjo/homebrew-tap. Gated rather than deleted so upstream
+    # can keep editing this file without a modify/delete conflict on every sync.
+    if: github.repository == 'herdrdev/herdr'
     runs-on: windows-11-arm
     timeout-minutes: 10
     steps:

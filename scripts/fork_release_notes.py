@@ -18,7 +18,17 @@ FIELD_RE = re.compile(r"^(?P<key>[a-z_]+)=(?P<value>.*)$", re.MULTILINE)
 # a quote and escape that string literal, so the shape is enforced here rather
 # than trusted — upstream's release workflow checked the tag against Cargo.toml,
 # and this fork's pipeline dropped that step.
-TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-palette\.\d+)?$")
+#
+# The palette segment is mandatory. It used to be optional, which meant an
+# upstream tag reaching this fork — the sync fetch imports them — composed valid
+# notes for a palette-less release and dispatched a formula bump for it. A bare
+# v0.9.0 sorts ABOVE v0.9.0-palette.1 in Homebrew's ordering, so brew would pin
+# the palette-less build and never upgrade back: a silent downgrade rather than
+# a visible error. release.yml's tag filter is the first gate; this is the second.
+# [0-9] rather than \d, which is Unicode-wide and would accept v١.٢.٣; and
+# fullmatch below rather than match, because Python's $ also matches before a
+# trailing newline.
+TAG_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+-palette\.[0-9]+")
 
 TEMPLATE = """\
 Fork build of herdr carrying the command palette, built from `{commit}`.
@@ -63,10 +73,10 @@ def main() -> int:
     parser.add_argument("--artifact", default="herdr-macos-aarch64")
     args = parser.parse_args()
 
-    if not TAG_RE.match(args.tag):
+    if not TAG_RE.fullmatch(args.tag):
         raise SystemExit(
             f"refusing to compose notes for tag {args.tag!r}: "
-            "expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-palette.N"
+            "expected vMAJOR.MINOR.PATCH-palette.N"
         )
 
     fields = parse_build_info(args.build_info.read_text(encoding="utf-8"))

@@ -38,6 +38,10 @@ concurrency:
 jobs:
   flake-check:
     name: flake check
+    # This fork distributes no Nix package -- its one artifact is an arm64 macOS
+    # binary via cameronsjo/homebrew-tap. Gated rather than deleted so upstream
+    # can keep editing this file without a modify/delete conflict on every sync.
+    if: github.repository == 'herdrdev/herdr'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
