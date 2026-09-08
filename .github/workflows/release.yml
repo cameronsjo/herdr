@@ -13,10 +13,15 @@ name: Release
 # Zig 0.15.2, whose bundled libSystem predates the macOS 26 SDK, so a native
 # build fails to link (herdrdev/herdr#285).
 
+# Palette-shaped tags only. A plain upstream tag reaching this fork -- the sync
+# fetch imports them -- would otherwise publish a real fork release and dispatch
+# a formula bump, and a bare v0.9.0 sorts ABOVE v0.9.0-palette.1 in Homebrew's
+# ordering. Brew would pin the palette-less build and never upgrade back: a
+# silent downgrade, not a visible error.
 on:
   push:
     tags:
-      - "v*"
+      - "v*-palette.[0-9]*"
 
 permissions:
   contents: read

@@ -33,6 +33,24 @@ to keep using it in the meantime, and goes away if upstream takes it.
 
 `master` tracks upstream and is rebuilt after each release.
 
+## Maintaining the fork
+
+Check how far behind upstream this fork has drifted:
+
+```sh
+scripts/upstream-drift.sh
+```
+
+It prints the commit counts either way and the newest upstream tag, and exits
+non-zero when the fork is behind. There is no scheduled sync — conflicts are the
+normal case here, so the weekly job only ever produced a red run nobody read.
+Sync on demand with `gh workflow run "Sync upstream"`, or merge `origin/master`
+into a branch by hand.
+
+Cut a release with `scripts/cut-fork-release.sh v<upstream-version>-palette.<n>`
+(add `--dry-run` first). It tags `master`, and CI builds the binary, publishes
+it, and bumps the Homebrew formula.
+
 ## Install
 
 macOS only.

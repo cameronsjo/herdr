@@ -8,11 +8,13 @@ name: Sync upstream
 # it — CI does not run on the sync PR. Close and reopen it (or push a commit)
 # to get a CI run before merging.
 
+# The weekly schedule was removed after failing 5/5 runs since 2026-08-10. A
+# conflicting merge is the normal case for this fork, not the exception, so the
+# cron produced a red run every week and nobody read the fifth one. Dispatch is
+# kept so a maintainer -- or a future automated one -- still has an entry point.
+# Drift detection moved to scripts/upstream-drift.sh, which answers on demand.
+# Do not restore the schedule without fixing why the merges conflict.
 on:
-  schedule:
-    # Mondays, 08:23 UTC — off the hour so it is not queued behind everything
-    # else scheduled at :00.
-    - cron: "23 8 * * 1"
   workflow_dispatch:
 
 permissions:
