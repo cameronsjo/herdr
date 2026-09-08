@@ -145,18 +145,24 @@ tag_on_remote=""
 printf '%s\n' "$remote_tags" | grep -q "refs/tags/$TAG\$" && tag_on_remote="yes" || true
 
 if [ -n "$tag_on_remote" ]; then
-  die "$TAG is already published on $FORK_REPO. A published palette tag is never reused -- re-pushing overwrites the asset while installed formulae stay pinned to the old sha256. Cut the next counter instead."
-fi
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  if [ -n "$WATCH_ONLY" ]; then
-    die "$TAG exists locally but was never pushed, so there is nothing to watch. Discard it (git tag -d $TAG) and rerun without --watch."
-  fi
+  # Published is exactly the state --watch exists for: rejoining a cut whose
+  # push succeeded and whose watching half was interrupted.
+  [ -n "$WATCH_ONLY" ] \
+    || die "$TAG is already published on $FORK_REPO. A published palette tag is never reused -- re-pushing overwrites the asset while installed formulae stay pinned to the old sha256. Cut the next counter instead. (To rejoin a cut already in flight: --watch $TAG)"
+  tagged="$(printf '%s\n' "$remote_tags" \
+    | sed -n "s#^\([0-9a-f]*\)[[:space:]]*refs/tags/$TAG^{}\$#\1#p")"
+  [ -n "$tagged" ] || tagged="$(printf '%s\n' "$remote_tags" \
+    | sed -n "s#^\([0-9a-f]*\)[[:space:]]*refs/tags/$TAG\$#\1#p")"
+  printf 'OK    %s is published (%s) -- resuming at the watch step\n' "$TAG" "$tagged"
+elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  [ -z "$WATCH_ONLY" ] \
+    || die "$TAG exists locally but was never pushed, so there is nothing to watch. Discard it (git tag -d $TAG) and rerun without --watch."
   die "$TAG exists locally but is NOT on $FORK_REPO -- an interrupted run, not a published release. Safe to discard: git tag -d $TAG, then rerun."
+else
+  [ -z "$WATCH_ONLY" ] \
+    || die "--watch needs a tag already pushed to $FORK_REPO; $TAG is on neither side."
+  printf 'OK    %s is free\n' "$TAG"
 fi
-if [ -n "$WATCH_ONLY" ]; then
-  die "--watch needs a tag already pushed to $FORK_REPO; $TAG is on neither side."
-fi
-printf 'OK    %s is free\n' "$TAG"
 
 # ---------------------------------------------------------------------------
 # 4. Leaked-upstream-tag check, derived from the tag under cut rather than a
@@ -165,6 +171,15 @@ printf 'OK    %s is free\n' "$TAG"
 #    no guard. Any PLAIN vX.Y.Z on the fork that sorts at or above this
 #    release's base version is a downgrade waiting to happen.
 # ---------------------------------------------------------------------------
+if [ -n "$WATCH_ONLY" ]; then
+  # Steps 4-7 decide whether a tag SHOULD be cut. Under --watch it already was,
+  # so re-running them can only produce a refusal about a decision already made.
+  step "Checking tap visibility"
+  gh api "repos/$TAP_REPO" >/dev/null 2>&1 \
+    || die "cannot read $TAP_REPO -- the verification below needs read access to it"
+  printf 'OK    %s readable\n' "$TAP_REPO"
+else
+
 step "Checking for leaked upstream tags"
 plain_tags="$(printf '%s\n' "$remote_tags" \
   | sed -n 's#.*refs/tags/\(v[0-9][0-9.]*\)$#\1#p' \
@@ -240,6 +255,8 @@ printf 'OK    %s -> %s\n' "$TAG" "$tagged"
 step "Pushing $TAG"
 git push --no-follow-tags "$FORK_REMOTE" "refs/tags/$TAG"
 printf 'OK    pushed. From here, rejoin with: scripts/cut-fork-release.sh --watch %s\n' "$TAG"
+
+fi  # end of the cut-only half; --watch resumes here
 
 # ---------------------------------------------------------------------------
 # 8. Watch the Release run. --branch "$TAG" is a sound correlation here because
