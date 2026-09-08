@@ -10,7 +10,7 @@ pub(crate) struct OverlayRender {
     pub(crate) cancel: Rect,
     pub(crate) navigator_popup: Rect,
     pub(crate) navigator_search: Rect,
-    pub(crate) navigator_rows: Vec<(Rect, usize)>,
+    pub(crate) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
     pub(crate) palette_popup: Rect,
     pub(crate) palette_rows: Vec<(Rect, usize)>,
     pub(crate) palette_max_scroll: usize,
@@ -39,6 +39,8 @@ pub(crate) fn render_client_overlay(
     b: &mut Buffer,
     o: &ClientShellOverlay,
     s: &ClientShellSnapshot,
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
     k: &LiveKeybindConfig,
     p: &Palette,
 ) -> Option<OverlayRender> {
@@ -65,7 +67,9 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
         ClientShellOverlay::ConfirmMerge(v) => render_confirm_merge_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
-        ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p),
+        ClientShellOverlay::Navigator(v) => {
+            render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
+        }
         ClientShellOverlay::Palette(v) => render_palette_overlay(b, v, s, k, p),
         ClientShellOverlay::PaneSplitDirection(v) => render_pane_split_direction_overlay(b, v, p),
         ClientShellOverlay::Settings(v) => {
@@ -678,103 +682,11 @@ fn render_rename_overlay(
     })
 }
 
-pub(crate) fn client_navigator_rows(
-    s: &ClientShellSnapshot,
-    n: &ClientNavigatorOverlay,
-) -> Vec<ClientNavigatorRow> {
-    let q = n.query.trim().to_lowercase();
-    let filter = |st| match n.filter {
-        Some(ClientNavigatorFilter::Blocked) => st == crate::api::schema::AgentStatus::Blocked,
-        Some(ClientNavigatorFilter::Working) => st == crate::api::schema::AgentStatus::Working,
-        Some(ClientNavigatorFilter::Idle) => st == crate::api::schema::AgentStatus::Idle,
-        Some(ClientNavigatorFilter::Done) => st == crate::api::schema::AgentStatus::Done,
-        None => true,
-    };
-    let text = |v: &str| q.is_empty() || v.to_lowercase().contains(&q);
-    let filtering = n.filter.is_some() || !q.is_empty();
-    let mut out = Vec::new();
-    // While armed the navigator is picking a destination, and "a new space" is
-    // a destination no existing row can name.
-    if n.move_armed() {
-        out.push(ClientNavigatorRow {
-            depth: 0,
-            label: "new space".to_owned(),
-            meta: "move into a space created for it".to_owned(),
-            status: crate::api::schema::AgentStatus::Unknown,
-            current: false,
-            target: ClientNavigatorTarget::NewWorkspace,
-        });
-    }
-    for w in &s.workspaces {
-        let mut children = Vec::new();
-        for t in s.tabs.iter().filter(|t| t.workspace_id == w.workspace_id) {
-            let mut panes = Vec::new();
-            for (ix, p) in s.panes.iter().filter(|p| p.tab_id == t.tab_id).enumerate() {
-                let a = s.agents.iter().find(|a| a.pane_id == p.pane_id);
-                let st = a
-                    .map(|a| a.agent_status)
-                    .unwrap_or(crate::api::schema::AgentStatus::Unknown);
-                let label = p
-                    .label
-                    .clone()
-                    .or_else(|| a.and_then(|a| a.name.clone()))
-                    .or_else(|| a.and_then(|a| a.display_agent.clone()))
-                    .or_else(|| a.and_then(|a| a.title.clone()))
-                    .unwrap_or_else(|| format!("pane {}", ix + 1));
-                let meta = p
-                    .foreground_cwd
-                    .clone()
-                    .or_else(|| p.cwd.clone())
-                    .unwrap_or_default();
-                if !filtering || filter(st) && (text(&label) || text(&meta)) {
-                    panes.push(ClientNavigatorRow {
-                        depth: 2,
-                        label,
-                        meta,
-                        status: st,
-                        current: s.focused_pane_id.as_deref() == Some(&p.pane_id),
-                        target: ClientNavigatorTarget::Pane(p.pane_id.clone()),
-                    })
-                }
-            }
-            if !filtering || filter(t.agent_status) && text(&t.label) || !panes.is_empty() {
-                children.push(ClientNavigatorRow {
-                    depth: 1,
-                    label: t.label.clone(),
-                    meta: format!(
-                        "{} panes",
-                        s.panes.iter().filter(|p| p.tab_id == t.tab_id).count()
-                    ),
-                    status: t.agent_status,
-                    current: s.focused_tab_id.as_deref() == Some(&t.tab_id),
-                    target: ClientNavigatorTarget::Tab(t.tab_id.clone()),
-                });
-                children.extend(panes)
-            }
-        }
-        let wm =
-            filter(w.agent_status) && (text(&w.label) || w.branch.as_deref().is_some_and(&text));
-        if !filtering || wm || !children.is_empty() {
-            out.push(ClientNavigatorRow {
-                depth: 0,
-                label: w.label.clone(),
-                meta: w.branch.clone().unwrap_or_default(),
-                status: w.agent_status,
-                current: s.focused_workspace_id.as_deref() == Some(&w.workspace_id),
-                target: ClientNavigatorTarget::Workspace(w.workspace_id.clone()),
-            });
-            if n.expanded_workspaces.contains(&w.workspace_id) || filtering {
-                out.extend(children)
-            }
-        }
-    }
-    out
-}
-
 fn render_navigator_overlay(
     b: &mut Buffer,
     n: &ClientNavigatorOverlay,
-    s: &ClientShellSnapshot,
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let a = b.area;
@@ -787,7 +699,7 @@ fn render_navigator_overlay(
         a.height.saturating_sub(my * 2).max(4),
     );
     let i = panel(b, q, p.accent, p.panel_bg)?;
-    let rows = client_navigator_rows(s, n);
+    let rows = super::navigator_moves::navigator_rows(endpoints, active_endpoint_id, n);
     let search = if n.search_focused {
         format!(" / {}", n.query)
     } else if let Some(f) = n.filter {
@@ -819,7 +731,12 @@ fn render_navigator_overlay(
         b,
         i,
         i.y,
-        &format!("{} panes", s.panes.len()),
+        &format!(
+            "{} panes",
+            rows.iter()
+                .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
+                .count()
+        ),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(
@@ -831,14 +748,12 @@ fn render_navigator_overlay(
         Style::default().fg(p.surface1).bg(p.panel_bg),
     );
     let body = Rect::new(i.x, i.y + 2, i.width, i.height.saturating_sub(4));
+    let selected = super::aggregate_navigation::navigator_selected_index(&rows, n).unwrap_or(0);
     let max = rows.len().saturating_sub(body.height as usize);
     let scroll = n
         .scroll
-        .max(
-            n.selected
-                .saturating_sub(body.height.saturating_sub(1) as usize),
-        )
-        .min(n.selected)
+        .max(selected.saturating_sub(body.height.saturating_sub(1) as usize))
+        .min(selected)
         .min(max);
     let mut row_hits = Vec::new();
     for (vis, (ix, r)) in rows
@@ -849,8 +764,17 @@ fn render_navigator_overlay(
         .enumerate()
     {
         let rect = Rect::new(body.x, body.y + vis as u16, body.width, 1);
-        row_hits.push((rect, ix));
-        let st = if ix == n.selected {
+        row_hits.push((rect, r.target.clone()));
+        let st = if r.stale {
+            Style::default()
+                .fg(p.overlay0)
+                .bg(if ix == selected {
+                    p.surface0
+                } else {
+                    p.panel_bg
+                })
+                .add_modifier(Modifier::DIM)
+        } else if ix == selected {
             Style::default()
                 .fg(contrast(p))
                 .bg(p.accent)
@@ -861,23 +785,93 @@ fn render_navigator_overlay(
                 .bg(p.panel_bg)
         };
         b.set_style(rect, st);
-        let tree = match r.depth {
-            0 => match &r.target {
-                ClientNavigatorTarget::Workspace(id) if n.expanded_workspaces.contains(id) => "▾",
-                _ => "▸",
-            },
-            1 => "└──",
-            _ => "   └──",
+        let tree = match &r.target {
+            ClientNavigatorTarget::Machine { .. } => "▾",
+            ClientNavigatorTarget::NewWorkspace => "+",
+            ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            } if n
+                .expanded_workspaces
+                .contains(&(endpoint_id.clone(), workspace_id.clone())) =>
+            {
+                if r.depth == 0 {
+                    "▾"
+                } else {
+                    "  ▾"
+                }
+            }
+            ClientNavigatorTarget::Workspace { .. } => {
+                if r.depth == 0 {
+                    "▸"
+                } else {
+                    "  ▸"
+                }
+            }
+            ClientNavigatorTarget::Tab { .. } => {
+                if r.depth == 1 {
+                    "└──"
+                } else {
+                    "    └──"
+                }
+            }
+            ClientNavigatorTarget::Pane { .. } => {
+                if r.depth == 2 {
+                    "   └──"
+                } else {
+                    "        └──"
+                }
+            }
         };
-        let label = format!(
-            " {} {} {} {}",
-            if r.current { "◆" } else { " " },
-            tree,
-            status_dot(r.status),
-            r.label
-        );
+        let current = if r.current { "◆ " } else { "" };
+        let status = r.status.map(status_dot).unwrap_or_default();
+        let status_separator = if status.is_empty() { "" } else { " " };
+        let label = format!(" {tree} {current}{status}{status_separator}{}", r.label);
         put_text(b, rect.x, rect.y, rect.width, &label, st);
-        if !r.meta.is_empty() {
+        if let Some(status) = r.status {
+            let prefix = format!(" {tree} {current}");
+            let status_style = if r.stale || ix == selected {
+                st
+            } else {
+                Style::default().fg(status_color(status, p)).bg(p.panel_bg)
+            };
+            put_text(
+                b,
+                rect.x.saturating_add(display_width(&prefix)),
+                rect.y,
+                display_width(status_dot(status)),
+                status_dot(status),
+                status_style,
+            );
+        }
+        let machine_status = match &r.target {
+            ClientNavigatorTarget::Machine { endpoint_id } if !endpoint_id.is_local() => endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .map(|endpoint| endpoint.status),
+            _ => None,
+        };
+        if let Some(status) = machine_status {
+            let (glyph, state, color) = endpoint_status_presentation(status, p);
+            let signal = if status == ClientEndpointStatus::Online {
+                glyph.to_owned()
+            } else {
+                format!("{glyph} {state}")
+            };
+            let signal_style = if ix == selected {
+                st
+            } else {
+                Style::default()
+                    .fg(color)
+                    .bg(p.panel_bg)
+                    .add_modifier(if r.stale {
+                        Modifier::DIM
+                    } else {
+                        Modifier::empty()
+                    })
+            };
+            put_right_text(b, rect, rect.y, &signal, signal_style);
+        } else if !r.meta.is_empty() {
             let label_width = display_width(&label).min(rect.width);
             let meta = Rect::new(
                 rect.x.saturating_add(label_width).saturating_add(1),
@@ -889,7 +883,7 @@ fn render_navigator_overlay(
         }
     }
     let dy = i.bottom() - 2;
-    if let Some(r) = rows.get(n.selected) {
+    if let Some(r) = rows.get(selected) {
         // While armed, the row's own identity matters less than what accepting
         // it does, and nothing else on screen says which destination a depth
         // implies.
@@ -906,10 +900,12 @@ fn render_navigator_overlay(
         } else if n.pending_pane_move.is_some() {
             match r.target {
                 ClientNavigatorTarget::NewWorkspace => " moves this pane to a new space".to_owned(),
-                ClientNavigatorTarget::Workspace(_) => {
+                ClientNavigatorTarget::Workspace { .. } => {
                     " moves this pane to a new tab here".to_owned()
                 }
-                ClientNavigatorTarget::Tab(_) | ClientNavigatorTarget::Pane(_) => {
+                ClientNavigatorTarget::Tab { .. }
+                | ClientNavigatorTarget::Pane { .. }
+                | ClientNavigatorTarget::Machine { .. } => {
                     " splits this pane into this tab".to_owned()
                 }
             }

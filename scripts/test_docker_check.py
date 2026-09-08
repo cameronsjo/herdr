@@ -15,6 +15,7 @@ No Docker or cargo nextest is required to run these.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -83,6 +84,7 @@ done
     )
 
 
+@unittest.skipUnless(os.name == "posix", "Docker fallback harness requires a POSIX host")
 class DockerCheckRetryTests(unittest.TestCase):
     def test_flaky_failure_passes_on_retry_and_is_not_reported(self) -> None:
         """The issue's acceptance bar: a test that fails once (the full run)

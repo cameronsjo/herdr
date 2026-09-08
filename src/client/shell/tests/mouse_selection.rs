@@ -835,14 +835,14 @@ fn tab_dragged_onto_a_sidebar_space_moves_the_whole_tab_there() {
     };
     assert!(matches!(
         &request.method,
-        crate::api::schema::Method::TabMove(params)
+        crate::api::schema::Method::TabMoveToDestination(params)
             if params.tab_id == "tab_1"
                 && matches!(
                     params.destination,
-                    Some(crate::api::schema::TabMoveDestination::Workspace {
+                    crate::api::schema::TabMoveDestination::Workspace {
                         ref workspace_id,
                         insert_index: None,
-                    }) if workspace_id == "ws_2"
+                    } if workspace_id == "ws_2"
                 )
     ));
 }
@@ -887,10 +887,10 @@ fn tab_dragged_onto_a_scrolled_space_list_targets_the_row_that_was_drawn() {
     };
     assert!(matches!(
         &request.method,
-        crate::api::schema::Method::TabMove(params)
+        crate::api::schema::Method::TabMoveToDestination(params)
             if matches!(
                 params.destination,
-                Some(crate::api::schema::TabMoveDestination::Workspace { ref workspace_id, .. })
+                crate::api::schema::TabMoveDestination::Workspace { ref workspace_id, .. }
                     if workspace_id == &first_visible_id
             )
     ));

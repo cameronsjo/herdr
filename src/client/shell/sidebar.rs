@@ -4,7 +4,9 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-fn collapsed_sidebar_sections(area: Rect) -> (Rect, Option<u16>, Rect) {
+pub(in crate::client::shell) fn collapsed_sidebar_sections(
+    area: Rect,
+) -> (Rect, Option<u16>, Rect) {
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
@@ -85,6 +87,7 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.workspaces.push(WorkspaceHit {
             rect,
+            endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
             indented: false,
             group_toggle: None,
@@ -294,19 +297,6 @@ pub(crate) fn render_sidebar(
         let selected = state.selected_workspace_id == Some(workspace.workspace_id.as_str());
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
         let drop_target = state.drop_target_workspace_id == Some(workspace.workspace_id.as_str());
-        // A drop target reads as a selection: it is the row the release acts
-        // on. A theme whose selection background is Reset would draw nothing at
-        // all, so a drop target falls back to the drag surface — a drop target
-        // the operator cannot see is worse than one styled slightly off.
-        if drop_target && palette.selection_bg == ratatui::style::Color::Reset {
-            buffer.set_style(rect, Style::default().bg(palette.surface1));
-        } else if drop_target || selected {
-            buffer.set_style(rect, Style::default().bg(palette.selection_bg));
-        } else if dragged {
-            buffer.set_style(rect, Style::default().bg(palette.surface1));
-        } else if workspace.focused {
-            buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-        }
         render_workspace_rows(
             buffer,
             rect,
@@ -315,7 +305,8 @@ pub(crate) fn render_sidebar(
             config.status_indicators,
             entry,
             rows,
-            selected,
+            true,
+            workspace_selection_background(selected, drop_target, palette),
             dragged,
             palette,
         );
@@ -337,6 +328,7 @@ pub(crate) fn render_sidebar(
         });
         hits.workspaces.push(WorkspaceHit {
             rect,
+            endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
             indented: entry.indented,
             group_toggle,
@@ -447,17 +439,6 @@ pub(crate) fn render_sidebar(
     );
 }
 
-pub(crate) fn render_sidebar_background(buffer: &mut Buffer, area: Rect, palette: &Palette) {
-    buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
-    let separator_x = area.right().saturating_sub(1);
-    for y in area.y..area.bottom() {
-        if let Some(cell) = buffer.cell_mut((separator_x, y)) {
-            cell.set_symbol("│");
-            cell.set_style(Style::default().fg(palette.surface_dim));
-        }
-    }
-}
-
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
@@ -547,7 +528,7 @@ pub(crate) fn workspace_entries(
     entries
 }
 
-fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
+pub(super) fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
     let workspace = snapshot.workspaces.get(index)?;
     let worktree = workspace.worktree.as_ref()?;
     if worktree.is_linked_worktree {
@@ -567,7 +548,7 @@ fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<Stri
         .then(|| worktree.key.clone())
 }
 
-fn displayed_workspace_status(
+pub(super) fn displayed_workspace_status(
     snapshot: &ClientShellSnapshot,
     workspace: &ClientShellWorkspace,
     collapsed_groups: &HashSet<String>,
@@ -596,7 +577,7 @@ fn displayed_workspace_status(
         .unwrap_or(workspace.agent_status)
 }
 
-fn workspace_rows(
+pub(in crate::client::shell) fn workspace_rows(
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
     indented: bool,
@@ -625,7 +606,21 @@ fn workspace_rows(
     )
 }
 
-fn render_workspace_rows(
+pub(in crate::client::shell) fn workspace_selection_background(
+    selected: bool,
+    drop_target: bool,
+    palette: &Palette,
+) -> Option<ratatui::style::Color> {
+    (selected || drop_target).then_some(
+        if drop_target && palette.selection_bg == ratatui::style::Color::Reset {
+            palette.surface1
+        } else {
+            palette.selection_bg
+        },
+    )
+}
+
+pub(in crate::client::shell) fn render_workspace_rows(
     buffer: &mut Buffer,
     area: Rect,
     workspace: &ClientShellWorkspace,
@@ -633,7 +628,8 @@ fn render_workspace_rows(
     indicators: crate::config::StatusIndicatorStyle,
     entry: &WorkspaceEntry,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
-    selected: bool,
+    endpoint_active: bool,
+    selection_background: Option<ratatui::style::Color>,
     dragged: bool,
     palette: &Palette,
 ) {
@@ -668,7 +664,7 @@ fn render_workspace_rows(
         } else {
             x = x.saturating_add(3);
         }
-        let highlighted = workspace.focused || dragged;
+        let highlighted = endpoint_active && workspace.focused || dragged;
         let workspace_style = Style::default()
             .fg(if highlighted {
                 palette.text
@@ -680,7 +676,7 @@ fn render_workspace_rows(
             } else {
                 Modifier::empty()
             });
-        let secondary_style = Style::default().fg(if workspace.focused {
+        let secondary_style = Style::default().fg(if endpoint_active && workspace.focused {
             palette.mauve
         } else {
             palette.overlay0
@@ -706,11 +702,11 @@ fn render_workspace_rows(
         );
     }
 
-    let background = if selected {
-        Some(palette.selection_bg)
+    let background = if selection_background.is_some() {
+        selection_background
     } else if dragged {
         Some(palette.surface1)
-    } else if workspace.focused {
+    } else if endpoint_active && workspace.focused {
         Some(palette.active_row_bg)
     } else {
         None

@@ -183,6 +183,7 @@ impl App {
             return tab_not_found(id, &params.tab_id);
         }
 
+        let legacy_reorder = params.destination.is_none();
         let Some(destination) = params.resolved_destination() else {
             return encode_error(
                 id,
@@ -193,7 +194,7 @@ impl App {
 
         match destination {
             TabMoveDestination::Index { insert_index } => {
-                self.tab_move_within_workspace(id, ws_idx, tab_idx, insert_index)
+                self.tab_move_within_workspace(id, ws_idx, tab_idx, insert_index, legacy_reorder)
             }
             TabMoveDestination::Workspace {
                 workspace_id,
@@ -227,6 +228,7 @@ impl App {
         ws_idx: usize,
         tab_idx: usize,
         insert_index: usize,
+        legacy_reorder: bool,
     ) -> String {
         let Some(ws) = self.state.workspaces.get(ws_idx) else {
             return encode_error(id, "tab_move_failed", "workspace is unavailable");
@@ -260,6 +262,10 @@ impl App {
                     tabs: tabs.clone(),
                 },
             });
+        }
+
+        if legacy_reorder {
+            return encode_success(id, ResponseResult::TabList { tabs });
         }
 
         encode_success(
@@ -726,11 +732,9 @@ mod tests {
         );
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::TabMove { move_result, tabs } = success.result else {
+        let ResponseResult::TabList { tabs } = success.result else {
             panic!("expected tab move result");
         };
-        assert!(move_result.changed);
-        assert_eq!(move_result.reason, None);
         assert_eq!(app.state.workspaces[0].tabs[2].root_pane, moved_root);
         assert_eq!(tabs[2].tab_id, app.public_tab_id(0, 2).unwrap());
         let events = event_hub.events_after(0);
@@ -777,17 +781,18 @@ mod tests {
         let previous_tab_id = app.public_tab_id(0, 1).unwrap();
         let target_workspace_id = app.public_workspace_id(1);
 
-        let response = app.handle_tab_move(
-            "req".into(),
-            TabMoveParams {
-                tab_id: previous_tab_id.clone(),
-                insert_index: None,
-                destination: Some(TabMoveDestination::Workspace {
-                    workspace_id: target_workspace_id.clone(),
-                    insert_index: None,
-                }),
-            },
-        );
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::TabMoveToDestination(
+                crate::api::schema::TabMoveToDestinationParams {
+                    tab_id: previous_tab_id.clone(),
+                    destination: TabMoveDestination::Workspace {
+                        workspace_id: target_workspace_id.clone(),
+                        insert_index: None,
+                    },
+                },
+            ),
+        });
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         let ResponseResult::TabMove { move_result, .. } = success.result else {
@@ -1198,10 +1203,10 @@ mod tests {
         );
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::TabMove { move_result, .. } = success.result else {
+        let ResponseResult::TabList { tabs } = success.result else {
             panic!("expected tab move result");
         };
-        assert!(move_result.changed);
+        assert_eq!(tabs.len(), 2);
         assert_eq!(app.state.workspaces[0].tabs[1].root_pane, moved_root);
     }
 

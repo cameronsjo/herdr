@@ -102,7 +102,7 @@ Raw socket method names use dot notation:
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.merge`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
-| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.close` |
+| Tab | `tab.create`, `tab.list`, `tab.get`, `tab.focus`, `tab.rename`, `tab.move`, `tab.move_to_destination`, `tab.close` |
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
@@ -177,11 +177,12 @@ pane.
 
 Clients can treat `offset_from_bottom == 0` as at-bottom state.
 
-### Experimental pane graphics
+### Pane graphics
 
-Pane graphics let a plugin place image data over a pane. They are available
-only when `[experimental].kitty_graphics = true`; otherwise every pane graphics
-method returns `feature_disabled`. Calling `pane.graphics.info` explicitly
+Pane graphics let a plugin place image data over a pane. They are available by
+default; when the server has `[terminal].kitty_graphics = false`, every pane
+graphics method returns `feature_disabled`. Changing this setting requires a
+server restart. Calling `pane.graphics.info` explicitly
 activates capability discovery and returns the attached client's cell size,
 file-frame options, pixel-mouse support, the 16-layer limit, and `pane_visible`.
 `pane_visible` is true only when the target is in the active workspace and tab
@@ -945,8 +946,11 @@ Errors look like this:
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH
 servers. Client and server builds do not need to match. During connection setup,
 they agree on the core snapshot, screen, input, and blob codecs, and the server advertises
-the API methods it supports. A missing method disables only that action on that
-server and shows a client-local notice; it does not disconnect the UI. Rejected
+the API methods and optional capabilities it supports. Saved SSH federation requires the
+`surface_interest` capability so only the selected machine streams a pane surface and the
+`health_check` capability so a quiet broken connection cannot remain Online indefinitely. A server
+without this lifecycle support stays at Attention until it is explicitly updated. Other missing methods disable
+only those actions and show a client-local notice; they do not disconnect the UI. Rejected
 or timed-out actions are also reported without ending the connection. Servers
 from before endpoint generation 1 need one final update.
 
@@ -954,3 +958,16 @@ The numbered binary protocol remains for same-install and internal operations,
 including direct terminal attach and live handoff. Check `ping` or `herdr status`
 before using those operations across different builds. JSON API clients should
 ignore unknown fields and handle unsupported methods as normal errors.
+
+### Moving tabs between workspaces (fork)
+
+`tab.move` with `tab_id` and `insert_index` reorders within a workspace and
+returns `tab_list`, matching upstream clients. Cross-workspace moves use the
+separately advertised `tab.move_to_destination` method with `tab_id` and a
+required `destination`: `{ "type": "workspace", "workspace_id": "w2" }` or
+`{ "type": "new_workspace" }`. It returns `tab_move` with `move_result` and
+`tabs`. The older fork `tab.move` destination form remains accepted.
+
+The client checks the selected server's advertised methods before offering a
+request that depends on destination support. Moves and workspace merges stay
+within that server; IDs on another machine are not valid destinations.

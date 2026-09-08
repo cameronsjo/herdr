@@ -70,6 +70,12 @@ herdr agent list
 
 Server errors are JSON on stderr, exit status 1. Syntax errors exit status 2.
 
+## Multiple machines
+
+IDs and live agent names are scoped to one server; two machines can both have `w1:p1`. Selecting a machine in the TUI does not retarget a command running in a pane: its inherited session and socket still choose the server. Run remote commands on the intended host with its explicit session and discover IDs there.
+
+`herdr machine list --json` lists saved connection profiles, not a combined pane inventory. Change profiles only when asked. Removing a profile disconnects the client without stopping the remote session. Do not approve an incompatible server replacement without the user's consent.
+
 ## References
 
 - `references/cli-semantics.md` — command discovery, opaque IDs, ID churn after `pane move`, JSON result paths

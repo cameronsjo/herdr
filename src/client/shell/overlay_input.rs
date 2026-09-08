@@ -218,18 +218,18 @@ impl ClientShellState {
         pending_tab_move: Option<String>,
         pending_workspace_merge: Option<String>,
     ) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
-            return;
-        };
-        let expanded_workspaces = snapshot
-            .workspaces
-            .iter()
-            .map(|workspace| workspace.workspace_id.clone())
-            .collect();
+        let expanded_workspaces =
+            super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
+                .flat_map(|endpoint| {
+                    endpoint.snapshot.workspaces.iter().map(move |workspace| {
+                        (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
+                    })
+                })
+                .collect();
         let mut navigator = ClientNavigatorOverlay {
             query: String::new(),
             search_focused: false,
-            selected: 0,
+            selected: None,
             scroll: 0,
             filter: None,
             expanded_workspaces,
@@ -237,247 +237,13 @@ impl ClientShellState {
             pending_tab_move,
             pending_workspace_merge,
         };
-        let rows = render::client_navigator_rows(snapshot, &navigator);
-        navigator.selected = rows.iter().position(|row| row.current).unwrap_or(0);
+        let rows =
+            render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, &navigator);
+        navigator.selected = rows
+            .iter()
+            .find(|row| row.current)
+            .map(|row| row.target.clone());
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
-    }
-
-    pub(super) fn open_palette_overlay(&mut self, outcome: &mut ClientShellInput) {
-        self.overlay = Some(ClientShellOverlay::Palette(ClientPaletteOverlay {
-            recent_command_ids: self.recent_command_ids.clone(),
-            ..ClientPaletteOverlay::default()
-        }));
-        self.chrome_drag = None;
-        // Plugin actions and panes are server-owned facts; ask for them once
-        // per open rather than caching a list that goes stale on plugin
-        // enable/disable. The palette renders its core rows meanwhile.
-        let list = crate::api::schema::Method::PluginList(crate::api::schema::PluginListParams {
-            plugin_id: None,
-        });
-        // An endpoint too old to list plugins simply has no plugin rows to
-        // offer; that is not worth an "action unavailable" notice over a
-        // palette the operator opened for its core commands.
-        if self.supports_endpoint_method(&list) {
-            self.push_endpoint_method_with_kind(
-                list,
-                PendingEndpointKind::PalettePluginList,
-                outcome,
-            );
-        }
-    }
-
-    pub(super) fn receive_palette_plugins(
-        &mut self,
-        installed: Vec<crate::api::schema::InstalledPluginInfo>,
-        host_platform: Option<crate::api::schema::PluginPlatform>,
-    ) -> bool {
-        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
-            return false;
-        };
-        palette.plugins = super::palette::PalettePlugins {
-            installed,
-            host_platform,
-        };
-        palette.selected = 0;
-        palette.scroll = 0;
-        true
-    }
-
-    pub(super) fn filtered_palette_commands(&self) -> Vec<super::palette::PaletteCommand> {
-        let (Some(snapshot), Some(ClientShellOverlay::Palette(palette))) =
-            (self.snapshot.as_deref(), self.overlay.as_ref())
-        else {
-            return Vec::new();
-        };
-        super::palette::filtered_palette_commands(
-            &palette.query,
-            &palette.recent_command_ids,
-            &self.config.keybinds,
-            &palette.plugins,
-            snapshot,
-        )
-    }
-
-    fn palette_body_height(&self) -> usize {
-        self.last_composed_size
-            .and_then(|(cols, rows)| super::palette::palette_geometry(Rect::new(0, 0, cols, rows)))
-            .map(|(_, _, body)| usize::from(body.height.max(1)))
-            .unwrap_or(1)
-    }
-
-    /// Takes the row count from the caller: rebuilding the command list is the
-    /// expensive part, and every caller has already built it.
-    fn ensure_palette_selection_visible(&mut self, count: usize) {
-        let viewport = self.palette_body_height();
-        let max_scroll = count.saturating_sub(viewport);
-        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
-            return;
-        };
-        let adjusted = if palette.selected < palette.scroll {
-            palette.selected
-        } else if palette.selected >= palette.scroll + viewport {
-            palette.selected + 1 - viewport
-        } else {
-            return;
-        };
-        palette.scroll = adjusted.min(max_scroll);
-    }
-
-    pub(super) fn move_palette_selection(&mut self, delta: isize) {
-        let count = self.filtered_palette_commands().len();
-        let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
-            return;
-        };
-        if count == 0 {
-            palette.selected = 0;
-            palette.scroll = 0;
-            return;
-        }
-        let current = palette.selected.min(count - 1) as isize;
-        palette.selected = (current + delta).rem_euclid(count as isize) as usize;
-        self.ensure_palette_selection_visible(count);
-    }
-
-    fn reset_palette_selection(&mut self) {
-        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
-            palette.selected = 0;
-            palette.scroll = 0;
-        }
-    }
-
-    /// Runs the highlighted palette row. A query matching nothing leaves the
-    /// palette open, so an empty enter is not a silent dismissal.
-    pub(super) fn run_palette_selection(&mut self, outcome: &mut ClientShellInput) {
-        let selected = match self.overlay.as_ref() {
-            Some(ClientShellOverlay::Palette(palette)) => palette.selected,
-            _ => return,
-        };
-        let commands = self.filtered_palette_commands();
-        let Some(command) = commands.into_iter().nth(selected) else {
-            return;
-        };
-        self.overlay = None;
-        self.remember_palette_command(command.id);
-        self.run_palette_action(command.action, outcome);
-        outcome.repaint = true;
-    }
-
-    fn remember_palette_command(&mut self, command_id: String) {
-        crate::palette_history::remember(&mut self.recent_command_ids, command_id);
-        self.persist_palette_history();
-    }
-
-    #[cfg(not(test))]
-    fn persist_palette_history(&self) {
-        if let Err(error) = crate::palette_history::save(&self.recent_command_ids) {
-            tracing::warn!(
-                path = %crate::palette_history::store_path().display(),
-                error = %error,
-                "Failed to save command palette history; the command still ran"
-            );
-        }
-    }
-
-    /// Tests must not write the operator's real history file.
-    #[cfg(test)]
-    fn persist_palette_history(&self) {}
-
-    fn run_palette_action(
-        &mut self,
-        action: super::palette::PaletteAction,
-        outcome: &mut ClientShellInput,
-    ) {
-        match action {
-            super::palette::PaletteAction::Keybind(action) => {
-                self.record_binding(crate::input::KeybindMatch::Action(action), outcome);
-            }
-            super::palette::PaletteAction::PluginAction {
-                plugin_id,
-                action_id,
-            } => {
-                self.push_endpoint_method(
-                    crate::api::schema::Method::PluginActionInvoke(
-                        crate::api::schema::PluginActionInvokeParams {
-                            action_id,
-                            plugin_id: Some(plugin_id),
-                            // The server merges the focused workspace, tab and
-                            // pane into the context itself, and it is the only
-                            // side that can see them authoritatively.
-                            context: None,
-                        },
-                    ),
-                    outcome,
-                );
-            }
-            super::palette::PaletteAction::PluginPane {
-                plugin_id,
-                entrypoint,
-            } => {
-                self.push_endpoint_method(
-                    crate::api::schema::Method::PluginPaneOpen(
-                        crate::api::schema::PluginPaneOpenParams {
-                            plugin_id,
-                            entrypoint,
-                            placement: None,
-                            width: None,
-                            height: None,
-                            workspace_id: None,
-                            target_pane_id: None,
-                            direction: None,
-                            cwd: None,
-                            focus: true,
-                            env: Default::default(),
-                        },
-                    ),
-                    outcome,
-                );
-            }
-        }
-    }
-
-    pub(super) fn route_palette_key(
-        &mut self,
-        key: &crate::input::TerminalKey,
-        outcome: &mut ClientShellInput,
-    ) {
-        use crossterm::event::KeyModifiers;
-
-        let text_character = crate::input::keybind_help_text_char(key);
-        let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-        match code {
-            KeyCode::Esc => {
-                self.overlay = None;
-            }
-            KeyCode::Enter => {
-                self.run_palette_selection(outcome);
-                return;
-            }
-            KeyCode::Up | KeyCode::BackTab => self.move_palette_selection(-1),
-            KeyCode::Down | KeyCode::Tab => self.move_palette_selection(1),
-            KeyCode::PageUp => self.move_palette_selection(-8),
-            KeyCode::PageDown => self.move_palette_selection(8),
-            KeyCode::Backspace => {
-                if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
-                    palette.query.pop();
-                }
-                self.reset_palette_selection();
-            }
-            KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
-                    palette.query.clear();
-                }
-                self.reset_palette_selection();
-            }
-            _ => {
-                if let Some(character) = text_character {
-                    if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
-                        palette.query.push(character);
-                    }
-                    self.reset_palette_selection();
-                }
-            }
-        }
-        outcome.repaint = true;
     }
 
     pub(super) fn open_pane_split_direction_overlay(
@@ -570,38 +336,54 @@ impl ClientShellState {
     }
 
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
-            return;
-        };
         let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
             return;
         };
-        let rows = render::client_navigator_rows(snapshot, navigator);
+        let rows =
+            render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, navigator);
         if rows.is_empty() {
-            navigator.selected = 0;
+            navigator.selected = None;
             return;
         }
-        navigator.selected = (navigator.selected as isize + delta)
-            .clamp(0, rows.len().saturating_sub(1) as isize) as usize;
+        let selected =
+            super::aggregate_navigation::navigator_selected_index(&rows, navigator).unwrap_or(0);
+        let next =
+            (selected as isize + delta).clamp(0, rows.len().saturating_sub(1) as isize) as usize;
+        navigator.selected = Some(rows[next].target.clone());
+    }
+
+    fn navigator_target_is_local(&self, target: &ClientNavigatorTarget) -> bool {
+        match target {
+            ClientNavigatorTarget::Workspace { endpoint_id, .. }
+            | ClientNavigatorTarget::Tab { endpoint_id, .. }
+            | ClientNavigatorTarget::Pane { endpoint_id, .. } => {
+                endpoint_id == &self.active_endpoint_id
+            }
+            ClientNavigatorTarget::NewWorkspace => true,
+            ClientNavigatorTarget::Machine { .. } => false,
+        }
     }
 
     /// The workspace a navigator row lands a move in — a tab or pane row names
     /// the workspace it lives in.
     fn navigator_row_workspace(&self, target: &ClientNavigatorTarget) -> Option<String> {
+        if !self.navigator_target_is_local(target) {
+            return None;
+        }
         let snapshot = self.snapshot.as_deref()?;
         match target {
-            ClientNavigatorTarget::Workspace(workspace_id) => Some(workspace_id.clone()),
-            ClientNavigatorTarget::Tab(tab_id) => snapshot
+            ClientNavigatorTarget::Workspace { workspace_id, .. } => Some(workspace_id.clone()),
+            ClientNavigatorTarget::Tab { tab_id, .. } => snapshot
                 .tabs
                 .iter()
                 .find(|tab| &tab.tab_id == tab_id)
                 .map(|tab| tab.workspace_id.clone()),
-            ClientNavigatorTarget::Pane(pane_id) => snapshot
+            ClientNavigatorTarget::Pane { pane_id, .. } => snapshot
                 .panes
                 .iter()
                 .find(|pane| &pane.pane_id == pane_id)
                 .map(|pane| pane.workspace_id.clone()),
-            ClientNavigatorTarget::NewWorkspace => None,
+            ClientNavigatorTarget::NewWorkspace | ClientNavigatorTarget::Machine { .. } => None,
         }
     }
 
@@ -612,15 +394,20 @@ impl ClientShellState {
         &self,
         target: &ClientNavigatorTarget,
     ) -> Option<(String, Option<String>)> {
+        if !self.navigator_target_is_local(target) {
+            return None;
+        }
         let snapshot = self.snapshot.as_deref()?;
         match target {
-            ClientNavigatorTarget::Tab(tab_id) => Some((tab_id.clone(), None)),
-            ClientNavigatorTarget::Pane(pane_id) => snapshot
+            ClientNavigatorTarget::Tab { tab_id, .. } => Some((tab_id.clone(), None)),
+            ClientNavigatorTarget::Pane { pane_id, .. } => snapshot
                 .panes
                 .iter()
                 .find(|pane| &pane.pane_id == pane_id)
                 .map(|pane| (pane.tab_id.clone(), Some(pane.pane_id.clone()))),
-            ClientNavigatorTarget::Workspace(_) | ClientNavigatorTarget::NewWorkspace => None,
+            ClientNavigatorTarget::Workspace { .. }
+            | ClientNavigatorTarget::NewWorkspace
+            | ClientNavigatorTarget::Machine { .. } => None,
         }
     }
 
@@ -635,6 +422,9 @@ impl ClientShellState {
     ) -> bool {
         use crate::api::schema::{Method, PaneMoveDestination, PaneMoveParams};
 
+        if !self.navigator_target_is_local(&target) {
+            return false;
+        }
         // A tab destination is a split against an existing pane, so ask which
         // way it splits instead of guessing; every other destination has no
         // direction to choose.
@@ -648,11 +438,13 @@ impl ClientShellState {
                 label: None,
                 tab_label: None,
             },
-            ClientNavigatorTarget::Workspace(workspace_id) => PaneMoveDestination::NewTab {
+            ClientNavigatorTarget::Workspace { workspace_id, .. } => PaneMoveDestination::NewTab {
                 workspace_id: Some(workspace_id),
                 label: None,
             },
-            ClientNavigatorTarget::Tab(_) | ClientNavigatorTarget::Pane(_) => return false,
+            ClientNavigatorTarget::Tab { .. }
+            | ClientNavigatorTarget::Pane { .. }
+            | ClientNavigatorTarget::Machine { .. } => return false,
         };
         self.overlay = None;
         self.push_endpoint_method(
@@ -690,7 +482,7 @@ impl ClientShellState {
         };
         self.overlay = None;
         self.push_endpoint_method(
-            Method::TabMove(TabMoveParams {
+            Method::tab_move(TabMoveParams {
                 tab_id,
                 insert_index: None,
                 destination: Some(destination),
@@ -702,17 +494,17 @@ impl ClientShellState {
     }
 
     pub(super) fn accept_navigator_selection(&mut self, outcome: &mut ClientShellInput) {
-        let target = {
-            let Some(snapshot) = self.snapshot.as_deref() else {
-                return;
-            };
-            let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_ref() else {
-                return;
-            };
-            render::client_navigator_rows(snapshot, navigator)
-                .get(navigator.selected)
-                .map(|row| row.target.clone())
-        };
+        let target = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                super::aggregate_navigation::selected_navigator_target(&rows, navigator)
+            }
+            _ => None,
+        });
         let Some(target) = target else {
             return;
         };
@@ -745,47 +537,67 @@ impl ClientShellState {
             }
             (None, None, None) => {}
         }
-        self.overlay = None;
-        let method = match target {
+        let activated = match target {
             ClientNavigatorTarget::NewWorkspace => return,
-            ClientNavigatorTarget::Workspace(workspace_id) => {
-                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
-                    workspace_id,
-                })
+            ClientNavigatorTarget::Machine { endpoint_id } => {
+                self.activate_endpoint(endpoint_id, outcome)
             }
-            ClientNavigatorTarget::Tab(tab_id) => {
-                crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id })
+            ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            } => self.focus_or_activate(
+                endpoint_id,
+                ClientEndpointFocusTarget::Workspace(workspace_id),
+                outcome,
+            ),
+            ClientNavigatorTarget::Tab {
+                endpoint_id,
+                tab_id,
+            } => {
+                self.focus_or_activate(endpoint_id, ClientEndpointFocusTarget::Tab(tab_id), outcome)
             }
-            ClientNavigatorTarget::Pane(pane_id) => {
-                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id })
-            }
+            ClientNavigatorTarget::Pane {
+                endpoint_id,
+                pane_id,
+            } => self.focus_or_activate(
+                endpoint_id,
+                ClientEndpointFocusTarget::Pane(pane_id),
+                outcome,
+            ),
         };
-        self.push_endpoint_method(method, outcome);
+        if activated {
+            self.overlay = None;
+        }
         outcome.repaint = true;
     }
 
     pub(super) fn toggle_selected_navigator_workspace(&mut self) {
-        let workspace_id = {
-            let Some(snapshot) = self.snapshot.as_deref() else {
-                return;
-            };
-            let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_ref() else {
-                return;
-            };
-            render::client_navigator_rows(snapshot, navigator)
-                .get(navigator.selected)
-                .and_then(|row| match &row.target {
-                    ClientNavigatorTarget::Workspace(workspace_id) => Some(workspace_id.clone()),
-                    _ => None,
-                })
-        };
-        if let (Some(workspace_id), Some(ClientShellOverlay::Navigator(navigator))) =
-            (workspace_id, self.overlay.as_mut())
-        {
-            if !navigator.expanded_workspaces.remove(&workspace_id) {
-                navigator.expanded_workspaces.insert(workspace_id);
+        let workspace_key = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                super::aggregate_navigation::selected_navigator_target(&rows, navigator).and_then(
+                    |target| match target {
+                        ClientNavigatorTarget::Workspace {
+                            endpoint_id,
+                            workspace_id,
+                        } => Some((endpoint_id, workspace_id)),
+                        _ => None,
+                    },
+                )
             }
-            navigator.selected = 0;
+            _ => None,
+        });
+        if let (Some(workspace_key), Some(ClientShellOverlay::Navigator(navigator))) =
+            (workspace_key, self.overlay.as_mut())
+        {
+            if !navigator.expanded_workspaces.remove(&workspace_key) {
+                navigator.expanded_workspaces.insert(workspace_key);
+            }
+            navigator.selected = None;
             navigator.scroll = 0;
         }
     }
@@ -944,7 +756,7 @@ impl ClientShellState {
             Some(ClientShellOverlay::Navigator(navigator)) if navigator.search_focused => {
                 navigator.query.push_str(text);
                 navigator.filter = None;
-                navigator.selected = 0;
+                navigator.selected = None;
                 true
             }
             _ => false,
@@ -1165,11 +977,11 @@ impl ClientShellState {
                     if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
                         navigator.query.clear();
                         navigator.filter = None;
-                        navigator.selected = 0;
+                        navigator.selected = None;
                     } else if code == KeyCode::Backspace {
                         navigator.query.pop();
                         navigator.filter = None;
-                        navigator.selected = 0;
+                        navigator.selected = None;
                     } else if let KeyCode::Char(character) = code {
                         if modifiers.difference(KeyModifiers::SHIFT).is_empty() {
                             navigator.filter = None;
@@ -1178,7 +990,7 @@ impl ClientShellState {
                             } else {
                                 navigator.query.push(character);
                             }
-                            navigator.selected = 0;
+                            navigator.selected = None;
                         }
                     }
                     outcome.repaint = true;
@@ -1188,7 +1000,7 @@ impl ClientShellState {
             if code == KeyCode::Backspace && modifiers.is_empty() {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     if navigator.filter.take().is_some() {
-                        navigator.selected = 0;
+                        navigator.selected = None;
                     }
                 }
                 outcome.repaint = true;
@@ -1196,25 +1008,23 @@ impl ClientShellState {
             }
             if code == KeyCode::Home && modifiers.is_empty() {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.selected = 0;
+                    navigator.selected = None;
                     navigator.scroll = 0;
                 }
                 outcome.repaint = true;
                 return;
             }
             if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
-                let last = self
-                    .snapshot
-                    .as_deref()
-                    .zip(self.overlay.as_ref())
-                    .and_then(|(snapshot, overlay)| match overlay {
-                        ClientShellOverlay::Navigator(navigator) => {
-                            Some(render::client_navigator_rows(snapshot, navigator).len())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or(0)
-                    .saturating_sub(1);
+                let last = self.overlay.as_ref().and_then(|overlay| match overlay {
+                    ClientShellOverlay::Navigator(navigator) => render::client_navigator_rows(
+                        &self.endpoints,
+                        &self.active_endpoint_id,
+                        navigator,
+                    )
+                    .last()
+                    .map(|row| row.target.clone()),
+                    _ => None,
+                });
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.selected = last;
                 }
@@ -1259,7 +1069,7 @@ impl ClientShellState {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.query.clear();
                     navigator.filter = Some(filter);
-                    navigator.selected = 0;
+                    navigator.selected = None;
                 }
                 outcome.repaint = true;
                 return;
@@ -1268,7 +1078,7 @@ impl ClientShellState {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.query.clear();
                     navigator.filter = None;
-                    navigator.selected = 0;
+                    navigator.selected = None;
                 }
                 outcome.repaint = true;
                 return;

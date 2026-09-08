@@ -69,6 +69,8 @@ pub enum Method {
     ClientWindowTitleSet(ClientWindowTitleSetParams),
     #[serde(rename = "client.window_title.clear")]
     ClientWindowTitleClear(EmptyParams),
+    #[serde(rename = "client_shell.surface.set")]
+    ClientShellSurfaceSet(ClientShellSurfaceSetParams),
     #[serde(rename = "session.snapshot")]
     SessionSnapshot(EmptyParams),
     #[serde(rename = "workspace.create")]
@@ -111,6 +113,8 @@ pub enum Method {
     TabRename(TabRenameParams),
     #[serde(rename = "tab.move")]
     TabMove(TabMoveParams),
+    #[serde(rename = "tab.move_to_destination")]
+    TabMoveToDestination(TabMoveToDestinationParams),
     #[serde(rename = "tab.close")]
     TabClose(TabTarget),
     #[serde(rename = "agent.list")]
@@ -270,3 +274,23 @@ pub enum Method {
 
 #[cfg(test)]
 mod tests;
+
+impl Method {
+    /// Keep index-only reordering compatible with upstream servers. Destination
+    /// moves require their own advertised method so an older server cannot
+    /// ignore the destination and apply a different operation.
+    pub(crate) fn tab_move(params: TabMoveParams) -> Self {
+        match params.destination {
+            Some(TabMoveDestination::Index { insert_index }) => Self::TabMove(TabMoveParams {
+                tab_id: params.tab_id,
+                insert_index: Some(insert_index),
+                destination: None,
+            }),
+            Some(destination) => Self::TabMoveToDestination(TabMoveToDestinationParams {
+                tab_id: params.tab_id,
+                destination,
+            }),
+            None => Self::TabMove(params),
+        }
+    }
+}

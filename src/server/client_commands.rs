@@ -13,6 +13,7 @@ pub(crate) const MAX_ENDPOINT_REQUEST_ID_BYTES: usize = 128;
 const ENDPOINT_RESPONSE_CHUNK_BYTES: usize = 512 * 1024;
 
 const CLIENT_SHELL_METHODS: &[&str] = &[
+    "client_shell.surface.set",
     "command.invoke",
     "integration.install",
     "integration.list",
@@ -25,6 +26,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.focus_direction",
     "pane.input.set",
     "pane.link.activate",
+    "pane.move",
     "pane.rename",
     "pane.resize",
     "pane.scroll",
@@ -32,6 +34,9 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.split",
     "pane.swap",
     "pane.zoom",
+    "plugin.action.invoke",
+    "plugin.list",
+    "plugin.pane.open",
     "product_announcement.dismiss",
     "release_notes.dismiss",
     "server.reload_config",
@@ -39,6 +44,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "tab.create",
     "tab.focus",
     "tab.move",
+    "tab.move_to_destination",
     "tab.rename",
     "workspace.close",
     "workspace.create",
@@ -76,6 +82,30 @@ pub(crate) fn error_response(id: String, code: &str, message: impl Into<String>)
     .unwrap_or_else(|_| {
         r#"{"id":"","error":{"code":"serialization_error","message":"failed to serialize endpoint response"}}"#.into()
     })
+}
+
+pub(crate) fn success_message_with_result(
+    boot_id: String,
+    request_id: String,
+    result: crate::api::schema::ResponseResult,
+) -> crate::protocol::ServerMessage {
+    let response = serde_json::to_string(&crate::api::schema::SuccessResponse {
+        id: request_id.clone(),
+        result,
+    })
+    .unwrap_or_else(|_| {
+        error_response(
+            request_id.clone(),
+            "serialization_error",
+            "failed to serialize endpoint response",
+        )
+    });
+    crate::protocol::ServerMessage::ClientShellEndpointResponseChunk {
+        boot_id,
+        request_id,
+        final_chunk: true,
+        data: response.into_bytes(),
+    }
 }
 
 pub(crate) fn error_message(
@@ -254,24 +284,10 @@ mod tests {
         digests
     }
 
-    /// The fixture is the fork's contract, not upstream's.
-    ///
-    /// It differs from upstream on exactly one *existing* method: `tab.move`,
-    /// which this fork extended with an optional `destination` so a tab can move
-    /// to another space, and whose `insert_index` became optional in the same
-    /// change. Both fields carry
-    /// `#[serde(default, skip_serializing_if = "Option::is_none")]`, which is
-    /// this guard's own "explicitly gate new fields" escape — an older caller
-    /// omitting them still parses, and a request that omits them still
-    /// serializes to the previous shape.
-    ///
-    /// It also carries one fork-added method, `workspace.merge`. A new method is
-    /// additive: it adds a key here and changes no existing digest, which is why
-    /// it needed no wire-protocol bump.
-    ///
-    /// If a sync makes this fail again, check *which* method moved before
-    /// regenerating: a digest change on any other method is upstream's contract
-    /// shifting under the fork, not the fork's own divergence.
+    /// Preserve the fork's existing method contracts. Add capabilities under
+    /// new method names and add their digests without rewriting existing ones.
+    /// The historical destination extension of `tab.move` remains accepted;
+    /// new clients use `tab.move_to_destination` to negotiate that behavior.
     #[test]
     fn advertised_client_shell_method_shapes_stay_at_the_v1_contract() {
         let expected: BTreeMap<String, String> = serde_json::from_str(include_str!(concat!(
@@ -331,6 +347,11 @@ mod tests {
 
     #[test]
     fn client_shell_lane_excludes_api_front_door_and_lifecycle_methods() {
+        assert!(supports_client_shell_method(
+            &Method::ClientShellSurfaceSet(crate::api::schema::ClientShellSurfaceSetParams {
+                active: false,
+            })
+        ));
         assert!(supports_client_shell_method(&Method::ServerReloadConfig(
             crate::api::schema::EmptyParams::default(),
         )));

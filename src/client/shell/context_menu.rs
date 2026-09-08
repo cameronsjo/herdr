@@ -396,7 +396,7 @@ impl ClientShellState {
                 self.open_navigator_overlay_for_move(None, Some(tab_id));
             }
             ClientContextMenuAction::MoveTabToNewSpace => self.push_endpoint_method(
-                Method::TabMove(crate::api::schema::TabMoveParams {
+                Method::tab_move(crate::api::schema::TabMoveParams {
                     tab_id,
                     insert_index: None,
                     destination: Some(crate::api::schema::TabMoveDestination::NewWorkspace {
@@ -474,7 +474,7 @@ impl ClientShellState {
             .collect::<Vec<_>>();
         let source = tabs.iter().position(|tab| tab.tab_id == tab_id)?;
         let insert_index = super::actions::reorder_insert_index(tabs.len(), source, forward)?;
-        Some(crate::api::schema::Method::TabMove(
+        Some(crate::api::schema::Method::tab_move(
             crate::api::schema::TabMoveParams {
                 tab_id: tab_id.to_owned(),
                 insert_index: Some(insert_index),

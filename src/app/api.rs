@@ -93,7 +93,10 @@ impl App {
                     return Vec::new();
                 }
                 worktree_restore_failed = true;
-                AppEvent::PaneDied { pane_id }
+                AppEvent::PaneDied {
+                    pane_id,
+                    exit_reason: crate::platform::ChildExitReason::Exited,
+                }
             }
             ev => ev,
         };
@@ -164,7 +167,7 @@ impl App {
         }
 
         let mut worktree_restore_updates = Vec::new();
-        if let AppEvent::PaneDied { pane_id } = &ev {
+        if let AppEvent::PaneDied { pane_id, .. } = &ev {
             if self
                 .state
                 .popup_pane
@@ -224,7 +227,18 @@ impl App {
             }
         }
 
-        let overlay_state = if let AppEvent::PaneDied { pane_id } = &ev {
+        let checkpointed_pane_exit = matches!(
+            &ev,
+            AppEvent::PaneDied {
+                pane_id,
+                exit_reason,
+            } if exit_reason.requires_session_checkpoint() && self.find_pane(*pane_id).is_some() && !self.overlay_panes.contains_key(pane_id)
+        );
+        if checkpointed_pane_exit {
+            self.checkpoint_session_before_pane_exit();
+        }
+
+        let overlay_state = if let AppEvent::PaneDied { pane_id, .. } = &ev {
             self.overlay_panes.remove(pane_id).map(|overlay| {
                 let was_overlay_active =
                     self.state
@@ -248,7 +262,7 @@ impl App {
             None
         };
 
-        if let AppEvent::PaneDied { pane_id } = &ev {
+        if let AppEvent::PaneDied { pane_id, .. } = &ev {
             if let Some((ws_idx, _)) = self.find_pane(*pane_id) {
                 if let Some(public_pane_id) = self.public_pane_id(ws_idx, *pane_id) {
                     self.emit_event(crate::api::schema::EventEnvelope {
@@ -261,7 +275,7 @@ impl App {
                 }
             }
         }
-        let pane_exit_layout_target = if let AppEvent::PaneDied { pane_id } = &ev {
+        let pane_exit_layout_target = if let AppEvent::PaneDied { pane_id, .. } = &ev {
             self.find_pane(*pane_id).and_then(|(ws_idx, _)| {
                 self.layout_update_target_after_pane_removal(ws_idx, *pane_id)
             })
@@ -300,6 +314,9 @@ impl App {
         let mut pane_updates = self.state.handle_app_event(ev);
         if update_ready.is_some() {
             self.state.latest_release_notes = crate::release_notes::load_latest();
+        }
+        if checkpointed_pane_exit {
+            self.finish_checkpointed_pane_exit();
         }
         if let Some(agents) = manifest_update_agents {
             self.reset_agent_detection_for_agents(&agents);
@@ -1038,6 +1055,16 @@ impl App {
             Method::TabFocus(target) => return self.handle_tab_focus(request.id, target),
             Method::TabRename(params) => return self.handle_tab_rename(request.id, params),
             Method::TabMove(params) => return self.handle_tab_move(request.id, params),
+            Method::TabMoveToDestination(params) => {
+                return self.handle_tab_move(
+                    request.id,
+                    crate::api::schema::TabMoveParams {
+                        tab_id: params.tab_id,
+                        insert_index: None,
+                        destination: Some(params.destination),
+                    },
+                )
+            }
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
             Method::AgentList(_) => return self.handle_agent_list(request.id),
             Method::AgentGet(target) => return self.handle_agent_get(request.id, target),
@@ -1974,6 +2001,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
         let overlay_tab = &app.state.workspaces[0].tabs[0];
@@ -2000,7 +2028,10 @@ mod tests {
         app.state.ensure_test_terminals();
         let tab_id = app.public_tab_id(0, 0).unwrap();
 
-        app.handle_internal_event(AppEvent::PaneDied { pane_id: dead_pane });
+        app.handle_internal_event(AppEvent::PaneDied {
+            pane_id: dead_pane,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
 
         let events = event_hub.events_after(0);
         let pane_exited = events
@@ -2149,6 +2180,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
         let events = event_hub.events_after(0);
@@ -2174,6 +2206,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
         let tab = &app.state.workspaces[0].tabs[0];
@@ -2193,6 +2226,7 @@ mod tests {
 
         app.handle_internal_event(AppEvent::PaneDied {
             pane_id: overlay_pane,
+            exit_reason: crate::platform::ChildExitReason::Exited,
         });
 
         let tab = &app.state.workspaces[0].tabs[0];
@@ -2213,6 +2247,7 @@ mod tests {
             crate::api::EventHub::default(),
         );
         let workspace = crate::workspace::Workspace::test_new("restored");
+        app.state.default_shell = test_support::exiting_test_command().into();
         let pane_id = workspace.tabs[0].root_pane;
         let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
         app.state.workspaces = vec![workspace];
@@ -2231,7 +2266,10 @@ mod tests {
                 .expect("test session id should be valid"),
         });
 
-        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+        app.handle_internal_event(AppEvent::PaneDied {
+            pane_id,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
 
         assert!(
             app.find_pane(pane_id).is_some(),

@@ -6,6 +6,12 @@ fn shell() -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
+    state.set_endpoint_methods(Some(
+        crate::server::client_commands::supported_client_shell_method_names()
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect(),
+    ));
     state.compose(106, 24).expect("composed frame");
     state
 }
@@ -218,7 +224,8 @@ fn move_pane_to_space_arms_the_navigator_and_a_workspace_row_moves_the_pane() {
     assert!(navigator.move_armed());
 
     let rows = render::client_navigator_rows(
-        state.snapshot.as_deref().expect("snapshot"),
+        &state.endpoints,
+        &state.active_endpoint_id,
         match state.overlay.as_ref() {
             Some(ClientShellOverlay::Navigator(navigator)) => navigator,
             _ => unreachable!(),
@@ -230,10 +237,10 @@ fn move_pane_to_space_arms_the_navigator_and_a_workspace_row_moves_the_pane() {
     );
     let workspace_row = rows
         .iter()
-        .position(|row| matches!(row.target, ClientNavigatorTarget::Workspace(_)))
+        .position(|row| matches!(row.target, ClientNavigatorTarget::Workspace { .. }))
         .expect("a workspace row");
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = workspace_row;
+        navigator.selected = Some(rows[workspace_row].target.clone());
     }
 
     let mut outcome = ClientShellInput::default();
@@ -258,7 +265,8 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
     state.open_navigator_overlay_for_move(Some("pane_1".into()), None);
     state.compose(106, 24).expect("composed frame");
     let rows = render::client_navigator_rows(
-        state.snapshot.as_deref().expect("snapshot"),
+        &state.endpoints,
+        &state.active_endpoint_id,
         match state.overlay.as_ref() {
             Some(ClientShellOverlay::Navigator(navigator)) => navigator,
             _ => unreachable!(),
@@ -266,10 +274,10 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
     );
     let pane_row = rows
         .iter()
-        .position(|row| matches!(row.target, ClientNavigatorTarget::Pane(_)))
+        .position(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
         .expect("a pane row");
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = pane_row;
+        navigator.selected = Some(rows[pane_row].target.clone());
     }
 
     let mut outcome = ClientShellInput::default();
@@ -306,7 +314,7 @@ fn an_armed_tab_move_lands_the_whole_tab_without_asking_for_a_direction() {
     state.open_navigator_overlay_for_move(None, Some("tab_1".into()));
     state.compose(106, 24).expect("composed frame");
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = 0; // the new-space row
+        navigator.selected = Some(ClientNavigatorTarget::NewWorkspace);
     }
 
     let mut outcome = ClientShellInput::default();
@@ -315,10 +323,10 @@ fn an_armed_tab_move_lands_the_whole_tab_without_asking_for_a_direction() {
     assert!(
         endpoint_methods(&outcome).iter().any(|method| matches!(
             method,
-            crate::api::schema::Method::TabMove(params)
+            crate::api::schema::Method::TabMoveToDestination(params)
                 if matches!(
                     params.destination,
-                    Some(crate::api::schema::TabMoveDestination::NewWorkspace { .. })
+                    crate::api::schema::TabMoveDestination::NewWorkspace { .. }
                 )
         )),
         "the new-space row moves the tab into a workspace made for it"
@@ -406,6 +414,12 @@ fn shell_with_second_workspace() -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot));
     state.set_pane_surface(surface());
+    state.set_endpoint_methods(Some(
+        crate::server::client_commands::supported_client_shell_method_names()
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect(),
+    ));
     state.compose(106, 24).expect("composed frame");
     state
 }
@@ -414,7 +428,8 @@ fn arm_merge_on_the_second_workspace(state: &mut ClientShellState) {
     state.open_navigator_overlay_for_merge("ws_1".into());
     state.compose(106, 24).expect("composed frame");
     let rows = render::client_navigator_rows(
-        state.snapshot.as_deref().expect("snapshot"),
+        &state.endpoints,
+        &state.active_endpoint_id,
         match state.overlay.as_ref() {
             Some(ClientShellOverlay::Navigator(navigator)) => navigator,
             _ => panic!("navigator should be open"),
@@ -422,10 +437,10 @@ fn arm_merge_on_the_second_workspace(state: &mut ClientShellState) {
     );
     let target_row = rows
         .iter()
-        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace(id) if id == "ws_2"))
+        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_2"))
         .expect("a row for the other workspace");
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = target_row;
+        navigator.selected = Some(rows[target_row].target.clone());
     }
 }
 
@@ -464,7 +479,8 @@ fn picking_the_source_row_leaves_the_merge_armed() {
     state.open_navigator_overlay_for_merge("ws_1".into());
     state.compose(106, 24).expect("composed frame");
     let rows = render::client_navigator_rows(
-        state.snapshot.as_deref().expect("snapshot"),
+        &state.endpoints,
+        &state.active_endpoint_id,
         match state.overlay.as_ref() {
             Some(ClientShellOverlay::Navigator(navigator)) => navigator,
             _ => panic!("navigator should be open"),
@@ -472,10 +488,10 @@ fn picking_the_source_row_leaves_the_merge_armed() {
     );
     let own_row = rows
         .iter()
-        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace(id) if id == "ws_1"))
+        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_1"))
         .expect("a row for the armed workspace");
     if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = own_row;
+        navigator.selected = Some(rows[own_row].target.clone());
     }
 
     let mut outcome = ClientShellInput::default();
@@ -567,5 +583,31 @@ fn the_merge_confirm_button_is_hit_where_the_renderer_drew_it() {
                     && params.target_workspace_id == "ws_2"
         )),
         "the mouse path merges exactly what the key path does"
+    );
+}
+
+#[test]
+fn destination_moves_are_not_sent_to_a_server_that_only_supports_reordering() {
+    let mut state = shell();
+    state.set_endpoint_methods(Some(vec!["tab.move".into()]));
+    let mut outcome = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::MoveTabToNewSpace),
+        &mut outcome,
+    );
+    assert!(endpoint_methods(&outcome).is_empty());
+    let notice = state
+        .visible_endpoint_notice
+        .as_ref()
+        .expect("unsupported action notice");
+    assert!(notice.body.contains("tab.move_to_destination"));
+    assert!(
+        state.supports_endpoint_method(&crate::api::schema::Method::TabMove(
+            crate::api::schema::TabMoveParams {
+                tab_id: "tab_1".into(),
+                insert_index: Some(0),
+                destination: None,
+            }
+        ))
     );
 }

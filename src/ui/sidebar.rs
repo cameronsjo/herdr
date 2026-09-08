@@ -130,6 +130,7 @@ pub(crate) fn resolved_token_spans(
         .iter()
         .map(|token| match &token.kind {
             ResolvedTokenKind::StateText(text)
+            | ResolvedTokenKind::Machine(text)
             | ResolvedTokenKind::Workspace(text)
             | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
@@ -279,7 +280,8 @@ pub(crate) fn resolved_token_spans(
                 truncate_end(text, budgets[index]),
                 apply_token_style(workspace_style, token.style),
             )),
-            ResolvedTokenKind::Tab(text)
+            ResolvedTokenKind::Machine(text)
+            | ResolvedTokenKind::Tab(text)
             | ResolvedTokenKind::Pane(text)
             | ResolvedTokenKind::Agent(text)
             | ResolvedTokenKind::Branch(text) => spans.push(Span::styled(

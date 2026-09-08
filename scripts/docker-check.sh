@@ -19,20 +19,10 @@ ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 IMAGE_TAG=herdr-docker-check:local
 REGISTRY_VOLUME=herdr-docker-check-cargo-registry
 
-# These tests fail in this container image regardless of code changes —
-# confirmed by running them against a pristine origin/master checkout in the
-# same image and getting the identical list, both parallel AND serialized
-# (--test-threads 1), on 2026-08-05. They are NOT load/parallelism flakes:
-# serializing the run doesn't rescue any of them. Root causes fall into two
-# groups:
-#   - `*_terminates_processes_inside_*`: rely on process-group reaping that
-#     needs a subreaper; a plain `docker run` (even with --init) has none.
-#   - the rest (hooks session-id tests, live_handoff tests, the TTL test):
-#     fail identically with or without serialization, so it's a container
-#     environment difference (missing agent CLI stubs, clock granularity,
-#     loopback/networking setup), not a race.
-# If a run surfaces a failure NOT on this list, treat it as real — this is a
-# verified allowlist, not a place to stash new flakiness without checking.
+# Legacy environment exclusions for the standalone fallback check. Unexpected
+# failures are retried and reported below; never extend this list without a
+# pristine-upstream reproduction. Process-cleanup tests run normally: --init
+# ensures orphaned children are reaped in both the main run and isolated retries.
 KNOWN_ENV_FAILURES=(
   "cases::hooks::claude_hook_reports_session_id_from_stdin"
   "cases::hooks::codex_hook_reports_persisted_root_session_and_ignores_ephemeral_or_nested_sessions"
@@ -40,9 +30,6 @@ KNOWN_ENV_FAILURES=(
   "cases::hooks::devin_hook_prefers_hook_session_id_over_list"
   "cases::hooks::devin_hook_reports_session_id_from_stdin_without_state"
   "cases::hooks::devin_hook_reports_tool_session_from_list_without_state"
-  "cases::panes::closing_pane_terminates_processes_inside_it"
-  "cases::panes::closing_workspace_terminates_processes_inside_it"
-  "cases::workspace::forced_worktree_remove_terminates_processes_inside_checkout"
   "live_handoff_preserves_http_servers_across_multiple_sessions"
   "live_handoff_preserves_keyboard_protocol_for_client_input"
   "live_handoff_preserves_modify_other_keys_for_client_input"
@@ -73,7 +60,7 @@ KNOWN_ENV_FAILURES=(
 run_nextest_filter() {
   local binary_id="$1"
   local test_name="$2"
-  docker run --rm \
+  docker run --rm --init \
     -v "$ROOT_DIR:/work" \
     -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
     -w /work \
@@ -168,7 +155,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   trap 'rm -f "$LOG_FILE"' EXIT
 
   set +e
-  docker run --rm \
+  docker run --rm --init \
     -v "$ROOT_DIR:/work" \
     -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
     -w /work \

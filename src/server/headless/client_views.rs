@@ -227,85 +227,103 @@ impl HeadlessServer {
     fn shell_locations_may_need_reconcile(method: &api::schema::Method) -> bool {
         use api::schema::Method;
 
-        matches!(
-            method,
-            Method::CommandInvoke(_)
-                | Method::PaneClose(_)
-                | Method::PaneEditScrollback(_)
-                | Method::PaneSplit(_)
-                | Method::TabClose(_)
-                | Method::TabCreate(_)
-                | Method::WorkspaceClose(_)
-                | Method::WorkspaceCreate(_)
-                | Method::WorktreeCreate(_)
-                | Method::WorktreeOpen(_)
-                | Method::WorktreeRemove(_)
-        )
+        matches!(method, Method::TabMove(params) if params.destination.is_some())
+            || matches!(
+                method,
+                Method::TabMoveToDestination(_)
+                    | Method::CommandInvoke(_)
+                    | Method::PaneClose(_)
+                    | Method::PaneMove(_)
+                    | Method::WorkspaceMerge(_)
+                    | Method::PluginActionInvoke(_)
+                    | Method::PluginPaneOpen(_)
+                    | Method::PaneEditScrollback(_)
+                    | Method::PaneSplit(_)
+                    | Method::TabClose(_)
+                    | Method::TabCreate(_)
+                    | Method::WorkspaceClose(_)
+                    | Method::WorkspaceCreate(_)
+                    | Method::WorktreeCreate(_)
+                    | Method::WorktreeOpen(_)
+                    | Method::WorktreeRemove(_)
+            )
     }
 
     fn shell_endpoint_claims_geometry(method: &api::schema::Method) -> bool {
         use api::schema::Method;
 
-        matches!(
-            method,
-            Method::CommandInvoke(_)
-                | Method::LayoutSetSplitRatio(_)
-                | Method::PaneClose(_)
-                | Method::PaneCopyMotion(_)
-                | Method::PaneCopySearch(_)
-                | Method::PaneEditScrollback(_)
-                | Method::PaneFocus(_)
-                | Method::PaneFocusDirection(_)
-                | Method::PaneInputSet(_)
-                | Method::PaneLinkActivate(_)
-                | Method::PaneRename(_)
-                | Method::PaneResize(_)
-                | Method::PaneScroll(_)
-                | Method::PaneSplit(_)
-                | Method::PaneSwap(_)
-                | Method::PaneZoom(_)
-                | Method::TabClose(_)
-                | Method::TabCreate(_)
-                | Method::TabFocus(_)
-                | Method::TabMove(_)
-                | Method::TabRename(_)
-                | Method::WorkspaceClose(_)
-                | Method::WorkspaceCreate(_)
-                | Method::WorkspaceFocus(_)
-                | Method::WorkspaceMove(_)
-                | Method::WorkspaceMoveBlock(_)
-                | Method::WorkspaceRename(_)
-                | Method::WorktreeCreate(_)
-                | Method::WorktreeOpen(_)
-                | Method::WorktreeRemove(_)
-        )
+        matches!(method, Method::TabMove(params) if params.destination.is_some())
+            || matches!(
+                method,
+                Method::TabMoveToDestination(_)
+                    | Method::CommandInvoke(_)
+                    | Method::LayoutSetSplitRatio(_)
+                    | Method::PaneClose(_)
+                    | Method::PaneMove(_)
+                    | Method::WorkspaceMerge(_)
+                    | Method::PluginActionInvoke(_)
+                    | Method::PluginPaneOpen(_)
+                    | Method::PaneCopyMotion(_)
+                    | Method::PaneCopySearch(_)
+                    | Method::PaneEditScrollback(_)
+                    | Method::PaneFocus(_)
+                    | Method::PaneFocusDirection(_)
+                    | Method::PaneInputSet(_)
+                    | Method::PaneLinkActivate(_)
+                    | Method::PaneRename(_)
+                    | Method::PaneResize(_)
+                    | Method::PaneScroll(_)
+                    | Method::PaneSplit(_)
+                    | Method::PaneSwap(_)
+                    | Method::PaneZoom(_)
+                    | Method::TabClose(_)
+                    | Method::TabCreate(_)
+                    | Method::TabFocus(_)
+                    | Method::TabMove(_)
+                    | Method::TabRename(_)
+                    | Method::WorkspaceClose(_)
+                    | Method::WorkspaceCreate(_)
+                    | Method::WorkspaceFocus(_)
+                    | Method::WorkspaceMove(_)
+                    | Method::WorkspaceMoveBlock(_)
+                    | Method::WorkspaceRename(_)
+                    | Method::WorktreeCreate(_)
+                    | Method::WorktreeOpen(_)
+                    | Method::WorktreeRemove(_)
+            )
     }
 
     fn public_request_may_change_geometry(method: &api::schema::Method) -> bool {
         use api::schema::Method;
 
-        matches!(
-            method,
-            Method::CommandInvoke(_)
-                | Method::LayoutSetSplitRatio(_)
-                | Method::PaneClose(_)
-                | Method::PaneEditScrollback(_)
-                | Method::PaneFocus(_)
-                | Method::PaneFocusDirection(_)
-                | Method::PaneResize(_)
-                | Method::PaneSplit(_)
-                | Method::PaneSwap(_)
-                | Method::PaneZoom(_)
-                | Method::TabClose(_)
-                | Method::TabCreate(_)
-                | Method::TabFocus(_)
-                | Method::WorkspaceClose(_)
-                | Method::WorkspaceCreate(_)
-                | Method::WorkspaceFocus(_)
-                | Method::WorktreeCreate(_)
-                | Method::WorktreeOpen(_)
-                | Method::WorktreeRemove(_)
-        )
+        matches!(method, Method::TabMove(params) if params.destination.is_some())
+            || matches!(
+                method,
+                Method::TabMoveToDestination(_)
+                    | Method::CommandInvoke(_)
+                    | Method::LayoutSetSplitRatio(_)
+                    | Method::PaneClose(_)
+                    | Method::PaneMove(_)
+                    | Method::WorkspaceMerge(_)
+                    | Method::PluginActionInvoke(_)
+                    | Method::PluginPaneOpen(_)
+                    | Method::PaneEditScrollback(_)
+                    | Method::PaneFocus(_)
+                    | Method::PaneFocusDirection(_)
+                    | Method::PaneResize(_)
+                    | Method::PaneSplit(_)
+                    | Method::PaneSwap(_)
+                    | Method::PaneZoom(_)
+                    | Method::TabClose(_)
+                    | Method::TabCreate(_)
+                    | Method::TabFocus(_)
+                    | Method::WorkspaceClose(_)
+                    | Method::WorkspaceCreate(_)
+                    | Method::WorkspaceFocus(_)
+                    | Method::WorktreeCreate(_)
+                    | Method::WorktreeOpen(_)
+                    | Method::WorktreeRemove(_)
+            )
     }
 
     pub(super) fn deferred_endpoint_navigation_tab_id(response: &[u8]) -> Option<String> {
@@ -388,7 +406,7 @@ impl HeadlessServer {
         self.clients
             .iter()
             .filter(|(_, client)| {
-                client.is_shell_client() && client.outer_terminal_focus == Some(true)
+                client.is_active_shell_client() && client.outer_terminal_focus == Some(true)
             })
             .filter_map(|(&client_id, _)| self.shell_tab_id_for_client(client_id))
             .collect()
@@ -397,7 +415,7 @@ impl HeadlessServer {
     pub(super) fn shell_focus_targets(&self) -> Vec<(u64, Option<ShellFocusTarget>)> {
         self.clients
             .iter()
-            .filter(|(_, client)| client.is_shell_client())
+            .filter(|(_, client)| client.is_active_shell_client())
             .map(|(&client_id, _)| (client_id, self.shell_focus_target(client_id)))
             .collect()
     }
@@ -608,11 +626,16 @@ impl HeadlessServer {
         &mut self,
         start_pending_agent_resumes: bool,
     ) -> bool {
-        if self.app_client_count() != 1 {
+        let active_shell_count = self
+            .clients
+            .values()
+            .filter(|client| client.is_active_shell_client() && client.writer.is_some())
+            .count();
+        if active_shell_count != 1 {
             return false;
         }
         let Some(client_id) = self.clients.iter().find_map(|(&client_id, client)| {
-            (client.is_shell_client() && client.writer.is_some()).then_some(client_id)
+            (client.is_active_shell_client() && client.writer.is_some()).then_some(client_id)
         }) else {
             return false;
         };
@@ -625,7 +648,7 @@ impl HeadlessServer {
     ) -> bool {
         let mut viewed_tabs = HashMap::<String, Vec<u64>>::new();
         for (&client_id, client) in &self.clients {
-            if !client.is_shell_client() || client.writer.is_none() {
+            if !client.is_active_shell_client() || client.writer.is_none() {
                 continue;
             }
             let Some(tab_id) = self.shell_tab_id_for_client(client_id) else {
@@ -684,6 +707,13 @@ impl HeadlessServer {
         client_id: u64,
         start_pending_agent_resumes: bool,
     ) -> bool {
+        if !self
+            .clients
+            .get(&client_id)
+            .is_some_and(|client| client.shell_surface_active)
+        {
+            return false;
+        }
         let Some(tab_id) = self.shell_tab_id_for_client(client_id) else {
             return false;
         };
@@ -698,6 +728,13 @@ impl HeadlessServer {
         client_id: u64,
         start_pending_agent_resumes: bool,
     ) -> bool {
+        if !self
+            .clients
+            .get(&client_id)
+            .is_some_and(|client| client.shell_surface_active)
+        {
+            return false;
+        }
         let Some(tab_id) = self.shell_tab_id_for_client(client_id) else {
             return false;
         };
@@ -713,6 +750,13 @@ impl HeadlessServer {
         client_id: u64,
         start_pending_agent_resumes: bool,
     ) -> bool {
+        if !self
+            .clients
+            .get(&client_id)
+            .is_some_and(|client| client.shell_surface_active)
+        {
+            return false;
+        }
         let Some(tab_id) = self.shell_tab_id_for_client(client_id) else {
             return false;
         };
