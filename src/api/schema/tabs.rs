@@ -41,6 +41,13 @@ pub struct TabMoveParams {
     pub destination: Option<TabMoveDestination>,
 }
 
+/// Explicit destination moves are separately advertised from legacy tab reordering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TabMoveToDestinationParams {
+    pub tab_id: String,
+    pub destination: TabMoveDestination,
+}
+
 impl TabMoveParams {
     /// Resolves the two accepted request shapes into one destination.
     ///

@@ -147,6 +147,7 @@ fn agent_start_and_prompt_requests_round_trip() {
             wait: Some(AgentPromptWaitOptions {
                 until: vec![AgentStatus::Idle, AgentStatus::Done],
                 timeout_ms: Some(120_000),
+                submission_deadline: None,
             }),
         }),
     };
@@ -738,6 +739,8 @@ fn success_response_round_trips() {
                 live_handoff: true,
                 detached_server_daemon: true,
                 endpoint_protocol_generation: Some(1),
+                surface_interest: true,
+                health_check: true,
             }),
         },
     };
@@ -1470,4 +1473,22 @@ fn popup_close_request_round_trips() {
 
     assert_eq!(json["method"], "popup.close");
     assert_eq!(json["params"], serde_json::json!({}));
+}
+
+#[test]
+fn tab_reorder_uses_the_upstream_request_shape_even_from_a_destination() {
+    let method = Method::tab_move(TabMoveParams {
+        tab_id: "w1:t1".into(),
+        insert_index: None,
+        destination: Some(TabMoveDestination::Index { insert_index: 2 }),
+    });
+    let value = serde_json::to_value(Request {
+        id: "reorder".into(),
+        method,
+    })
+    .unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"id":"reorder","method":"tab.move","params":{"tab_id":"w1:t1","insert_index":2}})
+    );
 }

@@ -43,7 +43,7 @@ RENDER_AGENT_PANEL_RE = re.compile(r"(?m)^(?:pub\(\w+\) )?fn render_agent_panel\
 # they were unified; a reappearance in render_agent_panel means it recomputes
 # height itself again.
 INLINE_ENTRY_HEIGHT_RE = re.compile(r"\.\s*max\s*\(\s*1\s*\)")
-SHARED_ENTRY_HEIGHT_CALLS = ("agent_entry_height_from_rows(",)
+RENDER_AGENT_LIST_RE = re.compile(r"(?m)^(?:pub\(\w+\) )?fn render_agent_list<T>\s*\(")
 
 
 def blank_non_newlines(chars: list[str], start: int, end: int) -> None:
@@ -199,17 +199,23 @@ class UiHotPathArchitectureTests(unittest.TestCase):
         self.assertIsNotNone(render, "render_agent_panel was renamed or removed")
         body = function_body(code, render.start())
 
-        self.assertTrue(
-            any(call in body for call in SHARED_ENTRY_HEIGHT_CALLS),
-            "render_agent_panel must take entry heights from a shared height "
-            f"function (one of {SHARED_ENTRY_HEIGHT_CALLS})",
-        )
+        self.assertIn("render_agent_list(", body)
         self.assertNotRegex(
             body,
             INLINE_ENTRY_HEIGHT_RE,
-            "render_agent_panel must not recompute entry height itself; the "
-            "scroll metrics, the hit-test rects and the drawn rows all share "
-            "agent_entry_height_from_rows and must not drift",
+            "render_agent_panel must delegate entry geometry to render_agent_list",
+        )
+        shared = RENDER_AGENT_LIST_RE.search(code)
+        self.assertIsNotNone(shared, "shared agent renderer was renamed or removed")
+        shared_body = function_body(code, shared.start())
+        self.assertEqual(shared_body.count("row_lines(row)"), 1)
+        self.assertIn("list_scroll_metrics(&row_heights,", shared_body)
+        self.assertIn("let height = row_heights[index]", shared_body)
+        draw_loop = shared_body[shared_body.index("for (index, row)"):]
+        self.assertNotRegex(
+            draw_loop,
+            INLINE_ENTRY_HEIGHT_RE,
+            "drawn rows must use the heights already used by scroll metrics",
         )
 
     def test_function_body_scanner_stops_at_the_closing_brace(self) -> None:

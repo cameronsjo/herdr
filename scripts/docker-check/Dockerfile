@@ -20,7 +20,6 @@ ENV PATH="/opt/cargo/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" -c rustfmt,clippy
 
-ARG ZIG_VERSION
 RUN set -eu; \
     case "$(uname -m)" in \
       x86_64) zig_triple=x86_64-linux ;; \
@@ -33,9 +32,23 @@ RUN set -eu; \
     rm /tmp/zig.tar.xz
 ENV PATH="/opt/zig:${PATH}"
 
-RUN cargo install cargo-nextest --locked --quiet
+# Use the official prebuilt runner; compiling nextest can exhaust small VMs.
+ARG NEXTEST_VERSION=0.9.143
+RUN set -eu; \
+    case "$(uname -m)" in \
+      x86_64) nextest_triple=x86_64-unknown-linux-gnu ;; \
+      aarch64) nextest_triple=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    archive="cargo-nextest-${NEXTEST_VERSION}-${nextest_triple}"; \
+    base="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}"; \
+    cd /tmp; \
+    curl -sSfL "$base/$archive.tar.gz" -o "$archive.tar.gz"; \
+    curl -sSfL "$base/$archive.sha256" -o "$archive.sha256"; \
+    sha256sum -c "$archive.sha256"; \
+    tar xzf "$archive.tar.gz" -C /opt/cargo/bin cargo-nextest; \
+    rm "$archive.tar.gz" "$archive.sha256"
 
-ARG JUST_VERSION
 RUN set -eu; \
     case "$(uname -m)" in \
       x86_64) just_triple=x86_64-unknown-linux-musl ;; \

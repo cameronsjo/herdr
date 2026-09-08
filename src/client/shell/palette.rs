@@ -6,6 +6,8 @@
 //! palette registry: an action becomes searchable by gaining a help row that
 //! carries a `KeybindAction`.
 
+mod input;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 
