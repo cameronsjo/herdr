@@ -6,7 +6,7 @@ harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
 status: planned
-next: "Tasks 1 and 5 DONE. Next: Task 2 (family rows, leaf filter, ranking, match reason). Task 5 lives on branch docs/fork-ledger — merge into this branch at Task 6."
+next: "Tasks 1, 2, 5 DONE. Next: Task 3 (destructive manifest field, config override, tag, confirm)."
 branch: feat/palette-direction-picker
 pr: cameronsjo/herdr#61
 updated: 2026-09-09
@@ -107,7 +107,7 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [x] `just test`; expect GREEN
 - [x] Commit: `refactor(client): generalize the split picker into a chooser overlay` (de500b47)
 
-### Task 2 — Family rows, leaf filter, ranking, match reason
+### Task 2 — Family rows, leaf filter, ranking, match reason [DONE — c94ee161]
 
 **Files:**
 - Modify: `src/client/shell/palette.rs` (`PaletteAction::Chooser(DirectionFamily)`; `DirectionFamily::{MoveTab, MoveWorkspace, SwapPane}` with `fn choices(&self) -> Vec<ChooserChoice>` mapping `left`/`right` → `MoveTabPrevious`/`MoveTabNext`, `up`/`down` → `MoveWorkspacePrevious`/`MoveWorkspaceNext`, `left`/`down`/`up`/`right` → `SwapPane*`, each `Palette` outcome carrying the leaf row's `command_id`; `PaletteCommand.family: Option<DirectionFamily>`; `palette_commands` appends `move tab...` (keywords `["reorder tab", "tab left", "tab right"]`), `move workspace...` (`["reorder workspace", "workspace up", "workspace down"]`), `swap pane...` (`["move pane", "reorder pane"]`); `match_rank` drops the `contains` tier, `MAX_NAME_RANK = 2`; `command_match_rank` returns the matched keyword; `filtered_palette_commands` returns `Vec<PaletteRow>` and hides leaf rows unless a query token prefixes a direction word)
@@ -121,10 +121,10 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** Serial (after Task 1) · in-context Opus. **Report:** —
 
 **Steps:**
-- [ ] Tests first; expect RED
-- [ ] Implement; keybind chords unchanged; `EMPTY_PALETTE_LIMIT` and `FEATURED_COMMAND_IDS` untouched; the `...` suffix means "asks you something next", the same reading as `merge workspace into...`
-- [ ] `just test`; expect GREEN
-- [ ] Commit: `feat(client): collapse move and swap rows into a direction chooser`
+- [x] Tests first; expect RED
+- [x] Implement; keybind chords unchanged; `EMPTY_PALETTE_LIMIT` and `FEATURED_COMMAND_IDS` untouched; the `...` suffix means "asks you something next", the same reading as `merge workspace into...`
+- [x] `just test`; expect GREEN
+- [x] Commit: `feat(client): collapse move and swap rows into a direction chooser`
 
 ### Task 3 — Destructive plugin actions: manifest field, config override, tag, confirm
 
@@ -194,10 +194,15 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 
 ## Deviations
 
+- **Task 2:** `match_rank` drops the mid-word tier for a WORD-BOUNDARY substring tier rather than removing substring matching outright. The plan's three-tier scheme broke `new tab` finding `move pane to new tab` (a multi-word query can never be a single-word prefix). The boundary is any non-alphanumeric character, so `remove` still finds `(remove service)` while `move` inside `remove` does not — the review's actual finding.
+- **Task 2:** the `move pane <dir>` synonyms STAY on the swap leaf rows instead of moving to the family row. Moving them left `move pane left` matching nothing at all, because the leaf rows only surface on a directional query and the family row's own keywords do not carry a direction. `src/input/keybind_help.rs` is unchanged by this task.
+- **Task 2:** `DirectionFamily` is derived from the leaf `KeybindAction` rather than declared as a `family:` field on `KeybindHelpEntry`. One source, so a family and its leaves cannot drift, and `src/input` keeps no dependency on a client-shell type.
+- **Task 2:** a family row is NOT recorded in palette history — it asks rather than runs, so recording it would head the empty palette with a question and double-record the leaf the chooser then runs.
+
 - **Task 1:** `chooser_geometry` measures labels with `display_width` rather than byte length. The plan leaned on the ASCII byte-length invariant; measuring directly makes the rect correct by construction, and the ASCII test survives retargeted as `chooser_labels_are_ascii_so_every_terminal_renders_them_the_measured_width`.
 - **Task 1:** `ChooserOutcome::Cancel` is deferred to Task 3, which is where its first constructor (the `cancel` button on a destructive confirm) lands. Shipping it in Task 1 would have meant a dead variant and a `dead_code` warning across two commits.
 - **Task 1:** three tests fail in this worktree for reasons predating the branch — `live_handoff_preserves_pane_process_io` and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` fail identically on `master` (verified in the primary checkout at 24720e97); `client_read_loop_rejects_oversized_bracketed_paste_without_disconnect` and `server_reload_agent_manifests_reports_runtime_override` are load-flaky, each failing once under the full parallel run and passing on three isolated re-runs.
 
 ## Learnings
 
-- none yet
+
