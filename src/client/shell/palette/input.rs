@@ -127,7 +127,7 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    fn remember_palette_command(&mut self, command_id: String) {
+    pub(in crate::client::shell) fn remember_palette_command(&mut self, command_id: String) {
         crate::palette_history::remember(&mut self.recent_command_ids, command_id);
         self.persist_palette_history();
     }
@@ -147,7 +147,11 @@ impl ClientShellState {
     #[cfg(test)]
     fn persist_palette_history(&self) {}
 
-    fn run_palette_action(&mut self, action: super::PaletteAction, outcome: &mut ClientShellInput) {
+    pub(in crate::client::shell) fn run_palette_action(
+        &mut self,
+        action: super::PaletteAction,
+        outcome: &mut ClientShellInput,
+    ) {
         match action {
             super::PaletteAction::Keybind(action) => {
                 self.record_binding(crate::input::KeybindMatch::Action(action), outcome);

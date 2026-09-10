@@ -180,9 +180,8 @@ pub(super) struct ShellHitMap {
     pub(super) palette_popup: Rect,
     pub(super) palette_rows: Vec<(Rect, usize)>,
     pub(super) palette_max_scroll: usize,
-    pub(super) pane_split_popup: Rect,
-    pub(super) pane_split_vertical: Rect,
-    pub(super) pane_split_horizontal: Rect,
+    pub(super) chooser_popup: Rect,
+    pub(super) chooser_buttons: Vec<Rect>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
     pub(super) help_popup: Rect,
@@ -375,7 +374,7 @@ pub(super) enum ClientShellOverlayKind {
     GlobalMenu,
     Settings,
     Palette,
-    PaneSplitDirection,
+    Chooser,
 }
 
 #[derive(Debug)]
@@ -492,14 +491,52 @@ pub(super) struct ClientPaletteOverlay {
     pub(super) plugins: super::palette::PalettePlugins,
 }
 
-/// A pane move that landed on an existing tab, waiting on the user to pick
-/// which way it splits against that tab's focused pane before the move runs.
+/// What running a chooser button does. One overlay serves every "which one?"
+/// question the shell asks, so the outcome — not the overlay — carries what
+/// makes each question different.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ChooserOutcome {
+    /// Runs a palette row, recording it in the palette's history exactly as
+    /// running that row directly would have.
+    Palette {
+        action: super::palette::PaletteAction,
+        command_id: String,
+    },
+    /// A pane move that landed on an existing tab, waiting on which way it
+    /// splits against that tab's focused pane before the move runs.
+    PaneSplit {
+        pane_id: String,
+        tab_id: String,
+        target_pane_id: Option<String>,
+        split: crate::api::schema::SplitDirection,
+    },
+}
+
+/// One chooser button. The label is a fixed literal rather than a `String`
+/// because the geometry sizes each button from it and shares those rects with
+/// the mouse hit-test; runtime text — a plugin's own row name — goes in the
+/// overlay title, which is measured rather than assumed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ChooserChoice {
+    pub(super) label: &'static str,
+    pub(super) outcome: ChooserOutcome,
+}
+
+/// Where a chooser came from, so backing out costs the operator nothing. A
+/// chooser opened from the palette restores the query and the row they were
+/// on; one opened from a drag has nowhere to go back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PaletteReturn {
+    pub(super) query: String,
+    pub(super) selected: usize,
+}
+
 #[derive(Debug)]
-pub(super) struct ClientPaneSplitOverlay {
-    pub(super) pane_id: String,
-    pub(super) tab_id: String,
-    pub(super) target_pane_id: Option<String>,
-    pub(super) direction: crate::api::schema::SplitDirection,
+pub(super) struct ClientChooserOverlay {
+    pub(super) title: String,
+    pub(super) choices: Vec<ChooserChoice>,
+    pub(super) selected: usize,
+    pub(super) return_to: Option<PaletteReturn>,
 }
 
 #[derive(Debug)]
@@ -741,7 +778,7 @@ pub(super) enum ClientShellOverlay {
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
     Palette(ClientPaletteOverlay),
-    PaneSplitDirection(ClientPaneSplitOverlay),
+    Chooser(ClientChooserOverlay),
 }
 
 impl ClientShellOverlay {
@@ -762,7 +799,7 @@ impl ClientShellOverlay {
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
             Self::Palette(_) => ClientShellOverlayKind::Palette,
-            Self::PaneSplitDirection(_) => ClientShellOverlayKind::PaneSplitDirection,
+            Self::Chooser(_) => ClientShellOverlayKind::Chooser,
         }
     }
 }

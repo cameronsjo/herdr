@@ -246,61 +246,142 @@ impl ClientShellState {
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
     }
 
+    pub(super) fn open_chooser_overlay(
+        &mut self,
+        title: String,
+        choices: Vec<ChooserChoice>,
+        return_to: Option<PaletteReturn>,
+    ) {
+        self.overlay = Some(ClientShellOverlay::Chooser(ClientChooserOverlay {
+            title,
+            choices,
+            selected: 0,
+            return_to,
+        }));
+        self.chrome_drag = None;
+    }
+
     pub(super) fn open_pane_split_direction_overlay(
         &mut self,
         pane_id: String,
         tab_id: String,
         target_pane_id: Option<String>,
     ) {
-        self.overlay = Some(ClientShellOverlay::PaneSplitDirection(
-            ClientPaneSplitOverlay {
+        use crate::api::schema::SplitDirection;
+
+        let (vertical_label, horizontal_label) = super::palette::split_button_labels();
+        let split_choice = |label, split| ChooserChoice {
+            label,
+            outcome: ChooserOutcome::PaneSplit {
+                pane_id: pane_id.clone(),
+                tab_id: tab_id.clone(),
+                target_pane_id: target_pane_id.clone(),
+                split,
+            },
+        };
+        self.open_chooser_overlay(
+            "split into tab".to_owned(),
+            vec![
+                split_choice(vertical_label, SplitDirection::Right),
+                split_choice(horizontal_label, SplitDirection::Down),
+            ],
+            None,
+        );
+    }
+
+    fn move_chooser_selection(&mut self, delta: isize) {
+        let Some(ClientShellOverlay::Chooser(chooser)) = self.overlay.as_mut() else {
+            return;
+        };
+        let count = chooser.choices.len();
+        if count == 0 {
+            return;
+        }
+        chooser.selected = (chooser.selected as isize + delta).rem_euclid(count as isize) as usize;
+    }
+
+    /// The chooser the pane-split picker became still answers `v` and `h`,
+    /// which were the picker's own shortcuts. Keyed off the outcomes rather
+    /// than the labels so a chooser that is not about splitting never claims
+    /// two letters an operator might expect to type.
+    fn chooser_split_shortcut(&self, split: crate::api::schema::SplitDirection) -> Option<usize> {
+        let Some(ClientShellOverlay::Chooser(chooser)) = self.overlay.as_ref() else {
+            return None;
+        };
+        if !chooser
+            .choices
+            .iter()
+            .all(|choice| matches!(choice.outcome, ChooserOutcome::PaneSplit { .. }))
+        {
+            return None;
+        }
+        chooser.choices.iter().position(|choice| {
+            matches!(&choice.outcome, ChooserOutcome::PaneSplit { split: chosen, .. } if *chosen == split)
+        })
+    }
+
+    /// Runs the chosen button and closes the chooser. Cancelling hands the
+    /// operator back the palette they came from, query and row intact.
+    pub(super) fn run_chooser_choice(&mut self, index: usize, outcome: &mut ClientShellInput) {
+        let Some(ClientShellOverlay::Chooser(chooser)) = self.overlay.take() else {
+            return;
+        };
+        outcome.repaint = true;
+        let Some(choice) = chooser.choices.into_iter().nth(index) else {
+            return;
+        };
+        match choice.outcome {
+            ChooserOutcome::Palette { action, command_id } => {
+                self.remember_palette_command(command_id);
+                self.run_palette_action(action, outcome);
+            }
+            ChooserOutcome::PaneSplit {
                 pane_id,
                 tab_id,
                 target_pane_id,
-                direction: crate::api::schema::SplitDirection::Right,
-            },
-        ));
-        self.chrome_drag = None;
-    }
-
-    fn toggle_pane_split_direction(&mut self) {
-        use crate::api::schema::SplitDirection;
-        if let Some(ClientShellOverlay::PaneSplitDirection(pending)) = self.overlay.as_mut() {
-            pending.direction = if pending.direction == SplitDirection::Right {
-                SplitDirection::Down
-            } else {
-                SplitDirection::Right
-            };
+                split,
+            } => {
+                self.push_endpoint_method(
+                    crate::api::schema::Method::PaneMove(crate::api::schema::PaneMoveParams {
+                        pane_id,
+                        destination: crate::api::schema::PaneMoveDestination::Tab {
+                            tab_id,
+                            target_pane_id,
+                            split,
+                            ratio: Some(0.5),
+                        },
+                        focus: true,
+                    }),
+                    outcome,
+                );
+            }
         }
     }
 
-    /// Runs the move the picker was armed for, once the user has chosen which
-    /// way the pane splits into the destination tab.
-    pub(super) fn complete_pane_split(
-        &mut self,
-        split: crate::api::schema::SplitDirection,
-        outcome: &mut ClientShellInput,
-    ) {
-        let Some(ClientShellOverlay::PaneSplitDirection(pending)) = self.overlay.take() else {
+    /// Backing out of a chooser without running anything.
+    pub(super) fn cancel_chooser(&mut self, outcome: &mut ClientShellInput) {
+        let Some(ClientShellOverlay::Chooser(chooser)) = self.overlay.take() else {
             return;
         };
-        self.push_endpoint_method(
-            crate::api::schema::Method::PaneMove(crate::api::schema::PaneMoveParams {
-                pane_id: pending.pane_id,
-                destination: crate::api::schema::PaneMoveDestination::Tab {
-                    tab_id: pending.tab_id,
-                    target_pane_id: pending.target_pane_id,
-                    split,
-                    ratio: Some(0.5),
-                },
-                focus: true,
-            }),
-            outcome,
-        );
         outcome.repaint = true;
+        self.reopen_palette(chooser.return_to, outcome);
     }
 
-    pub(super) fn route_pane_split_direction_key(
+    fn reopen_palette(&mut self, return_to: Option<PaletteReturn>, outcome: &mut ClientShellInput) {
+        let Some(return_to) = return_to else {
+            return;
+        };
+        // Through `open_palette_overlay` rather than by rebuilding the overlay
+        // here, so the reopened palette re-asks for the plugin registry it
+        // lost — a stale list is what a hand-rolled restore would leave.
+        self.open_palette_overlay(outcome);
+        if let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() {
+            palette.query = return_to.query;
+            palette.selected = return_to.selected;
+        }
+    }
+
+    pub(super) fn route_chooser_key(
         &mut self,
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
@@ -308,26 +389,30 @@ impl ClientShellState {
         use crate::api::schema::SplitDirection;
 
         match key.code {
-            KeyCode::Esc => self.overlay = None,
-            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
-                self.toggle_pane_split_direction()
-            }
-            KeyCode::Char('v') => {
-                self.complete_pane_split(SplitDirection::Right, outcome);
+            KeyCode::Esc => {
+                self.cancel_chooser(outcome);
                 return;
+            }
+            KeyCode::Left | KeyCode::Up | KeyCode::BackTab => self.move_chooser_selection(-1),
+            KeyCode::Right | KeyCode::Down | KeyCode::Tab => self.move_chooser_selection(1),
+            KeyCode::Char('v') => {
+                if let Some(index) = self.chooser_split_shortcut(SplitDirection::Right) {
+                    self.run_chooser_choice(index, outcome);
+                    return;
+                }
             }
             KeyCode::Char('h') => {
-                self.complete_pane_split(SplitDirection::Down, outcome);
-                return;
+                if let Some(index) = self.chooser_split_shortcut(SplitDirection::Down) {
+                    self.run_chooser_choice(index, outcome);
+                    return;
+                }
             }
             KeyCode::Enter => {
-                let direction = match self.overlay.as_ref() {
-                    Some(ClientShellOverlay::PaneSplitDirection(pending)) => {
-                        pending.direction.clone()
-                    }
+                let selected = match self.overlay.as_ref() {
+                    Some(ClientShellOverlay::Chooser(chooser)) => chooser.selected,
                     _ => return,
                 };
-                self.complete_pane_split(direction, outcome);
+                self.run_chooser_choice(selected, outcome);
                 return;
             }
             _ => {}
@@ -893,11 +978,8 @@ impl ClientShellState {
             return;
         }
 
-        if matches!(
-            self.overlay,
-            Some(ClientShellOverlay::PaneSplitDirection(_))
-        ) {
-            self.route_pane_split_direction_key(key, outcome);
+        if matches!(self.overlay, Some(ClientShellOverlay::Chooser(_))) {
+            self.route_chooser_key(key, outcome);
             return;
         }
 

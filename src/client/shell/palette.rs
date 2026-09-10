@@ -21,7 +21,12 @@ use crate::protocol::ClientShellSnapshot;
 const EMPTY_PALETTE_LIMIT: usize = 12;
 
 const PALETTE_MODAL_SIZE: (u16, u16) = (76, 22);
-const SPLIT_MODAL_SIZE: (u16, u16) = (44, 6);
+const CHOOSER_MIN_MODAL_WIDTH: u16 = 44;
+const CHOOSER_MODAL_HEIGHT: u16 = 6;
+/// Borders, title and footer — what a stacked chooser costs on top of one row
+/// per choice.
+const CHOOSER_MODAL_CHROME_HEIGHT: u16 = 5;
+const CHOOSER_BUTTON_GAP: u16 = 2;
 const SPLIT_VERTICAL_LABEL: &str = " v vertical ";
 const SPLIT_HORIZONTAL_LABEL: &str = " h horizontal ";
 
@@ -43,33 +48,70 @@ pub(super) fn palette_geometry(area: Rect) -> Option<(Rect, Rect, Rect)> {
     Some((popup, inner, body))
 }
 
-/// The split-direction picker's popup, panel-inner and two button rects,
-/// shared between the renderer and the mouse hit-test for the same reason.
-pub(super) fn pane_split_direction_geometry(area: Rect) -> Option<(Rect, Rect, Rect, Rect)> {
-    let popup = crate::ui::centered_popup_rect(area, SPLIT_MODAL_SIZE.0, SPLIT_MODAL_SIZE.1)?;
-    let inner = Rect::new(
+/// The chooser's popup, panel-inner and one rect per button, shared between
+/// the renderer and the mouse hit-test for the same reason.
+///
+/// Buttons sit on one row while that row fits, and stack into a column when it
+/// does not. Stacking rather than refusing matters: a family row whose chooser
+/// returns nothing is a dead end, because collapsing the leaf rows took away
+/// the only other way to reach them.
+pub(super) fn chooser_geometry(area: Rect, labels: &[&str]) -> Option<(Rect, Rect, Vec<Rect>)> {
+    if labels.is_empty() {
+        return None;
+    }
+    let widths: Vec<u16> = labels
+        .iter()
+        .map(|label| super::render::display_width(label))
+        .collect();
+    let count = labels.len() as u16;
+    let row_width: u16 = widths
+        .iter()
+        .copied()
+        .sum::<u16>()
+        .saturating_add(CHOOSER_BUTTON_GAP.saturating_mul(count.saturating_sub(1)));
+    let widest = widths.iter().copied().max().unwrap_or(0);
+
+    let row_popup_width = CHOOSER_MIN_MODAL_WIDTH.max(row_width.saturating_add(4));
+    if let Some(popup) = crate::ui::centered_popup_rect(area, row_popup_width, CHOOSER_MODAL_HEIGHT)
+    {
+        let inner = chooser_inner(popup);
+        if inner.height >= 3 && inner.width >= row_width {
+            let mut x = inner.x + (inner.width - row_width) / 2;
+            let y = inner.y.saturating_add(1);
+            let mut buttons = Vec::with_capacity(labels.len());
+            for width in &widths {
+                buttons.push(Rect::new(x, y, *width, 1));
+                x = x.saturating_add(*width).saturating_add(CHOOSER_BUTTON_GAP);
+            }
+            return Some((popup, inner, buttons));
+        }
+    }
+
+    let stacked_popup_width = CHOOSER_MIN_MODAL_WIDTH.max(widest.saturating_add(4));
+    let stacked_popup_height = count.saturating_add(CHOOSER_MODAL_CHROME_HEIGHT);
+    let popup = crate::ui::centered_popup_rect(area, stacked_popup_width, stacked_popup_height)?;
+    let inner = chooser_inner(popup);
+    if inner.width < widest || inner.height < count.saturating_add(2) {
+        return None;
+    }
+    let x = inner.x + (inner.width - widest) / 2;
+    let buttons = (0..count)
+        .map(|row| Rect::new(x, inner.y.saturating_add(1 + row), widest, 1))
+        .collect();
+    Some((popup, inner, buttons))
+}
+
+fn chooser_inner(popup: Rect) -> Rect {
+    Rect::new(
         popup.x.saturating_add(1),
         popup.y.saturating_add(1),
         popup.width.saturating_sub(2),
         popup.height.saturating_sub(2),
-    );
-    let vertical_width = SPLIT_VERTICAL_LABEL.len() as u16;
-    let horizontal_width = SPLIT_HORIZONTAL_LABEL.len() as u16;
-    let gap = 2;
-    let total = vertical_width + gap + horizontal_width;
-    if inner.height < 3 || inner.width < total {
-        return None;
-    }
-    let x = inner.x + (inner.width - total) / 2;
-    let y = inner.y.saturating_add(1);
-    Some((
-        popup,
-        inner,
-        Rect::new(x, y, vertical_width, 1),
-        Rect::new(x + vertical_width + gap, y, horizontal_width, 1),
-    ))
+    )
 }
 
+/// The two labels the pane-split chooser offers, in the order its outcomes are
+/// built — vertical first.
 pub(super) fn split_button_labels() -> (&'static str, &'static str) {
     (SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL)
 }
@@ -706,12 +748,12 @@ mod tests {
         assert_eq!(command_match_rank(&cmd, ""), Some(1));
     }
 
-    // `pane_split_direction_geometry` sizes each button from the label's byte
-    // length, which only equals its rendered width while the labels stay
-    // ASCII. A wide or multi-byte glyph would silently mis-size the rect the
-    // mouse hit-test shares with the renderer.
+    // Chooser labels stay ASCII so a terminal cannot disagree with the
+    // geometry about how wide a button is. The rect is shared with the mouse
+    // hit-test, so a glyph that renders wider than measured moves the target
+    // out from under the drawn button rather than failing anything.
     #[test]
-    fn split_button_labels_are_ascii_so_byte_length_is_their_rendered_width() {
+    fn chooser_labels_are_ascii_so_every_terminal_renders_them_the_measured_width() {
         for label in [SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL] {
             assert!(label.is_ascii(), "{label:?} must stay ASCII");
             assert_eq!(
@@ -723,9 +765,15 @@ mod tests {
     }
 
     #[test]
-    fn the_split_picker_fits_its_two_buttons() {
-        let (_, _, vertical, horizontal) =
-            pane_split_direction_geometry(Rect::new(0, 0, 120, 40)).expect("geometry");
+    fn the_split_chooser_fits_its_two_buttons() {
+        let (_, _, buttons) = chooser_geometry(
+            Rect::new(0, 0, 120, 40),
+            &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL],
+        )
+        .expect("geometry");
+        let [vertical, horizontal] = buttons.as_slice() else {
+            panic!("two buttons, got {buttons:?}");
+        };
         assert_eq!(usize::from(vertical.width), SPLIT_VERTICAL_LABEL.len());
         assert_eq!(usize::from(horizontal.width), SPLIT_HORIZONTAL_LABEL.len());
         assert!(
@@ -736,9 +784,18 @@ mod tests {
     }
 
     #[test]
+    fn a_chooser_with_no_choices_has_no_geometry() {
+        assert!(chooser_geometry(Rect::new(0, 0, 120, 40), &[]).is_none());
+    }
+
+    #[test]
     fn a_terminal_too_small_for_the_palette_yields_no_geometry() {
         assert!(palette_geometry(Rect::new(0, 0, 10, 4)).is_none());
-        assert!(pane_split_direction_geometry(Rect::new(0, 0, 10, 4)).is_none());
+        assert!(chooser_geometry(
+            Rect::new(0, 0, 10, 4),
+            &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL]
+        )
+        .is_none());
     }
 
     #[test]

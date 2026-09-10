@@ -1811,18 +1811,16 @@ impl ClientShellState {
         // Every event is consumed here, not just the button hits: without this
         // branch a click, right-click or scroll aimed past the picker reaches
         // the pane and sidebar underneath it.
-        if matches!(
-            self.overlay,
-            Some(ClientShellOverlay::PaneSplitDirection(_))
-        ) {
+        if matches!(self.overlay, Some(ClientShellOverlay::Chooser(_))) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                if super::contains(self.hits.pane_split_vertical, point) {
-                    self.complete_pane_split(crate::api::schema::SplitDirection::Right, outcome);
-                } else if super::contains(self.hits.pane_split_horizontal, point) {
-                    self.complete_pane_split(crate::api::schema::SplitDirection::Down, outcome);
-                } else {
-                    self.overlay = None;
-                    outcome.repaint = true;
+                let hit = self
+                    .hits
+                    .chooser_buttons
+                    .iter()
+                    .position(|rect| super::contains(*rect, point));
+                match hit {
+                    Some(index) => self.run_chooser_choice(index, outcome),
+                    None => self.cancel_chooser(outcome),
                 }
             }
             return;

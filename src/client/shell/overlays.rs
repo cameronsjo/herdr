@@ -14,9 +14,8 @@ pub(crate) struct OverlayRender {
     pub(crate) palette_popup: Rect,
     pub(crate) palette_rows: Vec<(Rect, usize)>,
     pub(crate) palette_max_scroll: usize,
-    pub(crate) pane_split_popup: Rect,
-    pub(crate) pane_split_vertical: Rect,
-    pub(crate) pane_split_horizontal: Rect,
+    pub(crate) chooser_popup: Rect,
+    pub(crate) chooser_buttons: Vec<Rect>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
@@ -71,7 +70,7 @@ pub(crate) fn render_client_overlay(
             render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
         }
         ClientShellOverlay::Palette(v) => render_palette_overlay(b, v, s, k, p),
-        ClientShellOverlay::PaneSplitDirection(v) => render_pane_split_direction_overlay(b, v, p),
+        ClientShellOverlay::Chooser(v) => render_chooser_overlay(b, v, p),
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
@@ -1107,68 +1106,62 @@ fn render_palette_overlay(
     })
 }
 
-fn render_pane_split_direction_overlay(
+fn render_chooser_overlay(
     b: &mut Buffer,
-    v: &ClientPaneSplitOverlay,
+    v: &ClientChooserOverlay,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let (popup, inner, vertical, horizontal) =
-        super::super::palette::pane_split_direction_geometry(b.area)?;
+    let labels: Vec<&str> = v.choices.iter().map(|choice| choice.label).collect();
+    let (popup, inner, buttons) = super::super::palette::chooser_geometry(b.area, &labels)?;
     panel(b, popup, p.accent, p.panel_bg)?;
 
     let base = Style::default()
         .bg(p.panel_bg)
         .remove_modifier(Modifier::DIM);
+    // The title is the only runtime text here — a plugin's own row name
+    // reaches it — so it is drawn width-bounded rather than sized from.
     put_text(
         b,
         inner.x,
         inner.y,
         inner.width,
-        " split into tab",
+        &format!(" {}", v.title),
         base.fg(p.text).add_modifier(Modifier::BOLD),
     );
 
-    let selected_vertical = v.direction == crate::api::schema::SplitDirection::Right;
     let selected_style = base
         .fg(contrast(p))
         .bg(p.accent)
         .add_modifier(Modifier::BOLD);
     let unselected_style = base.fg(p.text).bg(p.surface0).add_modifier(Modifier::BOLD);
-    let (vertical_label, horizontal_label) = super::super::palette::split_button_labels();
-    button(
-        b,
-        vertical,
-        vertical_label,
-        if selected_vertical {
-            selected_style
-        } else {
-            unselected_style
-        },
-    );
-    button(
-        b,
-        horizontal,
-        horizontal_label,
-        if selected_vertical {
-            unselected_style
-        } else {
-            selected_style
-        },
-    );
+    for (index, rect) in buttons.iter().enumerate() {
+        button(
+            b,
+            *rect,
+            v.choices
+                .get(index)
+                .map(|choice| choice.label)
+                .unwrap_or_default(),
+            if index == v.selected {
+                selected_style
+            } else {
+                unselected_style
+            },
+        );
+    }
 
     put_text(
         b,
         inner.x,
         inner.bottom().saturating_sub(1),
         inner.width,
-        " ←→ choose · enter confirm · esc cancel",
+        " choose ←→ · confirm enter · cancel esc",
         base.fg(p.overlay0),
     );
 
     Some(OverlayRender {
-        pane_split_popup: popup,
-        pane_split_vertical: vertical,
-        pane_split_horizontal: horizontal,
+        chooser_popup: popup,
+        chooser_buttons: buttons,
         ..OverlayRender::default()
     })
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::input::TerminalKey;
+use crate::input::{KeybindAction, TerminalKey};
 
 fn shell() -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
@@ -283,10 +283,7 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
     let mut outcome = ClientShellInput::default();
     state.accept_navigator_selection(&mut outcome);
     assert!(
-        matches!(
-            state.overlay,
-            Some(ClientShellOverlay::PaneSplitDirection(_))
-        ),
+        matches!(state.overlay, Some(ClientShellOverlay::Chooser(_))),
         "a tab destination is a split, so the direction is asked rather than guessed"
     );
     assert!(endpoint_methods(&outcome).is_empty(), "nothing moves yet");
@@ -333,8 +330,133 @@ fn an_armed_tab_move_lands_the_whole_tab_without_asking_for_a_direction() {
     );
 }
 
+/// A chooser with more than two choices, carrying palette outcomes rather
+/// than pane splits — the shape every direction family uses. Cycling must
+/// wrap in both directions and enter must run the choice the cycle landed on,
+/// not the one that happened to be first.
 #[test]
-fn the_split_picker_captures_every_mouse_event_aimed_past_it() {
+fn a_four_way_chooser_cycles_and_runs_the_selected_outcome() {
+    let mut state = shell();
+    let choices = vec![
+        chooser_choice(" left ", KeybindAction::SwapPaneLeft, "core:swap-pane-left"),
+        chooser_choice(" down ", KeybindAction::SwapPaneDown, "core:swap-pane-down"),
+        chooser_choice(" up ", KeybindAction::SwapPaneUp, "core:swap-pane-up"),
+        chooser_choice(
+            " right ",
+            KeybindAction::SwapPaneRight,
+            "core:swap-pane-right",
+        ),
+    ];
+    state.open_chooser_overlay("swap pane".into(), choices, None);
+    state.compose(106, 24).expect("composed frame");
+
+    press(&mut state, KeyCode::Right);
+    press(&mut state, KeyCode::Right);
+    assert_eq!(chooser_selection(&state), Some(2), "right advances");
+    press(&mut state, KeyCode::Left);
+    assert_eq!(chooser_selection(&state), Some(1), "left goes back");
+    press(&mut state, KeyCode::Left);
+    press(&mut state, KeyCode::Left);
+    assert_eq!(chooser_selection(&state), Some(3), "left wraps past zero");
+
+    let ran = press(&mut state, KeyCode::Enter);
+    assert!(state.overlay.is_none(), "running closes the chooser");
+    assert!(
+        endpoint_methods(&ran).iter().any(|method| matches!(
+            method,
+            crate::api::schema::Method::PaneSwap(params)
+                if params.direction == Some(crate::api::schema::PaneDirection::Right)
+        )),
+        "enter runs the choice the cycle landed on"
+    );
+    assert_eq!(
+        state.recent_command_ids.first().map(String::as_str),
+        Some("core:swap-pane-right"),
+        "a palette outcome records the leaf row it ran"
+    );
+}
+
+/// A chooser opened from the palette owes the operator their query back when
+/// they change their mind — otherwise cancelling costs them the whole search.
+#[test]
+fn cancel_from_a_palette_spawned_chooser_restores_the_query() {
+    let mut state = shell();
+    let choices = vec![chooser_choice(
+        " left ",
+        KeybindAction::SwapPaneLeft,
+        "core:swap-pane-left",
+    )];
+    state.open_chooser_overlay(
+        "swap pane".into(),
+        choices,
+        Some(PaletteReturn {
+            query: "swap".into(),
+            selected: 2,
+        }),
+    );
+    state.compose(106, 24).expect("composed frame");
+
+    press(&mut state, KeyCode::Esc);
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Palette(palette)) => {
+            assert_eq!(palette.query, "swap", "the query comes back");
+            assert_eq!(palette.selected, 2, "and the row they were on");
+        }
+        other => panic!("esc should reopen the palette, got {other:?}"),
+    }
+}
+
+/// Four buttons do not fit on one row of a narrow terminal. The chooser must
+/// stack them rather than return nothing, because a family row that opens an empty
+/// overlay is a dead end with no other way to reach its leaves.
+#[test]
+fn a_chooser_too_wide_for_one_row_stacks_its_buttons() {
+    let labels = [" left ", " down ", " up ", " right "];
+    let (_, _, wide) =
+        super::super::palette::chooser_geometry(Rect::new(0, 0, 120, 40), &labels).expect("wide");
+    assert!(
+        wide.windows(2).all(|pair| pair[0].y == pair[1].y),
+        "a wide terminal keeps one row: {wide:?}"
+    );
+
+    let (_, _, narrow) =
+        super::super::palette::chooser_geometry(Rect::new(0, 0, 34, 24), &labels).expect("narrow");
+    assert_eq!(narrow.len(), labels.len(), "every choice keeps a rect");
+    assert!(
+        narrow.windows(2).all(|pair| pair[1].y > pair[0].y),
+        "a narrow terminal stacks: {narrow:?}"
+    );
+    assert!(
+        narrow
+            .windows(2)
+            .all(|pair| pair[0].x == pair[1].x && pair[0].width == pair[1].width),
+        "stacked buttons share a column: {narrow:?}"
+    );
+}
+
+fn chooser_choice(
+    label: &'static str,
+    action: KeybindAction,
+    command_id: &str,
+) -> super::super::state::ChooserChoice {
+    super::super::state::ChooserChoice {
+        label,
+        outcome: super::super::state::ChooserOutcome::Palette {
+            action: super::super::palette::PaletteAction::Keybind(action),
+            command_id: command_id.to_owned(),
+        },
+    }
+}
+
+fn chooser_selection(state: &ClientShellState) -> Option<usize> {
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => Some(chooser.selected),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_chooser_captures_every_mouse_event_aimed_past_it() {
     let mut state = shell();
     state.open_pane_split_direction_overlay("pane_1".into(), "tab_1".into(), None);
     state.compose(106, 24).expect("composed frame");
@@ -357,10 +479,7 @@ fn the_split_picker_captures_every_mouse_event_aimed_past_it() {
         }),
     ]);
     assert!(
-        matches!(
-            state.overlay,
-            Some(ClientShellOverlay::PaneSplitDirection(_))
-        ),
+        matches!(state.overlay, Some(ClientShellOverlay::Chooser(_))),
         "the picker stays open"
     );
     assert_eq!(state.workspace_scroll, scroll_before);
@@ -372,11 +491,16 @@ fn the_split_picker_captures_every_mouse_event_aimed_past_it() {
 }
 
 #[test]
-fn the_split_buttons_are_hit_where_the_renderer_drew_them() {
+fn the_chooser_buttons_are_hit_where_the_renderer_drew_them() {
     let mut state = shell();
     state.open_pane_split_direction_overlay("pane_1".into(), "tab_1".into(), None);
     state.compose(106, 24).expect("composed frame");
-    let vertical = state.hits.pane_split_vertical;
+    let vertical = state
+        .hits
+        .chooser_buttons
+        .first()
+        .copied()
+        .unwrap_or_default();
     assert!(!vertical.is_empty(), "the renderer publishes a button rect");
 
     let moved = click(&mut state, vertical.x + 1, vertical.y);
