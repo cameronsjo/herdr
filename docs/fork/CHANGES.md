@@ -37,7 +37,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **PR:** [cameronsjo/herdr#58](https://github.com/cameronsjo/herdr/pull/58)
 - **Files:** `scripts/cut-fork-release.sh`
 - **Replaces:** Upstream has no fork-suffixed release process; this scripts the tag-and-push sequence the fork's `vX.Y.Z-palette.N` tags need.
-- **Regression check:** `bash scripts/cut-fork-release.sh --dry-run` (or equivalent no-op flag) prints the next tag without pushing.
+- **Regression check:** `bash scripts/cut-fork-release.sh --dry-run v0.9.0-palette.1` prints the tag-and-push sequence without running it. The tag argument is required; the bare form tags and pushes with no prompt.
 
 ## Sync upstream into the fork (`docs/plans/2026-09-07-sync-upstream.md`)
 
@@ -196,7 +196,7 @@ before plan documents existed. Grouped here rather than dropped.
 - **PR:** [cameronsjo/herdr#7](https://github.com/cameronsjo/herdr/pull/7)
 - **Files:** `skills/herdr/SKILL.md`, `skills/herdr/references/*.md`, `src/main.rs`, `nix/package.nix`, `Cargo.toml`, `docs/next/website/src/content/docs/agent-skill.mdx`
 - **Replaces:** Upstream ships (or shipped, at this fork point) the agent skill as a single flat file; this splits it into a directory the binary can emit via a subcommand.
-- **Regression check:** `herdr skill emit` (or equivalent subcommand) writes the skill directory intact.
+- **Regression check:** `herdr --skill` prints the agent skill and exits (the flag is declared in `src/cli/spec.rs`).
 
 ### feat: move a tab to another space
 
