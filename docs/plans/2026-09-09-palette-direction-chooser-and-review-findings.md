@@ -6,9 +6,9 @@ harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
 status: planned
-next: "approve → worktree ../herdr-worktrees/palette-direction-picker on branch feat/palette-direction-picker → push -u fork → draft PR → file the bold-artifact issue → Task 1"
+next: "Task 0 DONE (PR #61 draft, issue #62). Driver mismatch (plan opus, live fable) asked; Task 5 dispatched in parallel. Next: Task 1"
 branch: feat/palette-direction-picker
-pr: —
+pr: cameronsjo/herdr#61
 updated: 2026-09-09
 date: 2026-09-09
 ---
@@ -82,10 +82,10 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** In-context. **Report:** —
 
 **Steps:**
-- [ ] `git -C ~/Projects/cadence-ecosystem/herdr worktree add ../herdr-worktrees/palette-direction-picker -b feat/palette-direction-picker master`
-- [ ] Copy this plan to `docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md` in the worktree; commit `docs: plan the palette direction chooser and review fixes`
-- [ ] `git push -u fork feat/palette-direction-picker`; `gh pr create -R cameronsjo/herdr --draft` with `--body-file`
-- [ ] File the bold-artifact issue on `cameronsjo/herdr` with `--body-file`: title `palette: stray bold spans inside plugin row labels`; body: two screenshots at different terminal sizes show bold on the same substring (`all web`) of the `Collie` row, which rules out bleed-through from the pane beneath; `overlays.rs:1060-1075` paints one style per row, so the modifier arrives with the row text or survives a frame diff. Reproduction: open the palette, type `move`, look at the `Collie` row.
+- [x] `git -C ~/Projects/cadence-ecosystem/herdr worktree add ../herdr-worktrees/palette-direction-picker -b feat/palette-direction-picker master`
+- [x] Copy this plan to `docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md` in the worktree; commit `docs: plan the palette direction chooser and review fixes`
+- [x] `git push -u fork feat/palette-direction-picker`; `gh pr create -R cameronsjo/herdr --draft` with `--body-file`
+- [x] File the bold-artifact issue on `cameronsjo/herdr` with `--body-file`: title `palette: stray bold spans inside plugin row labels`; body: two screenshots at different terminal sizes show bold on the same substring (`all web`) of the `Collie` row, which rules out bleed-through from the pane beneath; `overlays.rs:1060-1075` paints one style per row, so the modifier arrives with the row text or survives a frame diff. Reproduction: open the palette, type `move`, look at the `Collie` row.
 
 ### Task 1 — Generic chooser overlay; split picker migrated onto it
 
