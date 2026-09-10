@@ -209,4 +209,8 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 
 ## Learnings
 
+- **`cargo check --tests` is not the CI gate, and it masks a whole class of failure.** CI runs `just lint` = `cargo clippy --all-targets --locked -- -D warnings`. A field read only by a `#[cfg(test)]` assertion compiles clean under `cargo check --tests` and fails CI with `error: field is never read` on the non-test build — exactly what `PaletteRow.matched_keyword` did between Task 2 and Task 4, turning the branch's CI red for two commits. Run clippy with warnings denied before calling a branch green.
+- **`just` is not on PATH in the Bash tool.** It lives at `~/.local/share/mise/installs/just/1.58.0/just`, and the mise shim refuses without a global default version pinned. Invoke the binary by absolute path, or run the underlying cargo commands directly.
+- **Two `live_handoff` tests fail on `master`** — `live_handoff_preserves_pane_process_io` and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session`, verified in the primary checkout at `24720e97`. Three more are load-flaky under the full parallel run and pass in isolation. Neither set is a signal about a branch.
+- **Dropping a match tier is not the same as dropping mid-word matching.** The plan's three-tier scheme silently broke `new tab` finding `move pane to new tab`, because a multi-word query can never be a single-word prefix. A word-boundary substring tier kills the bad hit the review found and keeps every good one; the test that caught it was an existing one, not a new one.
 
