@@ -107,6 +107,10 @@ pub(crate) struct ClientShellConfig {
     pub(super) preferences: preferences::ClientChromePreferences,
     pub(super) startup_config_diagnostic: Option<String>,
     pub(super) startup_onboarding: bool,
+    /// Plugin actions the operator marked destructive, as
+    /// `"<plugin_id>:<action_id>"`. A row is destructive when either this
+    /// list or the plugin manifest says so.
+    pub(super) destructive_palette_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -496,6 +500,9 @@ pub(super) struct ClientPaletteOverlay {
 /// makes each question different.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ChooserOutcome {
+    /// Backs out without running anything, reopening the palette the chooser
+    /// came from.
+    Cancel,
     /// Runs a palette row, recording it in the palette's history exactly as
     /// running that row directly would have.
     Palette {

@@ -509,6 +509,22 @@ Metadata reporters provide values only; styling stays in the local sidebar confi
 
 Sidebar row settings affect only the expanded desktop sidebar. Collapsed and mobile views keep their compact layouts.
 
+## Command palette
+
+A plugin action whose manifest sets `destructive = true` is tagged in the
+command palette and asks before it runs. For a third-party plugin whose author
+has not set it, mark the action yourself:
+
+```toml
+[palette]
+destructive_actions = ["collie:uninstall"]
+```
+
+Each entry is `"<plugin_id>:<action_id>"`, matched as a whole pair — marking
+one action never marks a sibling. An action is confirmed when either its
+manifest or this list says so. Changes take effect on `herdr server
+reload-config`.
+
 ## Notifications
 
 Herdr can notify you when a background agent finishes or needs input:

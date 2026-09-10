@@ -266,7 +266,13 @@ pub(crate) struct PaletteCommand {
     /// Set on a leaf row of a direction family. Such a row is hidden unless
     /// the query names a direction, because its family row answers for it.
     pub family: Option<DirectionFamily>,
+    /// Running this removes or replaces something. The row carries a tag and
+    /// Enter asks before it runs.
+    pub destructive: bool,
 }
+
+/// The suffix a destructive row wears in the palette list.
+pub(super) const DESTRUCTIVE_TAG: &str = " [destructive]";
 
 /// A command that matched, with why it matched. The keyword is what the
 /// renderer shows when a row has no key of its own — a hit with no visible
@@ -287,6 +293,11 @@ struct PluginPaletteCommand {
 #[derive(Debug, Default)]
 pub(crate) struct PalettePlugins {
     pub installed: Vec<InstalledPluginInfo>,
+    /// The operator's own `[palette] destructive_actions` list, carried
+    /// alongside the endpoint's report because a row is destructive when
+    /// either source says so — and the manifest is the side we do not
+    /// control.
+    pub destructive_actions: Vec<String>,
     /// The platform the answering server runs on. `None` against a server too
     /// old to report it, which means "do not filter" — see
     /// [`platform_supported`].
@@ -367,6 +378,24 @@ fn plugin_command_name(plugin_name: &str, title: &str) -> String {
     }
 }
 
+/// Whether the operator's override list names this action. Matched on the
+/// exact `"<plugin_id>:<action_id>"` pair rather than either half, so marking
+/// one action never silently marks a sibling.
+fn action_is_marked_destructive(
+    destructive_actions: &[String],
+    plugin_id: &str,
+    action_id: &str,
+) -> bool {
+    destructive_actions
+        .iter()
+        .any(|marked| match marked.split_once(':') {
+            Some((marked_plugin, marked_action)) => {
+                marked_plugin == plugin_id && marked_action == action_id
+            }
+            None => false,
+        })
+}
+
 fn disambiguate_plugin_labels(plugin_commands: &mut [PluginPaletteCommand]) {
     let mut label_counts: HashMap<String, usize> = HashMap::new();
     for plugin_command in plugin_commands.iter() {
@@ -414,6 +443,12 @@ fn plugin_palette_commands(
             .collect();
         actions.sort_by(|left, right| left.id.cmp(&right.id));
         for action in actions {
+            let destructive = action.destructive
+                || action_is_marked_destructive(
+                    &plugins.destructive_actions,
+                    &plugin.plugin_id,
+                    &action.id,
+                );
             plugin_commands.push(PluginPaletteCommand {
                 command: PaletteCommand {
                     id: format!("plugin-action:{}.{}", plugin.plugin_id, action.id),
@@ -425,6 +460,7 @@ fn plugin_palette_commands(
                     },
                     keywords: &[],
                     family: None,
+                    destructive,
                 },
                 kind: "action",
             });
@@ -455,6 +491,8 @@ fn plugin_palette_commands(
                     },
                     keywords: &[],
                     family: None,
+                    // Opening a pane shows something; it removes nothing.
+                    destructive: false,
                 },
                 kind: "pane",
             });
@@ -486,6 +524,9 @@ pub(crate) fn palette_commands(
                     action: PaletteAction::Keybind(action),
                     keywords: entry.keywords,
                     family: DirectionFamily::of(action),
+                    // Core actions are confirmed where they need it — closing
+                    // a pane already has its own dialog.
+                    destructive: false,
                 })
             })
             .collect();
@@ -499,6 +540,7 @@ pub(crate) fn palette_commands(
             action: PaletteAction::Chooser(family),
             keywords: family.keywords(),
             family: None,
+            destructive: false,
         }
     }));
     commands.extend(plugin_palette_commands(plugins, snapshot));
@@ -657,6 +699,7 @@ mod tests {
             action: PaletteAction::Keybind(KeybindAction::ClosePane),
             keywords,
             family: None,
+            destructive: false,
         }
     }
 
@@ -1233,6 +1276,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: Some(PluginPlatform::Windows),
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(commands
@@ -1248,6 +1292,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: Some(PluginPlatform::Linux),
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(commands
@@ -1274,6 +1319,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: None,
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(
@@ -1316,7 +1362,107 @@ mod tests {
         PalettePlugins {
             installed,
             host_platform: Some(this_binarys_platform()),
+            destructive_actions: Vec::new(),
         }
+    }
+
+    /// The action `test_plugin` carries that removes something.
+    fn uninstall_action() -> crate::api::schema::PluginManifestAction {
+        crate::api::schema::PluginManifestAction {
+            id: "uninstall".into(),
+            title: "Uninstall web bridge (remove service)".into(),
+            description: None,
+            contexts: Vec::new(),
+            platforms: None,
+            destructive: false,
+            command: vec!["true".into()],
+        }
+    }
+
+    fn find_command<'a>(commands: &'a [PaletteCommand], id: &str) -> Option<&'a PaletteCommand> {
+        commands.iter().find(|command| command.id == id)
+    }
+
+    #[test]
+    fn a_destructive_manifest_action_carries_its_tag() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        let mut action = uninstall_action();
+        action.destructive = true;
+        plugin.actions.push(action);
+
+        let commands = plugin_palette_commands(&host_plugins(vec![plugin]), &snapshot);
+        let uninstall = find_command(&commands, "plugin-action:demo.uninstall")
+            .expect("the uninstall row reaches the palette");
+        assert!(uninstall.destructive, "the manifest said so");
+        assert!(
+            !find_command(&commands, "plugin-action:demo.build")
+                .expect("build row")
+                .destructive,
+            "its sibling is untouched"
+        );
+    }
+
+    #[test]
+    fn a_config_override_marks_a_third_party_action_destructive() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        // The manifest does NOT set it — this is the third-party case the
+        // override exists for.
+        plugin.actions.push(uninstall_action());
+        let plugins = PalettePlugins {
+            installed: vec![plugin],
+            host_platform: Some(this_binarys_platform()),
+            destructive_actions: vec!["demo:uninstall".into()],
+        };
+
+        let commands = plugin_palette_commands(&plugins, &snapshot);
+        assert!(
+            find_command(&commands, "plugin-action:demo.uninstall")
+                .expect("uninstall row")
+                .destructive
+        );
+        assert!(
+            !find_command(&commands, "plugin-action:demo.build")
+                .expect("build row")
+                .destructive,
+            "marking one action must not mark its siblings"
+        );
+    }
+
+    #[test]
+    fn a_destructive_override_matches_the_whole_pair_not_either_half() {
+        assert!(action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "demo",
+            "uninstall"
+        ));
+        // Same action id under a different plugin.
+        assert!(!action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "other",
+            "uninstall"
+        ));
+        // Same plugin, different action.
+        assert!(!action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "demo",
+            "build"
+        ));
+        // A malformed entry marks nothing rather than everything.
+        assert!(!action_is_marked_destructive(
+            &["demo".to_string()],
+            "demo",
+            "uninstall"
+        ));
+    }
+
+    #[test]
+    fn an_old_manifest_without_the_field_parses_as_not_destructive() {
+        let manifest: crate::api::schema::PluginManifestAction =
+            serde_json::from_str(r#"{"id":"build","title":"Build","command":["true"]}"#)
+                .expect("a manifest predating the field still parses");
+        assert!(!manifest.destructive);
     }
 
     // Two plugins, because the sort is across plugins as well as within one:
@@ -1332,6 +1478,7 @@ mod tests {
         second
             .actions
             .push(crate::api::schema::PluginManifestAction {
+                destructive: false,
                 id: "aaa-first".into(),
                 title: "Aaa first".into(),
                 description: None,
@@ -1391,6 +1538,7 @@ mod tests {
             build: Vec::new(),
             startup: Vec::new(),
             actions: vec![crate::api::schema::PluginManifestAction {
+                destructive: false,
                 id: "build".into(),
                 title: "Build".into(),
                 description: None,

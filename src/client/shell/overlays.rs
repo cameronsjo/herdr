@@ -1072,6 +1072,26 @@ fn render_palette_overlay(
                 &format!(" {}", row.command.name),
                 style,
             );
+            // Drawn over the name's trailing space rather than appended to it,
+            // so the tag keeps the warning colour on an unselected row while
+            // the selected row's own style still wins.
+            if row.command.destructive {
+                let tag = super::super::palette::DESTRUCTIVE_TAG;
+                let offset = display_width(&format!(" {}", row.command.name));
+                let tag_style = if selected {
+                    style
+                } else {
+                    base.fg(p.peach).add_modifier(Modifier::BOLD)
+                };
+                put_text(
+                    b,
+                    rect.x.saturating_add(offset),
+                    rect.y,
+                    rect.width.saturating_sub(offset),
+                    tag,
+                    tag_style,
+                );
+            }
             if !row.command.key.is_empty() {
                 let key_style = if selected { style } else { base.fg(p.overlay1) };
                 put_right_text(b, rect, rect.y, &format!("{} ", row.command.key), key_style);

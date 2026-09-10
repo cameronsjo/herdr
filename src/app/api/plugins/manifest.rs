@@ -57,6 +57,8 @@ struct RawPluginManifestAction {
     contexts: Vec<crate::api::schema::PluginActionContext>,
     #[serde(default)]
     platforms: Option<Vec<RawPlatform>>,
+    #[serde(default)]
+    destructive: bool,
     command: Vec<String>,
 }
 
@@ -400,6 +402,7 @@ fn normalize_manifest_action(
         description,
         contexts: action.contexts,
         platforms,
+        destructive: action.destructive,
         command,
     })
 }

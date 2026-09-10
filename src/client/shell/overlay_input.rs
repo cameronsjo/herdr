@@ -331,6 +331,7 @@ impl ClientShellState {
             return;
         };
         match choice.outcome {
+            ChooserOutcome::Cancel => self.reopen_palette(chooser.return_to, outcome),
             ChooserOutcome::Palette { action, command_id } => {
                 self.remember_palette_command(command_id);
                 self.run_palette_action(action, outcome);

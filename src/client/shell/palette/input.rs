@@ -7,6 +7,10 @@ impl ClientShellState {
     ) {
         self.overlay = Some(ClientShellOverlay::Palette(ClientPaletteOverlay {
             recent_command_ids: self.recent_command_ids.clone(),
+            plugins: super::PalettePlugins {
+                destructive_actions: self.config.destructive_palette_actions.clone(),
+                ..super::PalettePlugins::default()
+            },
             ..ClientPaletteOverlay::default()
         }));
         self.chrome_drag = None;
@@ -33,12 +37,14 @@ impl ClientShellState {
         installed: Vec<crate::api::schema::InstalledPluginInfo>,
         host_platform: Option<crate::api::schema::PluginPlatform>,
     ) -> bool {
+        let destructive_actions = self.config.destructive_palette_actions.clone();
         let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
             return false;
         };
         palette.plugins = super::PalettePlugins {
             installed,
             host_platform,
+            destructive_actions,
         };
         palette.selected = 0;
         palette.scroll = 0;
@@ -131,6 +137,31 @@ impl ClientShellState {
             self.open_chooser_overlay(
                 family.chooser_title().to_owned(),
                 family.choices(),
+                Some(PaletteReturn { query, selected }),
+            );
+            return;
+        }
+
+        // Cancel is offered first and selected by default, so the reflex
+        // second Enter backs out rather than running the thing. History
+        // records inside the "run anyway" outcome, never here — a cancelled
+        // row must not lead the next empty palette.
+        if row.command.destructive {
+            self.open_chooser_overlay(
+                row.command.name.into_owned(),
+                vec![
+                    ChooserChoice {
+                        label: " cancel ",
+                        outcome: ChooserOutcome::Cancel,
+                    },
+                    ChooserChoice {
+                        label: " run anyway ",
+                        outcome: ChooserOutcome::Palette {
+                            action: row.command.action,
+                            command_id: row.command.id,
+                        },
+                    },
+                ],
                 Some(PaletteReturn { query, selected }),
             );
             return;

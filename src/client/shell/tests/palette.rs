@@ -489,6 +489,148 @@ fn enter_on_a_family_row_opens_the_chooser_with_a_return() {
     );
 }
 
+/// A palette holding one destructive plugin action, reached by a query that
+/// names it.
+fn shell_with_a_destructive_plugin_row() -> ClientShellState {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    let action = crate::api::schema::PluginManifestAction {
+        id: "uninstall".into(),
+        title: "Uninstall web bridge (remove service)".into(),
+        description: None,
+        contexts: Vec::new(),
+        platforms: None,
+        destructive: true,
+        command: vec!["true".into()],
+    };
+    let plugin = crate::api::schema::InstalledPluginInfo {
+        plugin_id: "collie".into(),
+        name: "Collie".into(),
+        version: "1.0.0".into(),
+        min_herdr_version: String::new(),
+        description: None,
+        manifest_path: "/tmp/collie/herdr-plugin.toml".into(),
+        plugin_root: "/tmp/collie".into(),
+        enabled: true,
+        platforms: None,
+        build: Vec::new(),
+        startup: Vec::new(),
+        actions: vec![action],
+        events: Vec::new(),
+        panes: Vec::new(),
+        link_handlers: Vec::new(),
+        source: Default::default(),
+        warnings: Vec::new(),
+    };
+    assert!(state.receive_palette_plugins(vec![plugin], None));
+    for character in "uninstall".chars() {
+        press(&mut state, KeyCode::Char(character));
+    }
+    state.compose(106, 24).expect("composed frame");
+    state
+}
+
+#[test]
+fn enter_on_a_destructive_row_confirms_before_running() {
+    let mut state = shell_with_a_destructive_plugin_row();
+    let names: Vec<String> = state
+        .filtered_palette_commands()
+        .into_iter()
+        .map(|row| row.command.name.into_owned())
+        .collect();
+    assert_eq!(
+        names.first().map(String::as_str),
+        Some("Collie — Uninstall web bridge (remove service)"),
+        "got {names:?}"
+    );
+
+    let asked = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&asked)
+            .iter()
+            .all(|method| !matches!(method, crate::api::schema::Method::PluginActionInvoke(_))),
+        "nothing runs before the confirm is answered"
+    );
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => {
+            assert_eq!(
+                chooser.title, "Collie — Uninstall web bridge (remove service)",
+                "the confirm names the whole row, not a generic warning"
+            );
+            assert_eq!(chooser.choices.len(), 2);
+        }
+        other => panic!("enter should confirm, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_destructive_confirm_defaults_to_cancel() {
+    let mut state = shell_with_a_destructive_plugin_row();
+    press(&mut state, KeyCode::Enter);
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => {
+            assert_eq!(chooser.selected, 0, "the default choice is the first");
+            assert_eq!(
+                chooser.choices.first().map(|choice| &choice.outcome),
+                Some(&ChooserOutcome::Cancel),
+                "and the first choice backs out"
+            );
+        }
+        other => panic!("enter should confirm, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_cancelled_destructive_row_is_not_remembered() {
+    let mut state = shell_with_a_destructive_plugin_row();
+    press(&mut state, KeyCode::Enter);
+    state.compose(106, 24).expect("composed frame");
+
+    // The reflex second enter takes the default, which is cancel.
+    let cancelled = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&cancelled)
+            .iter()
+            .all(|method| !matches!(method, crate::api::schema::Method::PluginActionInvoke(_))),
+        "cancel runs nothing"
+    );
+    assert!(
+        !state
+            .recent_command_ids
+            .iter()
+            .any(|id| id == "plugin-action:collie.uninstall"),
+        "a cancelled row must not lead the next empty palette"
+    );
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Palette(_))),
+        "cancel returns the operator to their search"
+    );
+}
+
+#[test]
+fn run_anyway_runs_the_destructive_action_and_remembers_it() {
+    let mut state = shell_with_a_destructive_plugin_row();
+    press(&mut state, KeyCode::Enter);
+    state.compose(106, 24).expect("composed frame");
+    press(&mut state, KeyCode::Right);
+
+    let ran = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&ran).iter().any(|method| matches!(
+            method,
+            crate::api::schema::Method::PluginActionInvoke(params)
+                if params.action_id == "uninstall"
+        )),
+        "run anyway invokes the action"
+    );
+    assert_eq!(
+        state.recent_command_ids.first().map(String::as_str),
+        Some("plugin-action:collie.uninstall"),
+        "a run command is remembered like any other"
+    );
+}
+
 fn chooser_choice(
     label: &'static str,
     action: KeybindAction,
