@@ -6,7 +6,7 @@ harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
 status: planned
-next: "Tasks 1, 2, 5 DONE. Next: Task 3 (destructive manifest field, config override, tag, confirm)."
+next: "Tasks 1, 2, 3, 5 DONE. Next: Task 4 (right column + footer), dispatched to a fresh Sonnet implementer; then Task 6."
 branch: feat/palette-direction-picker
 pr: cameronsjo/herdr#61
 updated: 2026-09-09
@@ -126,7 +126,7 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [x] `just test`; expect GREEN
 - [x] Commit: `feat(client): collapse move and swap rows into a direction chooser`
 
-### Task 3 — Destructive plugin actions: manifest field, config override, tag, confirm
+### Task 3 — Destructive plugin actions: manifest field, config override, tag, confirm [DONE — b4390d7f]
 
 **Files:**
 - Modify: `src/api/schema/plugins.rs:244` (`destructive: bool`, `#[serde(default)]`, on `PluginManifestAction` only) and the manifest parser that fills it; `docs/next/api/herdr-api.schema.json` (regenerate, see Global Constraints); `docs/next/website/src/content/docs/plugins.mdx` (manifest field) and `configuration.mdx` + `src/data/config-reference.json` (the config key)
@@ -140,9 +140,9 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** Serial (after Task 2) · in-context Opus. **Report:** —
 
 **Steps:**
-- [ ] Tests first; expect RED
-- [ ] Implement; `just test`; if `generated_protocol_schema_artifact_is_current` is red, regenerate and commit the artifact in the same commit
-- [ ] Commit: `feat(plugins): tag and confirm destructive palette actions`
+- [x] Tests first; expect RED
+- [x] Implement; `just test`; regenerated `docs/next/api/herdr-api.schema.json` (one additive optional boolean)
+- [x] Commit: `feat(plugins): tag and confirm destructive palette actions`
 
 ### Task 4 — Right column and footer
 
@@ -193,6 +193,10 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - `gh pr view -R cameronsjo/herdr <n> --json isDraft,statusCheckRollup` reads ready and green; `docs/fork/CHANGES.md` top entry names that PR.
 
 ## Deviations
+
+- **Task 3:** the destructive-tag colour is `palette.peach` (the theme's documented warning colour). The plan said "the palette's warning color"; no `warning` field exists on the colour palette.
+- **Task 3:** the override list rides `PalettePlugins` rather than a new `filtered_palette_commands` parameter, matching how `recent_command_ids` is already carried on the palette overlay. Same effect, no new parameter through two render paths.
+- **Task 3:** added `a_destructive_override_matches_the_whole_pair_not_either_half` and `run_anyway_runs_the_destructive_action_and_remembers_it` beyond the plan's list — the first pins that marking one action never marks a sibling, the second is the positive arm the plan only specified negatively.
 
 - **Task 2:** `match_rank` drops the mid-word tier for a WORD-BOUNDARY substring tier rather than removing substring matching outright. The plan's three-tier scheme broke `new tab` finding `move pane to new tab` (a multi-word query can never be a single-word prefix). The boundary is any non-alphanumeric character, so `remove` still finds `(remove service)` while `move` inside `remove` does not — the review's actual finding.
 - **Task 2:** the `move pane <dir>` synonyms STAY on the swap leaf rows instead of moving to the family row. Moving them left `move pane left` matching nothing at all, because the leaf rows only surface on a directional query and the family row's own keywords do not carry a direction. `src/input/keybind_help.rs` is unchanged by this task.
