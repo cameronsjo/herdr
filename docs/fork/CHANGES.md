@@ -37,7 +37,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **PR:** [cameronsjo/herdr#61](https://github.com/cameronsjo/herdr/pull/61)
 - **Files:** `src/api/schema/plugins.rs`, `src/app/api/plugins/manifest.rs`, `src/config/{model.rs,io.rs}`, `src/client/shell/{config.rs,state.rs,palette.rs,palette/input.rs,overlays.rs}`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{plugins,configuration}.mdx`, `docs/next/website/src/data/config-reference.json`
 - **Replaces:** Upstream runs any plugin action straight from the palette with no marking and no confirm. The fork adds an optional `destructive` key to `[[actions]]` in the plugin manifest and a `[palette] destructive_actions` config override for third-party plugins; a marked row is tagged and asks before running, with cancel selected by default. The manifest field is additive and optional, so an older manifest parses unchanged.
-- **Regression check:** `cargo nextest run -E 'test(destructive)'` — nine tests. Also `python3 scripts/config_reference_check.py` exits 0, and step 5 of `bash scripts/palette-live-check.sh`.
+- **Regression check:** `cargo nextest run -E 'test(destructive)'` — eight tests. Also `python3 scripts/config_reference_check.py` exits 0, and step 5 of `bash scripts/palette-live-check.sh`.
 
 ### fix(client): palette right column shows a key, a match reason, or a dash
 
