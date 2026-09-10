@@ -6,7 +6,7 @@ harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
 status: planned
-next: "Task 0 DONE (PR #61 draft, issue #62). Driver mismatch (plan opus, live fable) asked; Task 5 dispatched in parallel. Next: Task 1"
+next: "Task 0 DONE (PR #61 draft, issue #62). Task 5 dispatched (Sonnet) in sibling worktree ../fork-ledger on branch docs/fork-ledger — merge it into this branch at Task 6. Cameron swapping the session to opus. Next: Task 1 in worktree herdr-worktrees/palette-direction-picker; reports dir /tmp/herdr-palette.GMQA8q"
 branch: feat/palette-direction-picker
 pr: cameronsjo/herdr#61
 updated: 2026-09-09
