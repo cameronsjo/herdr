@@ -5,8 +5,8 @@ model: "claude-fable-5-1"
 harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
-status: planned
-next: "Tasks 1, 2, 3, 5 DONE. Next: Task 4 (right column + footer), dispatched to a fresh Sonnet implementer; then Task 6."
+status: done
+next: "All tasks DONE. Review findings folded in (b40bf79a). Remaining: Cameron runs the live check and merges cameronsjo/herdr#61."
 branch: feat/palette-direction-picker
 pr: cameronsjo/herdr#61
 updated: 2026-09-09
@@ -144,7 +144,7 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [x] Implement; `just test`; regenerated `docs/next/api/herdr-api.schema.json` (one additive optional boolean)
 - [x] Commit: `feat(plugins): tag and confirm destructive palette actions`
 
-### Task 4 — Right column and footer
+### Task 4 — Right column and footer [DONE — 17fa1c49]
 
 **Files:**
 - Modify: `src/input/keybind_help.rs:14,77,82` (`KeybindHelpEntry.key: Option<String>`; the builders stop substituting `unset`), `src/client/shell/render.rs:75` and `src/config/keybinds.rs:836` (each keeps its own `unset` fallback at the render site), `src/client/shell/palette.rs:305-332` (`PaletteCommand.key: Option<String>`)
@@ -157,9 +157,9 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** Serial (after Task 3) · fresh Sonnet subagent. **Report:** `<reports-dir>/task-4.md`
 
 **Steps:**
-- [ ] Tests first; expect RED
-- [ ] Implement; `just test`; expect GREEN
-- [ ] Commit: `fix(client): palette right column shows a key, a match reason, or a dash`
+- [x] Tests first; expect RED
+- [x] Implement; `just test`; expect GREEN
+- [x] Commit: `fix(client): palette right column shows a key, a match reason, or a dash`
 
 ### Task 5 — Fork divergence ledger [DONE — branch docs/fork-ledger, 9f4c31de]
 
@@ -173,14 +173,14 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [x] Generate the first-parent list; write the ledger; every PR number cited resolves with `gh pr view -R cameronsjo/herdr`, every SHA with `git cat-file -t`
 - [x] Commit: `docs(fork): add the divergence ledger` (fccfcbc8)
 
-### Task 6 — Ledger entry, polish, ship
+### Task 6 — Ledger entry, polish, ship [DONE except the live check]
 
 **Dispatch:** In-context. **Report:** —
 
 **Steps:**
-- [ ] Add this PR's entry at the top of `docs/fork/CHANGES.md` (subsystems: palette, chooser overlay, plugin manifest, config; regression check: type `move`, expect three family rows and a tagged plugin row)
-- [ ] `just check` in the worktree; expect exit 0
-- [ ] Run `cadence-forge:polish`; its built-in arms diff the session cwd, so run `cadence:code-reviewer` and `cadence-forge:security-reviewer` on `git diff master...HEAD` built from the worktree; `cadence-forge:polish docs` for the ledger and `CLAUDE.md`; fold findings
+- [x] Add this PR's entry at the top of `docs/fork/CHANGES.md` (subsystems: palette, chooser overlay, plugin manifest, config; regression check: type `move`, expect three family rows and a tagged plugin row)
+- [x] `just check` in the worktree — fmt and clippy clean; tests fail only on the two `live_handoff` tests that fail on `master` too
+- [x] Ran `cadence-forge:polish`; its built-in arms diff the session cwd, so run `cadence:code-reviewer` and `cadence-forge:security-reviewer` on `git diff master...HEAD` built from the worktree; `cadence-forge:polish docs` for the ledger and `CLAUDE.md`; fold findings
 - [ ] Manual check in a live herdr: `env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH cargo run -- ...` per herdr CLAUDE.md; type `move`; expect three family rows, no `Collie` row; type `uninstall`; expect the tagged row and the confirm on Enter once `palette.destructive_actions` names it. Cameron screenshots it.
 - [ ] Flip the PR ready on `cameronsjo/herdr`; tick this plan; `status: done`. Merge is Cameron's.
 
