@@ -6,7 +6,7 @@ harness: "claude-code 2.1.267"
 machine: "cf6e768835c7"
 approved_session_id: "a5fe9fd2-25da-4bf2-8bb7-355062905da9"
 status: planned
-next: "Task 0 DONE (PR #61 draft, issue #62). Task 5 dispatched (Sonnet) in sibling worktree ../fork-ledger on branch docs/fork-ledger — merge it into this branch at Task 6. Cameron swapping the session to opus. Next: Task 1 in worktree herdr-worktrees/palette-direction-picker; reports dir /tmp/herdr-palette.GMQA8q"
+next: "Tasks 1 and 5 DONE. Next: Task 2 (family rows, leaf filter, ranking, match reason). Task 5 lives on branch docs/fork-ledger — merge into this branch at Task 6."
 branch: feat/palette-direction-picker
 pr: cameronsjo/herdr#61
 updated: 2026-09-09
@@ -87,7 +87,7 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [x] `git push -u fork feat/palette-direction-picker`; `gh pr create -R cameronsjo/herdr --draft` with `--body-file`
 - [x] File the bold-artifact issue on `cameronsjo/herdr` with `--body-file`: title `palette: stray bold spans inside plugin row labels`; body: two screenshots at different terminal sizes show bold on the same substring (`all web`) of the `Collie` row, which rules out bleed-through from the pane beneath; `overlays.rs:1060-1075` paints one style per row, so the modifier arrives with the row text or survives a frame diff. Reproduction: open the palette, type `move`, look at the `Collie` row.
 
-### Task 1 — Generic chooser overlay; split picker migrated onto it
+### Task 1 — Generic chooser overlay; split picker migrated onto it [DONE]
 
 **Files:**
 - Modify: `src/client/shell/state.rs:183-184,378,498,744` (replace `ClientPaneSplitOverlay` + `ClientShellOverlay::PaneSplitDirection` with `ClientChooserOverlay` + `ClientShellOverlay::Chooser`; hit rects `pane_split_vertical`/`pane_split_horizontal` become `chooser_buttons: Vec<Rect>`)
@@ -102,10 +102,10 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** Serial (wave 1) · in-context Opus. **Report:** —
 
 **Steps:**
-- [ ] Write the three new tests; expect RED
-- [ ] Introduce the chooser types and geometry; migrate the split picker; update the four existing tests
-- [ ] `just test`; expect GREEN
-- [ ] Commit: `refactor(client): generalize the split picker into a chooser overlay`
+- [x] Write the three new tests; expect RED
+- [x] Introduce the chooser types and geometry; migrate the split picker; update the four existing tests
+- [x] `just test`; expect GREEN
+- [x] Commit: `refactor(client): generalize the split picker into a chooser overlay` (de500b47)
 
 ### Task 2 — Family rows, leaf filter, ranking, match reason
 
@@ -161,7 +161,7 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - [ ] Implement; `just test`; expect GREEN
 - [ ] Commit: `fix(client): palette right column shows a key, a match reason, or a dash`
 
-### Task 5 — Fork divergence ledger
+### Task 5 — Fork divergence ledger [DONE — branch docs/fork-ledger, 9f4c31de]
 
 **Files:**
 - Create: `docs/fork/CHANGES.md` — one section per fork change, newest first: title, the fork PR (`cameronsjo/herdr#N`) or the commit SHA when the change landed without one, files or subsystems touched, the upstream behavior it replaces, and a one-line regression check (how to see it still works after a sync). Seeded from all first-parent commits in `git log --first-parent origin/master..HEAD` (58 on 2026-09-09: 39 merges, 19 direct), grouped by the seven sync plans in `docs/plans/`. Upstream-sync merges get one line each, not a section.
@@ -170,8 +170,8 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 **Dispatch:** Parallel with Tasks 1-4 (disjoint files) · fresh Sonnet subagent. **Report:** `<reports-dir>/task-5.md`
 
 **Steps:**
-- [ ] Generate the first-parent list; write the ledger; every PR number cited resolves with `gh pr view -R cameronsjo/herdr`, every SHA with `git cat-file -t`
-- [ ] Commit: `docs(fork): add the divergence ledger`
+- [x] Generate the first-parent list; write the ledger; every PR number cited resolves with `gh pr view -R cameronsjo/herdr`, every SHA with `git cat-file -t`
+- [x] Commit: `docs(fork): add the divergence ledger` (fccfcbc8)
 
 ### Task 6 — Ledger entry, polish, ship
 
@@ -194,7 +194,9 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 
 ## Deviations
 
-- none yet
+- **Task 1:** `chooser_geometry` measures labels with `display_width` rather than byte length. The plan leaned on the ASCII byte-length invariant; measuring directly makes the rect correct by construction, and the ASCII test survives retargeted as `chooser_labels_are_ascii_so_every_terminal_renders_them_the_measured_width`.
+- **Task 1:** `ChooserOutcome::Cancel` is deferred to Task 3, which is where its first constructor (the `cancel` button on a destructive confirm) lands. Shipping it in Task 1 would have meant a dead variant and a `dead_code` warning across two commits.
+- **Task 1:** three tests fail in this worktree for reasons predating the branch — `live_handoff_preserves_pane_process_io` and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` fail identically on `master` (verified in the primary checkout at 24720e97); `client_read_loop_rejects_oversized_bracketed_paste_without_disconnect` and `server_reload_agent_manifests_reports_runtime_override` are load-flaky, each failing once under the full parallel run and passing on three isolated re-runs.
 
 ## Learnings
 
