@@ -207,6 +207,18 @@ Rust (herdr fork, `master` at `24720e97`), ratatui client shell, `just check` (f
 - **Task 1:** `ChooserOutcome::Cancel` is deferred to Task 3, which is where its first constructor (the `cancel` button on a destructive confirm) lands. Shipping it in Task 1 would have meant a dead variant and a `dead_code` warning across two commits.
 - **Task 1:** three tests fail in this worktree for reasons predating the branch — `live_handoff_preserves_pane_process_io` and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session` fail identically on `master` (verified in the primary checkout at 24720e97); `client_read_loop_rejects_oversized_bracketed_paste_without_disconnect` and `server_reload_agent_manifests_reports_runtime_override` are load-flaky, each failing once under the full parallel run and passing on three isolated re-runs.
 
+
+### Task 6 — review findings folded in
+
+Two reviewers ran against `git diff master...HEAD` (the repo's own polish preflight resolves the base to upstream `origin/master` and returns the whole 165-file fork divergence, so it was not usable here).
+
+- **cadence:code-reviewer** — 0 Critical, 1 Important, 2 Nits. The Important was real: `run_chooser_choice` took the overlay and then returned early on an out-of-range index without restoring the palette, losing the operator's query. Fixed with a `tracing::warn!` and the same restore cancelling does, pinned by `an_out_of_range_chooser_index_restores_the_palette_rather_than_closing_it`.
+- **cadence-forge:security-reviewer** (opus, U9) — 0 Critical, 2 Important, 4 Nits.
+  - **Fixed:** `action_is_marked_destructive` split the override entry on the first colon, but the manifest's identifier rules allow a colon in BOTH ids. A namespaced plugin id was therefore impossible to mark — the fail-open direction, in the one lever an operator has against a plugin that declines to mark itself. Now compares the joined string; the remaining collision over-marks, which only ever costs an extra confirm. Pinned by `a_colon_in_either_id_is_markable_and_a_collision_errs_toward_confirming`.
+  - **Fixed:** the confirm dialog truncated the plugin-chosen name it was asking about, so a plugin could front-load innocuous text. `chooser_geometry` now takes the title and widens the popup to fit it.
+  - **Documented, not built:** `destructive` binds the palette only — a link handler or `herdr plugin action invoke` still runs the action with no confirm. Routing those through a confirm is a new flow on a different surface and outside this plan's goal; `plugins.mdx` now says the key is not an authorization boundary.
+  - **Declined:** a whole-file config parse error drops the override list (the live-reload path already guards it); a long plugin name can push the `[destructive]` tag off the row (cosmetic, the Enter gate still fires); the restored palette selection is briefly stale until the plugin list arrives (self-correcting).
+
 ## Learnings
 
 - **`cargo check --tests` is not the CI gate, and it masks a whole class of failure.** CI runs `just lint` = `cargo clippy --all-targets --locked -- -D warnings`. A field read only by a `#[cfg(test)]` assertion compiles clean under `cargo check --tests` and fails CI with `error: field is never read` on the non-test build — exactly what `PaletteRow.matched_keyword` did between Task 2 and Task 4, turning the branch's CI red for two commits. Run clippy with warnings denied before calling a branch green.
