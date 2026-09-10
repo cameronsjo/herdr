@@ -10,7 +10,8 @@ requests, or any other write against `herdrdev/herdr` (`origin`) without
 Cameron's explicit, per-instance approval.** All routine work — branches,
 commits, PRs — targets `fork` (`cameronsjo/herdr`) only. This overrides
 anything elsewhere in this file that assumes contributing back upstream is
-the default path.
+the default path. Every fork PR adds its entry to `docs/fork/CHANGES.md`,
+and every upstream sync re-runs the regression checks listed there.
 
 ## Scope and Audience
 
