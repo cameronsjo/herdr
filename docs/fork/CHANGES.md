@@ -23,6 +23,29 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Palette direction chooser, destructive confirm, and review findings (`docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md`)
+
+### feat(client): collapse move and swap rows into a direction chooser
+
+- **PR:** [cameronsjo/herdr#61](https://github.com/cameronsjo/herdr/pull/61)
+- **Files:** `src/client/shell/{palette.rs,palette/input.rs,overlay_input.rs,overlays.rs,state.rs,mouse.rs,composition.rs,input_source.rs}`
+- **Replaces:** Upstream lists every directional action as its own palette row, so a query for `move` returns nine rows. The fork collapses `move tab`, `move workspace`, and `swap pane` into one row each, opening a generic chooser overlay that also replaced upstream's two-button split-into-tab picker. Leaf rows stay reachable by naming a direction.
+- **Regression check:** open the palette, type `move` — three rows ending in `...` and no directional leaves. Type `move tab l` — `move tab left` ranks first.
+
+### feat(plugins): tag and confirm destructive palette actions
+
+- **PR:** [cameronsjo/herdr#61](https://github.com/cameronsjo/herdr/pull/61)
+- **Files:** `src/api/schema/plugins.rs`, `src/app/api/plugins/manifest.rs`, `src/config/{model.rs,io.rs}`, `src/client/shell/{config.rs,state.rs,palette.rs,palette/input.rs,overlays.rs}`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{plugins,configuration}.mdx`, `docs/next/website/src/data/config-reference.json`
+- **Replaces:** Upstream runs any plugin action straight from the palette with no marking and no confirm. The fork adds an optional `destructive` key to `[[actions]]` in the plugin manifest and a `[palette] destructive_actions` config override for third-party plugins; a marked row is tagged and asks before running, with cancel selected by default. The manifest field is additive and optional, so an older manifest parses unchanged.
+- **Regression check:** `cargo nextest run -E 'test(destructive)'` — eight tests. Also `python3 scripts/config_reference_check.py` exits 0.
+
+### fix(client): palette right column shows a key, a match reason, or a dash
+
+- **PR:** [cameronsjo/herdr#61](https://github.com/cameronsjo/herdr/pull/61)
+- **Files:** `src/input/keybind_help.rs`, `src/client/shell/{palette.rs,overlays.rs}`
+- **Replaces:** Upstream leaves the palette's right column empty for a row with no key binding, while the keybind help screen shows the word `unset` for the same fact. The fork makes `KeybindHelpEntry.key` an `Option`, so the palette can show the key, else the keyword that matched the row, else a dash — and the help screen keeps `unset` at its own render site. Upstream's mid-word substring match tier is also gone: it is what put a plugin's `(remove service)` action in front of a query for `move`.
+- **Regression check:** open the palette and confirm every visible row has something in its right column.
+
 ## Land the upstream sync, cut the release, fit CI to the fork (`docs/plans/2026-09-08-land-the-upstream-sync-cut-the-release-fit-ci-to-the-fork.md`)
 
 ### ci: fit the pipeline to what this fork actually ships
