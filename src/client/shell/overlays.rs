@@ -1092,9 +1092,21 @@ fn render_palette_overlay(
                     tag_style,
                 );
             }
-            if !row.command.key.is_empty() {
+            if let Some(key) = row.command.key.as_deref() {
                 let key_style = if selected { style } else { base.fg(p.overlay1) };
-                put_right_text(b, rect, rect.y, &format!("{} ", row.command.key), key_style);
+                put_right_text(b, rect, rect.y, &format!("{key} "), key_style);
+            } else if let Some(keyword) = row.matched_keyword {
+                let reason_style = if selected { style } else { base.fg(p.overlay0) };
+                put_right_text(
+                    b,
+                    rect,
+                    rect.y,
+                    &format!("matched: {keyword} "),
+                    reason_style,
+                );
+            } else {
+                let dash_style = if selected { style } else { base.fg(p.overlay0) };
+                put_right_text(b, rect, rect.y, "— ", dash_style);
             }
         }
     }
@@ -1107,7 +1119,7 @@ fn render_palette_overlay(
         inner.x,
         inner.bottom().saturating_sub(1),
         inner.width,
-        " run enter · move ↑↓ · close esc",
+        " run enter · move ↑↓",
         base.fg(p.overlay0),
     );
 
@@ -1199,7 +1211,11 @@ fn help_lines(
     );
     let key_width = groups
         .iter()
-        .flat_map(|(_, entries)| entries.iter().map(|entry| entry.key.chars().count()))
+        .flat_map(|(_, entries)| {
+            entries
+                .iter()
+                .map(|entry| entry.key.as_deref().unwrap_or("unset").chars().count())
+        })
         .max()
         .unwrap_or(8);
     if groups.is_empty() {
@@ -1226,7 +1242,7 @@ fn help_lines(
             )),
         ));
         for entry in entries {
-            let (key, label) = (entry.key, entry.label);
+            let (key, label) = (entry.key.unwrap_or_else(|| "unset".to_owned()), entry.label);
             let padded_key = format!(" {key:<key_width$} ");
             let width = padded_key.chars().count() + label.chars().count();
             lines.push((

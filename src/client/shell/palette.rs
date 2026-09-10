@@ -260,7 +260,7 @@ impl DirectionFamily {
 pub(crate) struct PaletteCommand {
     pub id: String,
     pub name: Cow<'static, str>,
-    pub key: String,
+    pub key: Option<String>,
     pub action: PaletteAction,
     pub keywords: &'static [&'static str],
     /// Set on a leaf row of a direction family. Such a row is hidden unless
@@ -453,7 +453,7 @@ fn plugin_palette_commands(
                 command: PaletteCommand {
                     id: format!("plugin-action:{}.{}", plugin.plugin_id, action.id),
                     name: Cow::Owned(plugin_command_name(&plugin.name, &action.title)),
-                    key: String::new(),
+                    key: None,
                     action: PaletteAction::PluginAction {
                         plugin_id: plugin.plugin_id.clone(),
                         action_id: action.id.clone(),
@@ -484,7 +484,7 @@ fn plugin_palette_commands(
                 command: PaletteCommand {
                     id: format!("plugin-pane:{}.{}", plugin.plugin_id, pane.id),
                     name: Cow::Owned(plugin_command_name(&plugin.name, &pane.title)),
-                    key: String::new(),
+                    key: None,
                     action: PaletteAction::PluginPane {
                         plugin_id: plugin.plugin_id.clone(),
                         entrypoint: pane.id.clone(),
@@ -536,7 +536,7 @@ pub(crate) fn palette_commands(
             name: Cow::Borrowed(family.row_name()),
             // A family row is a question, not a binding — its leaves keep
             // whatever keys they were bound to.
-            key: String::new(),
+            key: None,
             action: PaletteAction::Chooser(family),
             keywords: family.keywords(),
             family: None,
@@ -695,7 +695,7 @@ mod tests {
         PaletteCommand {
             id: format!("test:{name}"),
             name: Cow::Borrowed(name),
-            key: String::new(),
+            key: None,
             action: PaletteAction::Keybind(KeybindAction::ClosePane),
             keywords,
             family: None,

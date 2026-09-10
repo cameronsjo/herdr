@@ -631,6 +631,132 @@ fn run_anyway_runs_the_destructive_action_and_remembers_it() {
     );
 }
 
+/// Reads the drawn text of a palette row back off the composed buffer, so a
+/// test can assert on what the operator actually sees rather than the model
+/// behind it.
+fn palette_row_text(state: &mut ClientShellState, command_id: &str) -> String {
+    let index = state
+        .filtered_palette_commands()
+        .into_iter()
+        .position(|row| row.command.id == command_id)
+        .unwrap_or_else(|| panic!("command {command_id} should be in the filtered list"));
+    let frame = state.compose(106, 24).expect("composed frame");
+    let rect = state
+        .hits
+        .palette_rows
+        .iter()
+        .find(|(_, row_index)| *row_index == index)
+        .map(|(rect, _)| *rect)
+        .unwrap_or_else(|| {
+            panic!("row {index} for {command_id} should be visible in the viewport")
+        });
+    let buffer = frame.to_ratatui_buffer().expect("buffer reconstructs");
+    (rect.x..rect.right())
+        .map(|x| buffer[(x, rect.y)].symbol().to_string())
+        .collect()
+}
+
+// `merge workspace into...` is unbound by default — see
+// `merge_workspace_command_reaches_the_palette` — so a query that hits it by
+// name, with no keyword involved, is the case with neither a key nor a
+// match reason to show. It must still read as a dash, not a hole.
+#[test]
+fn an_unbound_row_shows_a_dash_not_a_hole() {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    for character in "merge workspace into".chars() {
+        press(&mut state, KeyCode::Char(character));
+    }
+    let row = state
+        .filtered_palette_commands()
+        .into_iter()
+        .next()
+        .expect("a matching row");
+    assert!(
+        row.command.key.is_none(),
+        "merge workspace into... is unbound by default, got {:?}",
+        row.command.key
+    );
+    assert!(
+        row.matched_keyword.is_none(),
+        "the query names the row directly, got keyword {:?}",
+        row.matched_keyword
+    );
+    let command_id = row.command.id.clone();
+    let text = palette_row_text(&mut state, &command_id);
+    assert!(
+        text.contains('—'),
+        "an unbound, non-keyword row should show a dash, got {text:?}"
+    );
+    assert!(
+        !text.contains("matched:"),
+        "no keyword matched, so no match reason should print, got {text:?}"
+    );
+}
+
+// "combine" only reaches `merge workspace into...` through its keyword
+// vocabulary (`merge_workspace_command_reaches_the_palette` pins that
+// keyword) — so the row's right column has nothing but the match reason to
+// show.
+#[test]
+fn a_keyword_only_row_shows_its_match_reason() {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    for character in "combine".chars() {
+        press(&mut state, KeyCode::Char(character));
+    }
+    let row = state
+        .filtered_palette_commands()
+        .into_iter()
+        .next()
+        .expect("a matching row");
+    assert_eq!(
+        row.command.name, "merge workspace into...",
+        "got {}",
+        row.command.name
+    );
+    let keyword = row
+        .matched_keyword
+        .expect("combine should only match through a keyword");
+    let command_id = row.command.id.clone();
+    let text = palette_row_text(&mut state, &command_id);
+    assert!(
+        text.contains("matched:") && text.contains(keyword),
+        "expected the match reason {keyword:?} in the row, got {text:?}"
+    );
+}
+
+// A plugin action carries no keybind (plugin rows never set `key`) and this
+// one is reached by a query that hits its own name — no keyword involved
+// either — so it has nothing but the dash to show, same as a core row.
+#[test]
+fn a_plugin_row_with_no_key_and_no_keyword_shows_a_dash() {
+    let mut state = shell_with_a_destructive_plugin_row();
+    let row = state
+        .filtered_palette_commands()
+        .into_iter()
+        .next()
+        .expect("a matching row");
+    assert!(
+        row.command.key.is_none(),
+        "plugin rows carry no keybind, got {:?}",
+        row.command.key
+    );
+    assert!(
+        row.matched_keyword.is_none(),
+        "the query names the row directly, got keyword {:?}",
+        row.matched_keyword
+    );
+    let command_id = row.command.id.clone();
+    let text = palette_row_text(&mut state, &command_id);
+    assert!(
+        text.contains('—'),
+        "a plugin row with neither a key nor a match reason should show a dash, got {text:?}"
+    );
+}
+
 fn chooser_choice(
     label: &'static str,
     action: KeybindAction,
