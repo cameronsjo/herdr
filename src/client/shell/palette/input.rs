@@ -45,7 +45,7 @@ impl ClientShellState {
         true
     }
 
-    pub(in crate::client::shell) fn filtered_palette_commands(&self) -> Vec<super::PaletteCommand> {
+    pub(in crate::client::shell) fn filtered_palette_commands(&self) -> Vec<super::PaletteRow> {
         let (Some(snapshot), Some(ClientShellOverlay::Palette(palette))) =
             (self.snapshot.as_deref(), self.overlay.as_ref())
         else {
@@ -113,18 +113,31 @@ impl ClientShellState {
         &mut self,
         outcome: &mut ClientShellInput,
     ) {
-        let selected = match self.overlay.as_ref() {
-            Some(ClientShellOverlay::Palette(palette)) => palette.selected,
+        let (query, selected) = match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Palette(palette)) => (palette.query.clone(), palette.selected),
             _ => return,
         };
-        let commands = self.filtered_palette_commands();
-        let Some(command) = commands.into_iter().nth(selected) else {
+        let rows = self.filtered_palette_commands();
+        let Some(row) = rows.into_iter().nth(selected) else {
             return;
         };
         self.overlay = None;
-        self.remember_palette_command(command.id);
-        self.run_palette_action(command.action, outcome);
         outcome.repaint = true;
+
+        // A family row runs nothing on its own — it asks. Recording it here
+        // would put a question at the head of the empty palette and record
+        // the leaf a second time when the chooser runs it.
+        if let super::PaletteAction::Chooser(family) = row.command.action {
+            self.open_chooser_overlay(
+                family.chooser_title().to_owned(),
+                family.choices(),
+                Some(PaletteReturn { query, selected }),
+            );
+            return;
+        }
+
+        self.remember_palette_command(row.command.id);
+        self.run_palette_action(row.command.action, outcome);
     }
 
     pub(in crate::client::shell) fn remember_palette_command(&mut self, command_id: String) {
@@ -174,6 +187,9 @@ impl ClientShellState {
                     outcome,
                 );
             }
+            // Reached only through a chooser button, which resolves the
+            // family to a leaf action before running anything.
+            super::PaletteAction::Chooser(_) => {}
             super::PaletteAction::PluginPane {
                 plugin_id,
                 entrypoint,

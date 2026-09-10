@@ -92,7 +92,7 @@ fn typing_filters_and_enter_runs_the_highlighted_command() {
     let names: Vec<String> = state
         .filtered_palette_commands()
         .into_iter()
-        .map(|command| command.name.into_owned())
+        .map(|row| row.command.name.into_owned())
         .collect();
     assert_eq!(names.first().map(String::as_str), Some("zoom pane"));
 
@@ -129,7 +129,7 @@ fn a_remembered_command_leads_the_next_empty_palette() {
     let ids: Vec<String> = state
         .filtered_palette_commands()
         .into_iter()
-        .map(|command| command.id)
+        .map(|row| row.command.id)
         .collect();
     assert_eq!(ids.first().map(String::as_str), Some("core:last-pane"));
 }
@@ -173,6 +173,7 @@ fn clicking_a_palette_row_runs_it_and_clicking_outside_closes_the_palette() {
         .into_iter()
         .nth(index)
         .expect("a first row")
+        .command
         .id;
 
     let ran = click(&mut state, rect.x + 2, rect.y);
@@ -431,6 +432,60 @@ fn a_chooser_too_wide_for_one_row_stacks_its_buttons() {
             .windows(2)
             .all(|pair| pair[0].x == pair[1].x && pair[0].width == pair[1].width),
         "stacked buttons share a column: {narrow:?}"
+    );
+}
+
+/// The whole point of collapsing the leaf rows: the family row asks, and
+/// backing out of the question returns the operator to the search they typed.
+#[test]
+fn enter_on_a_family_row_opens_the_chooser_with_a_return() {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    for character in "swap pane".chars() {
+        press(&mut state, KeyCode::Char(character));
+    }
+    let names: Vec<String> = state
+        .filtered_palette_commands()
+        .into_iter()
+        .map(|row| row.command.name.into_owned())
+        .collect();
+    assert_eq!(
+        names.first().map(String::as_str),
+        Some("swap pane..."),
+        "got {names:?}"
+    );
+
+    let opened = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&opened).is_empty(),
+        "opening the question runs nothing"
+    );
+    assert!(
+        state.recent_command_ids.is_empty(),
+        "a family row is a question, not a command to remember"
+    );
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => {
+            assert_eq!(chooser.title, "swap pane");
+            assert_eq!(chooser.choices.len(), 4, "one button per direction");
+            assert!(chooser.return_to.is_some(), "esc must have somewhere to go");
+        }
+        other => panic!("enter should open the chooser, got {other:?}"),
+    }
+
+    state.compose(106, 24).expect("composed frame");
+    let ran = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&ran)
+            .iter()
+            .any(|method| matches!(method, crate::api::schema::Method::PaneSwap(_))),
+        "the chosen direction runs the leaf action"
+    );
+    assert_eq!(
+        state.recent_command_ids.first().map(String::as_str),
+        Some("core:swap-pane-left"),
+        "history records the leaf that actually ran"
     );
 }
 

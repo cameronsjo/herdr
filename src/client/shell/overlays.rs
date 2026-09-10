@@ -1010,7 +1010,7 @@ fn render_palette_overlay(
         query_style,
     );
 
-    let commands = super::super::palette::filtered_palette_commands(
+    let rows = super::super::palette::filtered_palette_commands(
         &v.query,
         &v.recent_command_ids,
         k,
@@ -1018,7 +1018,7 @@ fn render_palette_overlay(
         s,
     );
     let viewport = usize::from(body.height.max(1));
-    let max_scroll = commands.len().saturating_sub(viewport);
+    let max_scroll = rows.len().saturating_sub(viewport);
     let scroll = v.scroll.min(max_scroll);
     let metrics = crate::pane::ScrollMetrics {
         offset_from_bottom: max_scroll.saturating_sub(scroll),
@@ -1030,8 +1030,8 @@ fn render_palette_overlay(
         .map(|_| Rect::new(body.x, body.y, body.width.saturating_sub(1), body.height))
         .unwrap_or(body);
 
-    let mut rows = Vec::new();
-    if commands.is_empty() {
+    let mut row_hits = Vec::new();
+    if rows.is_empty() {
         put_text(
             b,
             text_area.x,
@@ -1041,7 +1041,7 @@ fn render_palette_overlay(
             base.fg(p.overlay1),
         );
     } else {
-        for (visible, (index, command)) in commands
+        for (visible, (index, row)) in rows
             .iter()
             .enumerate()
             .skip(scroll)
@@ -1054,7 +1054,7 @@ fn render_palette_overlay(
                 text_area.width,
                 1,
             );
-            rows.push((rect, index));
+            row_hits.push((rect, index));
             let selected = index == v.selected;
             let style = if selected {
                 base.fg(contrast(p))
@@ -1069,12 +1069,12 @@ fn render_palette_overlay(
                 rect.x,
                 rect.y,
                 rect.width,
-                &format!(" {}", command.name),
+                &format!(" {}", row.command.name),
                 style,
             );
-            if !command.key.is_empty() {
+            if !row.command.key.is_empty() {
                 let key_style = if selected { style } else { base.fg(p.overlay1) };
-                put_right_text(b, rect, rect.y, &format!("{} ", command.key), key_style);
+                put_right_text(b, rect, rect.y, &format!("{} ", row.command.key), key_style);
             }
         }
     }
@@ -1094,7 +1094,7 @@ fn render_palette_overlay(
     Some(OverlayRender {
         cancel: close,
         palette_popup: popup,
-        palette_rows: rows,
+        palette_rows: row_hits,
         palette_max_scroll: max_scroll,
         cursor: Some(crate::protocol::CursorState {
             x: (inner.x + 3 + display_width(&v.query)).min(inner.right().saturating_sub(1)),
