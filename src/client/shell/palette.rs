@@ -55,10 +55,21 @@ pub(super) fn palette_geometry(area: Rect) -> Option<(Rect, Rect, Rect)> {
 /// does not. Stacking rather than refusing matters: a family row whose chooser
 /// returns nothing is a dead end, because collapsing the leaf rows took away
 /// the only other way to reach them.
-pub(super) fn chooser_geometry(area: Rect, labels: &[&str]) -> Option<(Rect, Rect, Vec<Rect>)> {
+///
+/// The popup is also widened to fit `title`. A confirm dialog that truncates
+/// the thing it is asking about lets a plugin front-load innocuous text and
+/// hide the rest, so the operator must be able to read the whole name they are
+/// approving.
+pub(super) fn chooser_geometry(
+    area: Rect,
+    title: &str,
+    labels: &[&str],
+) -> Option<(Rect, Rect, Vec<Rect>)> {
     if labels.is_empty() {
         return None;
     }
+    // One leading space, drawn by the renderer, plus the panel borders.
+    let title_popup_width = super::render::display_width(title).saturating_add(3);
     let widths: Vec<u16> = labels
         .iter()
         .map(|label| super::render::display_width(label))
@@ -71,7 +82,9 @@ pub(super) fn chooser_geometry(area: Rect, labels: &[&str]) -> Option<(Rect, Rec
         .saturating_add(CHOOSER_BUTTON_GAP.saturating_mul(count.saturating_sub(1)));
     let widest = widths.iter().copied().max().unwrap_or(0);
 
-    let row_popup_width = CHOOSER_MIN_MODAL_WIDTH.max(row_width.saturating_add(4));
+    let row_popup_width = CHOOSER_MIN_MODAL_WIDTH
+        .max(row_width.saturating_add(4))
+        .max(title_popup_width);
     if let Some(popup) = crate::ui::centered_popup_rect(area, row_popup_width, CHOOSER_MODAL_HEIGHT)
     {
         let inner = chooser_inner(popup);
@@ -87,7 +100,9 @@ pub(super) fn chooser_geometry(area: Rect, labels: &[&str]) -> Option<(Rect, Rec
         }
     }
 
-    let stacked_popup_width = CHOOSER_MIN_MODAL_WIDTH.max(widest.saturating_add(4));
+    let stacked_popup_width = CHOOSER_MIN_MODAL_WIDTH
+        .max(widest.saturating_add(4))
+        .max(title_popup_width);
     let stacked_popup_height = count.saturating_add(CHOOSER_MODAL_CHROME_HEIGHT);
     let popup = crate::ui::centered_popup_rect(area, stacked_popup_width, stacked_popup_height)?;
     let inner = chooser_inner(popup);
@@ -378,22 +393,22 @@ fn plugin_command_name(plugin_name: &str, title: &str) -> String {
     }
 }
 
-/// Whether the operator's override list names this action. Matched on the
-/// exact `"<plugin_id>:<action_id>"` pair rather than either half, so marking
-/// one action never silently marks a sibling.
+/// Whether the operator's override list names this action.
+///
+/// Compared against the joined `"<plugin_id>:<action_id>"` rather than by
+/// splitting the entry, because BOTH halves may themselves contain a colon —
+/// the manifest's identifier rules allow it. Splitting on the first colon made
+/// a namespaced plugin id (`acme:tools`) impossible to mark at all, and made
+/// the same entry mark a different plugin's action instead. This is the only
+/// lever the operator has against a plugin that declines to mark itself, so a
+/// hole here is a hole in the whole control.
 fn action_is_marked_destructive(
     destructive_actions: &[String],
     plugin_id: &str,
     action_id: &str,
 ) -> bool {
-    destructive_actions
-        .iter()
-        .any(|marked| match marked.split_once(':') {
-            Some((marked_plugin, marked_action)) => {
-                marked_plugin == plugin_id && marked_action == action_id
-            }
-            None => false,
-        })
+    let qualified = format!("{plugin_id}:{action_id}");
+    destructive_actions.contains(&qualified)
 }
 
 fn disambiguate_plugin_labels(plugin_commands: &mut [PluginPaletteCommand]) {
@@ -1170,6 +1185,7 @@ mod tests {
     fn the_split_chooser_fits_its_two_buttons() {
         let (_, _, buttons) = chooser_geometry(
             Rect::new(0, 0, 120, 40),
+            "split into tab",
             &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL],
         )
         .expect("geometry");
@@ -1187,7 +1203,7 @@ mod tests {
 
     #[test]
     fn a_chooser_with_no_choices_has_no_geometry() {
-        assert!(chooser_geometry(Rect::new(0, 0, 120, 40), &[]).is_none());
+        assert!(chooser_geometry(Rect::new(0, 0, 120, 40), "anything", &[]).is_none());
     }
 
     #[test]
@@ -1195,6 +1211,7 @@ mod tests {
         assert!(palette_geometry(Rect::new(0, 0, 10, 4)).is_none());
         assert!(chooser_geometry(
             Rect::new(0, 0, 10, 4),
+            "split into tab",
             &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL]
         )
         .is_none());
@@ -1455,6 +1472,35 @@ mod tests {
             "demo",
             "uninstall"
         ));
+    }
+
+    // Both halves may contain a colon — `normalize_identifier` and
+    // `normalize_local_identifier` allow it. Splitting the entry on the first
+    // colon left a namespaced plugin id unmarkable, which is the fail-OPEN
+    // direction: the override is the only lever against a plugin that declines
+    // to mark itself.
+    //
+    // Joining instead means two different id pairs can share one string
+    // (`acme:tools` + `uninstall` and `acme` + `tools:uninstall`). That
+    // collision over-marks, which costs an extra confirm and never skips one —
+    // the safe direction, and the reason this is a comparison rather than a
+    // parse.
+    #[test]
+    fn a_colon_in_either_id_is_markable_and_a_collision_errs_toward_confirming() {
+        let marked = ["acme:tools:uninstall".to_string()];
+
+        assert!(
+            action_is_marked_destructive(&marked, "acme:tools", "uninstall"),
+            "a namespaced plugin id must be markable"
+        );
+        assert!(
+            action_is_marked_destructive(&marked, "acme", "tools:uninstall"),
+            "the joined-string collision confirms too often, never too rarely"
+        );
+        assert!(
+            !action_is_marked_destructive(&marked, "acme:tools", "build"),
+            "an unrelated action is still unmarked"
+        );
     }
 
     #[test]

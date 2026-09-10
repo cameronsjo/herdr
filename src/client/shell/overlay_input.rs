@@ -327,7 +327,18 @@ impl ClientShellState {
             return;
         };
         outcome.repaint = true;
+        let choice_count = chooser.choices.len();
         let Some(choice) = chooser.choices.into_iter().nth(index) else {
+            // Every caller passes an index it took from the same list, so this
+            // is a bug rather than an operator action. Fall back to the same
+            // restore cancelling would do: dropping the overlay here would
+            // vanish the palette along with the query behind it.
+            tracing::warn!(
+                index,
+                choice_count,
+                "Chooser index out of range; restoring the palette instead of closing it"
+            );
+            self.reopen_palette(chooser.return_to, outcome);
             return;
         };
         match choice.outcome {

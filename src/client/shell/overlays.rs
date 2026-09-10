@@ -1144,7 +1144,8 @@ fn render_chooser_overlay(
     p: &Palette,
 ) -> Option<OverlayRender> {
     let labels: Vec<&str> = v.choices.iter().map(|choice| choice.label).collect();
-    let (popup, inner, buttons) = super::super::palette::chooser_geometry(b.area, &labels)?;
+    let (popup, inner, buttons) =
+        super::super::palette::chooser_geometry(b.area, &v.title, &labels)?;
     panel(b, popup, p.accent, p.panel_bg)?;
 
     let base = Style::default()

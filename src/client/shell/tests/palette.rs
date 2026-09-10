@@ -414,14 +414,16 @@ fn cancel_from_a_palette_spawned_chooser_restores_the_query() {
 fn a_chooser_too_wide_for_one_row_stacks_its_buttons() {
     let labels = [" left ", " down ", " up ", " right "];
     let (_, _, wide) =
-        super::super::palette::chooser_geometry(Rect::new(0, 0, 120, 40), &labels).expect("wide");
+        super::super::palette::chooser_geometry(Rect::new(0, 0, 120, 40), "swap pane", &labels)
+            .expect("wide");
     assert!(
         wide.windows(2).all(|pair| pair[0].y == pair[1].y),
         "a wide terminal keeps one row: {wide:?}"
     );
 
     let (_, _, narrow) =
-        super::super::palette::chooser_geometry(Rect::new(0, 0, 34, 24), &labels).expect("narrow");
+        super::super::palette::chooser_geometry(Rect::new(0, 0, 34, 24), "swap pane", &labels)
+            .expect("narrow");
     assert_eq!(narrow.len(), labels.len(), "every choice keeps a rect");
     assert!(
         narrow.windows(2).all(|pair| pair[1].y > pair[0].y),
@@ -755,6 +757,47 @@ fn a_plugin_row_with_no_key_and_no_keyword_shows_a_dash() {
         text.contains('—'),
         "a plugin row with neither a key nor a match reason should show a dash, got {text:?}"
     );
+}
+
+/// An out-of-range index is a bug in a caller, not an operator action — but it
+/// must not cost the operator their palette. Every other exit from
+/// `run_chooser_choice` restores the palette; this one used to drop the overlay
+/// and take the query with it.
+#[test]
+fn an_out_of_range_chooser_index_restores_the_palette_rather_than_closing_it() {
+    let mut state = shell();
+    let choices = vec![chooser_choice(
+        " left ",
+        KeybindAction::SwapPaneLeft,
+        "core:swap-pane-left",
+    )];
+    state.open_chooser_overlay(
+        "swap pane".into(),
+        choices,
+        Some(PaletteReturn {
+            query: "swap".into(),
+            selected: 1,
+        }),
+    );
+    state.compose(106, 24).expect("composed frame");
+
+    let mut outcome = ClientShellInput::default();
+    state.run_chooser_choice(9, &mut outcome);
+    // The reopened palette re-asks for the plugin registry, so the only
+    // request allowed here is that list.
+    assert!(
+        endpoint_methods(&outcome)
+            .iter()
+            .all(|method| matches!(method, crate::api::schema::Method::PluginList(_))),
+        "an index that names no button runs nothing"
+    );
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Palette(palette)) => {
+            assert_eq!(palette.query, "swap", "the query survives");
+            assert_eq!(palette.selected, 1);
+        }
+        other => panic!("the palette should come back, got {other:?}"),
+    }
 }
 
 fn chooser_choice(

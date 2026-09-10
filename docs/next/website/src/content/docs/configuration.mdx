@@ -520,10 +520,14 @@ has not set it, mark the action yourself:
 destructive_actions = ["collie:uninstall"]
 ```
 
-Each entry is `"<plugin_id>:<action_id>"`, matched as a whole pair — marking
-one action never marks a sibling. An action is confirmed when either its
-manifest or this list says so. Changes take effect on `herdr server
-reload-config`.
+Each entry is `"<plugin_id>:<action_id>"`, compared exactly and
+case-sensitively against the joined pair — so it must match the ids as the
+manifest declares them. An action is confirmed when either its manifest or this
+list says so. Changes take effect on `herdr server reload-config`.
+
+Both ids may themselves contain a colon, so two different pairs can join to the
+same string. That collision asks about both, which costs an extra confirm and
+never skips one.
 
 ## Notifications
 
