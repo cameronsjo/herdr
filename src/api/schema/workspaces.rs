@@ -19,6 +19,29 @@ pub struct WorkspaceCreateParams {
     pub env: HashMap<String, String>,
 }
 
+/// Focuses the space already open on the requested path, or creates one there.
+///
+/// `workspace.create` keeps creating unconditionally, so this is a separate
+/// method rather than a flag on it: an older server that ignored such a flag
+/// would report success while opening the duplicate the caller asked it to
+/// avoid. A server that does not advertise `workspace.open` simply loses the
+/// reuse, and the client falls back to `workspace.create`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceOpenParams {
+    /// Workspace whose focused pane supplies the `follow` cwd policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub focus: bool,
+    /// Applied only to a space this call creates; reuse never renames a space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkspaceCloseParams {
     pub workspace_id: String,

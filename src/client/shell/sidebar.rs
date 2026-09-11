@@ -229,7 +229,7 @@ pub(crate) fn render_sidebar(
                 .map(|workspace| {
                     workspace_rows(
                         workspace,
-                        displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
+                        displayed_workspace_status(snapshot, entry.index, state.collapsed_groups),
                         entry.indented,
                         &config.spaces,
                     )
@@ -287,7 +287,7 @@ pub(crate) fn render_sidebar(
         let Some(workspace) = snapshot.workspaces.get(entry.index) else {
             continue;
         };
-        let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
+        let status = displayed_workspace_status(snapshot, entry.index, state.collapsed_groups);
         let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
         let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
         if y.saturating_add(row_height) > body.bottom() {
@@ -431,70 +431,91 @@ pub(crate) fn render_sidebar(
     );
 }
 
+/// The workspace that owns the worktree group on `key`: the first workspace on
+/// that key that is not a linked worktree.
+fn group_parent_index(snapshot: &ClientShellSnapshot, key: &str) -> Option<usize> {
+    snapshot.workspaces.iter().position(|workspace| {
+        workspace
+            .worktree
+            .as_ref()
+            .is_some_and(|worktree| worktree.key == key && !worktree.is_linked_worktree)
+    })
+}
+
+/// The linked worktrees on `key`, in snapshot order.
+///
+/// A second NON-linked workspace on the same key is another space opened on the
+/// same checkout, not a worktree of it, so it is never a group member. It keeps
+/// its own top-level row instead: a space folded into a collapsed group has no
+/// hit rect, which leaves it unable to receive a dragged tab or pane.
+fn group_child_indices<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    key: &'a str,
+) -> impl Iterator<Item = usize> + 'a {
+    snapshot
+        .workspaces
+        .iter()
+        .enumerate()
+        .filter_map(move |(index, workspace)| {
+            workspace
+                .worktree
+                .as_ref()
+                .is_some_and(|worktree| worktree.key == key && worktree.is_linked_worktree)
+                .then_some(index)
+        })
+}
+
+/// The key of the group `index` owns, or `None` when it owns no group — because
+/// it is a linked worktree, a duplicate space on an owned checkout, or a repo
+/// with no linked worktree open.
+fn parent_group_key_ref(snapshot: &ClientShellSnapshot, index: usize) -> Option<&str> {
+    let worktree = snapshot.workspaces.get(index)?.worktree.as_ref()?;
+    if worktree.is_linked_worktree || group_parent_index(snapshot, &worktree.key) != Some(index) {
+        return None;
+    }
+    group_child_indices(snapshot, &worktree.key)
+        .next()
+        .map(|_| worktree.key.as_str())
+}
+
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
 ) -> Vec<WorkspaceEntry> {
-    let mut members = HashMap::<&str, Vec<usize>>::new();
-    for (index, workspace) in snapshot.workspaces.iter().enumerate() {
-        if let Some(worktree) = &workspace.worktree {
-            members.entry(&worktree.key).or_default().push(index);
-        }
-    }
-    let grouped = members
-        .iter()
-        .filter(|(_, indices)| {
-            indices.len() >= 2
-                && indices.iter().any(|index| {
-                    snapshot.workspaces[*index]
-                        .worktree
-                        .as_ref()
-                        .is_some_and(|worktree| !worktree.is_linked_worktree)
-                })
-        })
-        .map(|(key, _)| *key)
-        .collect::<HashSet<_>>();
+    let top_level = |index: usize| WorkspaceEntry {
+        index,
+        indented: false,
+        last_child: false,
+    };
     let mut emitted = HashSet::<&str>::new();
     let mut entries = Vec::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
-        let Some(worktree) = workspace
-            .worktree
-            .as_ref()
-            .filter(|worktree| grouped.contains(worktree.key.as_str()))
-        else {
-            entries.push(WorkspaceEntry {
-                index,
-                indented: false,
-                last_child: false,
-            });
+        let Some(worktree) = workspace.worktree.as_ref() else {
+            entries.push(top_level(index));
             continue;
         };
-        if !emitted.insert(&worktree.key) {
+        let key = worktree.key.as_str();
+        let Some(parent) = group_parent_index(snapshot, key)
+            .filter(|_| group_child_indices(snapshot, key).next().is_some())
+        else {
+            entries.push(top_level(index));
+            continue;
+        };
+        let member = parent == index || worktree.is_linked_worktree;
+        if !member {
+            // A second space on an owned checkout. Not a worktree, so not a
+            // child: it stays a row of its own.
+            entries.push(top_level(index));
             continue;
         }
-        let Some(group_members) = members.get(worktree.key.as_str()) else {
+        // The group renders where its first member appears.
+        if !emitted.insert(key) {
             continue;
-        };
-        let parent = group_members
-            .iter()
-            .copied()
-            .find(|member| {
-                snapshot.workspaces[*member]
-                    .worktree
-                    .as_ref()
-                    .is_some_and(|worktree| !worktree.is_linked_worktree)
-            })
-            .unwrap_or(index);
-        entries.push(WorkspaceEntry {
-            index: parent,
-            indented: false,
-            last_child: false,
-        });
-        if collapsed_groups.contains(&worktree.key) {
-            if let Some(active) = group_members
-                .iter()
-                .copied()
-                .find(|member| *member != parent && snapshot.workspaces[*member].focused)
+        }
+        entries.push(top_level(parent));
+        if collapsed_groups.contains(key) {
+            if let Some(active) =
+                group_child_indices(snapshot, key).find(|child| snapshot.workspaces[*child].focused)
             {
                 entries.push(WorkspaceEntry {
                     index: active,
@@ -504,40 +525,54 @@ pub(crate) fn workspace_entries(
             }
             continue;
         }
-        let children = group_members
-            .iter()
-            .copied()
-            .filter(|member| *member != parent)
-            .collect::<Vec<_>>();
-        for (child_index, child) in children.iter().enumerate() {
+        let last_child = group_child_indices(snapshot, key).last();
+        for child in group_child_indices(snapshot, key) {
             entries.push(WorkspaceEntry {
-                index: *child,
+                index: child,
                 indented: true,
-                last_child: child_index + 1 == children.len(),
+                last_child: Some(child) == last_child,
             });
         }
     }
     entries
 }
 
-fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
-    let workspace = snapshot.workspaces.get(index)?;
-    let worktree = workspace.worktree.as_ref()?;
-    if worktree.is_linked_worktree {
-        return None;
+/// The workspaces a group action covers for the row at `index`: the workspace
+/// itself, plus its linked worktrees when it owns a group. A duplicate space on
+/// an owned checkout covers only itself.
+pub(in crate::client::shell) fn group_member_indices(
+    snapshot: &ClientShellSnapshot,
+    index: usize,
+) -> Vec<usize> {
+    match parent_group_key_ref(snapshot, index) {
+        Some(key) => std::iter::once(index)
+            .chain(group_child_indices(snapshot, key))
+            .collect(),
+        None => vec![index],
     }
-    (snapshot
+}
+
+/// The same group scope as [`group_member_indices`], resolved from a public
+/// workspace id for the confirm dialogs.
+pub(in crate::client::shell) fn workspace_group_members<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    workspace_id: &str,
+) -> Vec<&'a ClientShellWorkspace> {
+    let Some(index) = snapshot
         .workspaces
         .iter()
-        .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
-        })
-        .count()
-        >= 2)
-        .then(|| worktree.key.clone())
+        .position(|workspace| workspace.workspace_id == workspace_id)
+    else {
+        return Vec::new();
+    };
+    group_member_indices(snapshot, index)
+        .into_iter()
+        .filter_map(|member| snapshot.workspaces.get(member))
+        .collect()
+}
+
+fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
+    parent_group_key_ref(snapshot, index).map(str::to_owned)
 }
 
 pub(in crate::client::shell) fn render_parent_group_toggle(
@@ -570,31 +605,26 @@ pub(in crate::client::shell) fn render_parent_group_toggle(
     Some((toggle, key))
 }
 
+/// A collapsed group shows its worst member status on the parent row, so a
+/// blocked worktree is still visible while it is folded away. Only the group's
+/// own members count: a duplicate space on the same checkout is not one.
 pub(in crate::client::shell) fn displayed_workspace_status(
     snapshot: &ClientShellSnapshot,
-    workspace: &ClientShellWorkspace,
+    index: usize,
     collapsed_groups: &HashSet<String>,
 ) -> crate::api::schema::AgentStatus {
-    let Some(worktree) = workspace
-        .worktree
-        .as_ref()
-        .filter(|worktree| !worktree.is_linked_worktree)
+    let Some(workspace) = snapshot.workspaces.get(index) else {
+        return crate::api::schema::AgentStatus::Unknown;
+    };
+    let Some(key) =
+        parent_group_key_ref(snapshot, index).filter(|key| collapsed_groups.contains(*key))
     else {
         return workspace.agent_status;
     };
-    if !collapsed_groups.contains(&worktree.key) {
-        return workspace.agent_status;
-    }
-    snapshot
-        .workspaces
-        .iter()
-        .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
-        })
-        .map(|candidate| candidate.agent_status)
+    std::iter::once(index)
+        .chain(group_child_indices(snapshot, key))
+        .filter_map(|member| snapshot.workspaces.get(member))
+        .map(|member| member.agent_status)
         .max_by_key(|status| status_priority(*status))
         .unwrap_or(workspace.agent_status)
 }

@@ -139,6 +139,7 @@ Use `default` as the session name when you need to stop the default session expl
 ```bash
 herdr workspace list
 herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]
+herdr workspace open [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]
 herdr workspace get <workspace_id>
 herdr workspace focus <workspace_id>
 herdr workspace rename <workspace_id> <label>
@@ -155,6 +156,8 @@ herdr workspace create --cwd ~/project --label api --no-focus
 ```
 
 A workspace is a top-level project or work context. Creating one also creates its first tab and root pane. The JSON response exposes their IDs as `.result.workspace.workspace_id`, `.result.tab.tab_id`, and `.result.root_pane.pane_id`.
+
+`open` is the "work on this path" command: it focuses the workspace already on that path instead of opening a second one there, and creates a workspace only when the path has none. Its response is `.result.workspace` plus `.result.already_open`, which says which of the two happened. `create` always creates, so it remains the way to ask for a second workspace on a path you already have open. The TUI new-space action uses `open` unless you type a name for the new space.
 
 ## Worktrees
 

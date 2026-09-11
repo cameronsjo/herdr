@@ -52,6 +52,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "workspace.merge",
     "workspace.move",
     "workspace.move_block",
+    "workspace.open",
     "workspace.rename",
     "worktree.create",
     "worktree.list",
@@ -288,14 +289,36 @@ mod tests {
     /// new method names and add their digests without rewriting existing ones.
     /// The historical destination extension of `tab.move` remains accepted;
     /// new clients use `tab.move_to_destination` to negotiate that behavior.
+    ///
+    /// A newly advertised method has no recorded digest yet. Record it with
+    /// `HERDR_RECORD_ENDPOINT_METHOD_SHAPES=1 cargo test
+    /// advertised_client_shell_method_shapes`. Recording only ever ADDS a
+    /// missing method: a recorded digest that no longer matches still fails,
+    /// because a changed shape needs a new method name, not a new expectation.
     #[test]
     fn advertised_client_shell_method_shapes_stay_at_the_v1_contract() {
-        let expected: BTreeMap<String, String> = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/endpoint-method-shapes-v1.json"
-        )))
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/endpoint-method-shapes-v1.json");
+        let mut expected: BTreeMap<String, String> = serde_json::from_str(
+            &std::fs::read_to_string(&fixture).expect("endpoint method shape fixture"),
+        )
         .expect("endpoint method shape fixture");
         let actual = endpoint_method_shape_digests();
+
+        if std::env::var_os("HERDR_RECORD_ENDPOINT_METHOD_SHAPES").is_some() {
+            let added = actual
+                .iter()
+                .filter(|(method, _)| !expected.contains_key(method.as_str()))
+                .map(|(method, digest)| (method.clone(), digest.clone()))
+                .collect::<Vec<_>>();
+            if !added.is_empty() {
+                expected.extend(added);
+                let mut recorded =
+                    serde_json::to_string_pretty(&expected).expect("endpoint method shape fixture");
+                recorded.push('\n');
+                std::fs::write(&fixture, recorded).expect("write endpoint method shape fixture");
+            }
+        }
 
         assert_eq!(
             actual,

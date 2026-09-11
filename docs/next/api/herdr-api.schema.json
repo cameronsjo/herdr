@@ -4725,6 +4725,42 @@
           ],
           "type": "object"
         },
+        "WorkspaceOpenParams": {
+          "description": "Focuses the space already open on the requested path, or creates one there.\n\n`workspace.create` keeps creating unconditionally, so this is a separate\nmethod rather than a flag on it: an older server that ignored such a flag\nwould report success while opening the duplicate the caller asked it to\navoid. A server that does not advertise `workspace.open` simply loses the\nreuse, and the client falls back to `workspace.create`.",
+          "properties": {
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "focus": {
+              "default": false,
+              "type": "boolean"
+            },
+            "label": {
+              "description": "Applied only to a space this call creates; reuse never renames a space.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_workspace_id": {
+              "description": "Workspace whose focused pane supplies the `follow` cwd policy.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "WorkspaceRenameParams": {
           "properties": {
             "label": {
@@ -5187,6 +5223,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceOpenParams"
             }
           },
           "required": [
@@ -9581,6 +9633,26 @@
                 "workspace",
                 "tab",
                 "root_pane"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "already_open": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "workspace_opened",
+                  "type": "string"
+                },
+                "workspace": {
+                  "$ref": "#/schemas/success_response/$defs/WorkspaceInfo"
+                }
+              },
+              "required": [
+                "type",
+                "workspace",
+                "already_open"
               ],
               "type": "object"
             },

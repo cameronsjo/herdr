@@ -245,7 +245,7 @@ pub(super) fn render_expanded(
                                 workspace,
                                 super::sidebar::displayed_workspace_status(
                                     snapshot,
-                                    workspace,
+                                    entry.index,
                                     collapsed_groups,
                                 ),
                                 entry.indented,
@@ -317,7 +317,7 @@ pub(super) fn render_expanded(
                     .unwrap_or(&empty_collapsed_groups);
                 let status = super::sidebar::displayed_workspace_status(
                     snapshot,
-                    workspace,
+                    entry.index,
                     collapsed_groups,
                 );
                 let tokens = super::sidebar::workspace_rows(

@@ -571,10 +571,11 @@ impl ClientShellState {
         before_workspace_id: Option<&str>,
     ) -> Option<crate::api::schema::Method> {
         let snapshot = self.snapshot.as_deref()?;
-        let source = snapshot
+        let source_index = snapshot
             .workspaces
             .iter()
-            .find(|workspace| workspace.workspace_id == source_workspace_id)?;
+            .position(|workspace| workspace.workspace_id == source_workspace_id)?;
+        let source = snapshot.workspaces.get(source_index)?;
         if source
             .worktree
             .as_ref()
@@ -613,21 +614,13 @@ impl ClientShellState {
             return None;
         }
 
-        if let Some(worktree) = source.worktree.as_ref() {
-            let workspace_ids = std::iter::once(source.workspace_id.clone())
-                .chain(
-                    snapshot
-                        .workspaces
-                        .iter()
-                        .filter(|workspace| workspace.workspace_id != source.workspace_id)
-                        .filter(|workspace| {
-                            workspace
-                                .worktree
-                                .as_ref()
-                                .is_some_and(|candidate| candidate.key == worktree.key)
-                        })
-                        .map(|workspace| workspace.workspace_id.clone()),
-                )
+        if source.worktree.is_some() {
+            // Only the group moves as a block. A second space on an owned
+            // checkout is not a member of that group and moves on its own.
+            let workspace_ids = super::sidebar::group_member_indices(snapshot, source_index)
+                .into_iter()
+                .filter_map(|member| snapshot.workspaces.get(member))
+                .map(|workspace| workspace.workspace_id.clone())
                 .collect();
             Some(crate::api::schema::Method::WorkspaceMoveBlock(
                 crate::api::schema::WorkspaceMoveBlockParams {

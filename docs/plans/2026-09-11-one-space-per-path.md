@@ -36,9 +36,9 @@ What does break on duplicates is identity by path:
 - `handle_workspace_create` (`src/app/api/workspaces.rs:40`) has no reuse check.
   Creating a space for an already-open path always produces a duplicate.
 
-This session could not build the project (no `zig`, no `just` in the container),
-so the sidebar mechanism is read from source, not reproduced. Step 1 confirms it
-before any code changes.
+The sidebar mechanism is read from source, not reproduced: no session that
+worked on this could build the project. Confirming it on a real build is part of
+validating the change.
 
 ## Chosen approach
 
@@ -85,25 +85,51 @@ deterministic instead of first-match.
 
 ## Checklist
 
-- [ ] Reproduce: open two spaces on one checkout, collapse the group, confirm
-      the second space has no sidebar row and no drop target. Record evidence.
-- [ ] Fix `workspace_entries` grouping and the two `position` lookups; add tests
-      covering two non-linked same-key spaces.
-- [ ] Add `workspace.open`, advertise it, and wire the client new-space action,
-      palette entry, and CLI to it with a `workspace.create` fallback.
-- [ ] Add API tests: reuse focuses the existing space, `workspace.create` still
-      creates, and an unadvertised method degrades to create.
+- [x] Fix the sidebar grouping so two non-linked spaces on one repo key never
+      collapse into a group, and keep group scope (status rollup, block move,
+      merge and close dialogs) to the parent plus its linked worktrees.
+- [x] Make `workspace_close_indices` linked-only and owned by the first
+      non-linked space, so a group close or merge cannot take a duplicate with
+      it.
+- [x] Make the worktree parent lookups prefer the focused space instead of the
+      lowest matching index.
+- [x] Add `workspace.open`, advertise it, and wire the TUI new-space action and
+      `herdr workspace open` to it with a `workspace.create` fallback.
+- [x] Add tests: sidebar entries, group close indices, `workspace.open` reuse,
+      and the TUI's open-versus-create choice.
+- [x] Update the generated API schema artifact and the English docs.
+- [ ] Record the `workspace.open` digest:
+      `HERDR_RECORD_ENDPOINT_METHOD_SHAPES=1 just test-one advertised_client_shell_method_shapes`.
+      The test now appends a missing method's digest and still refuses to
+      rewrite an existing one.
 - [ ] Run `just check` and `just bench-render-scale`.
 - [ ] Open a PR against `cameronsjo/herdr`.
+
+## Status
+
+Implemented, not validated. The session that wrote this could not compile:
+`static.crates.io` is unreachable from it, so no dependency could be fetched.
+`cargo fmt` ran and passes; nothing else did. Every test listed above is
+written but unrun, and the two remaining checklist items need a machine that
+can build.
+
+Two judgment calls worth a second look:
+
+- The new-space action reuses whenever no name is typed. Pressing it in a space
+  whose path already has a space now focuses that space, which in the common
+  case is the space you are already in — so the key can look like it did
+  nothing. That is the behavior Cameron asked for, and the ways to still get a
+  second space on a path are typing a name in the new-space prompt
+  (`ui.prompt_new_workspace_name = true`) or `herdr workspace create`.
+- Reuse matches on identity path equality, so a space sitting in a
+  subdirectory of the same repo is a different space and is not reused.
 
 ## Risks
 
 - The sidebar grouping change touches a rendering path that runs per space per
-  frame; the grouping pass stays the same shape, so no new scaling cost is
-  expected. `just bench-render-scale` confirms.
-- Reuse changes what the new-space key does for a repeat path. It focuses
-  instead of creating, which is the requested behavior but is a visible habit
-  change.
+  frame. The grouping pass keeps the same shape and cardinality, so no new
+  scaling cost is expected; `just bench-render-scale` confirms.
+- Reuse changes what the new-space key does for a repeat path, as above.
 
 ## Notes
 

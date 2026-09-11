@@ -453,14 +453,41 @@ impl App {
         }
     }
 
+    /// Picks one workspace out of several that match: the focused one when it
+    /// matches, otherwise the lowest index.
+    ///
+    /// Two spaces can sit on one checkout, and a plain first-match lookup then
+    /// routes every worktree action to the earlier space no matter which one the
+    /// user is working in.
+    pub(super) fn preferred_workspace_idx(
+        &self,
+        matches: impl Iterator<Item = usize>,
+    ) -> Option<usize> {
+        let mut first = None;
+        for idx in matches {
+            if self.state.active == Some(idx) {
+                return Some(idx);
+            }
+            first.get_or_insert(idx);
+        }
+        first
+    }
+
     fn find_parent_workspace_by_key(&self, repo_key: &str) -> Option<usize> {
-        self.state.workspaces.iter().position(|ws| {
-            ws.worktree_space()
-                .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
-                || ws
-                    .git_space()
-                    .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
-        })
+        self.preferred_workspace_idx(
+            self.state
+                .workspaces
+                .iter()
+                .enumerate()
+                .filter(|(_, ws)| {
+                    ws.worktree_space()
+                        .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
+                        || ws
+                            .git_space()
+                            .is_some_and(|space| space.key == repo_key && !space.is_linked_worktree)
+                })
+                .map(|(idx, _)| idx),
+        )
     }
 
     fn mark_worktree_membership(
@@ -600,7 +627,7 @@ impl App {
     pub(crate) fn open_workspace_idx_for_checkout(&self, checkout_path: &Path) -> Option<usize> {
         let canonical_checkout = crate::worktree::canonical_or_original(checkout_path);
         let checkout_key = canonical_checkout.display().to_string();
-        self.state.workspaces.iter().position(|ws| {
+        let matches = self.state.workspaces.iter().enumerate().filter(|(_, ws)| {
             if ws.worktree_space().is_some_and(|space| {
                 crate::worktree::canonical_or_original(&space.checkout_path) == canonical_checkout
             }) {
@@ -624,7 +651,8 @@ impl App {
                 .is_some_and(|cwd| {
                     crate::worktree::canonical_or_original(cwd) == canonical_checkout
                 })
-        })
+        });
+        self.preferred_workspace_idx(matches.map(|(idx, _)| idx))
     }
 
     pub(crate) fn worktree_info_for_workspace(&self, ws_idx: usize) -> Option<WorktreeInfo> {
