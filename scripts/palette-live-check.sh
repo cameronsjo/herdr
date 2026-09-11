@@ -25,16 +25,32 @@ fi
 
 CONFIG_DIR="$(mktemp -d /tmp/herdr-palette-check.XXXXXX)"
 trap 'rm -rf "$CONFIG_DIR"' EXIT
-cat > "$CONFIG_DIR/config.toml" <<'EOF'
+# A debug build reads $XDG_CONFIG_HOME/herdr-dev, not .../herdr — see
+# app_dir_name() in src/config/io.rs. Writing the override one level up leaves
+# it unread, and step 5 then shows no tag whether the feature works or not.
+APP_CONFIG_DIR="$CONFIG_DIR/herdr-dev"
+mkdir -p "$APP_CONFIG_DIR"
+cat > "$APP_CONFIG_DIR/config.toml" <<'EOF'
 # Mark a third-party action destructive without touching its manifest. Replace
 # the entry with a plugin you actually have installed.
 [palette]
 destructive_actions = ["collie:uninstall"]
 EOF
 
+# Ask the binary where it will actually look, rather than trusting the path
+# above. A silently unread override makes step 5 show no tag whether the
+# feature works or not, which is the one outcome this script must not produce.
+RESOLVED="$(XDG_CONFIG_HOME="$CONFIG_DIR" "$BIN" --help 2>/dev/null | command sed -n 's/^Config: //p')"
+if [ "$RESOLVED" != "$APP_CONFIG_DIR/config.toml" ]; then
+  echo "This script wrote the override to $APP_CONFIG_DIR/config.toml," >&2
+  echo "but the binary reads ${RESOLVED:-<unknown>}. Step 5 would test nothing." >&2
+  echo "Fix the path in this script to match app_dir_name() in src/config/io.rs." >&2
+  exit 1
+fi
+
 cat <<EOF
 
-Config: $CONFIG_DIR/config.toml
+Config: $APP_CONFIG_DIR/config.toml
 Binary: $BIN
 
 What to check once herdr is up (open the palette with your prefix key then '/'):
