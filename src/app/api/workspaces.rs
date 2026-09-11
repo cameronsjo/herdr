@@ -822,7 +822,8 @@ mod tests {
         assert_eq!(app.state.workspaces.len(), 2, "no duplicate space");
         assert_eq!(app.state.active, Some(1), "the existing space is focused");
         assert_eq!(
-            app.state.workspaces[1].custom_name, None,
+            app.state.workspaces[1].custom_name.as_deref(),
+            Some("project"),
             "reuse never renames the space the user already has"
         );
 
