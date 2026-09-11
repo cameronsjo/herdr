@@ -35,6 +35,12 @@ cat > "$APP_CONFIG_DIR/config.toml" <<'EOF'
 # the entry with a plugin you actually have installed.
 [palette]
 destructive_actions = ["collie:uninstall"]
+
+# This check is normally run from a pane inside a running herdr, which the
+# nesting guard refuses by default (src/main.rs, should_block_nested). The
+# opt-in lives in this throwaway config, so it never reaches the real one.
+[experimental]
+allow_nested = true
 EOF
 
 # Ask the binary where it will actually look, rather than trusting the path
