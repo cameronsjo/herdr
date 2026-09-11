@@ -1944,6 +1944,84 @@ async fn public_workspace_focus_preserves_each_clients_remembered_tabs() {
     shutdown_test_runtimes(&mut server);
 }
 
+/// A reuse can land on the space that already holds the default target, so it
+/// cannot rely on the target changing the way a creation does. Without the
+/// explicit focus target the other client would stay where it was.
+#[tokio::test]
+async fn public_workspace_open_focuses_every_client_on_a_reused_space() {
+    let mut server = test_headless_server();
+    let first = crate::workspace::Workspace::test_new("first");
+    let second = crate::workspace::Workspace::test_new("second");
+    server.app.state.workspaces = vec![first, second];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+
+    let reused_cwd = std::env::temp_dir().join(format!("herdr-open-focus-{}", std::process::id()));
+    std::fs::create_dir_all(&reused_cwd).unwrap();
+    let pane_id = server.app.state.workspaces[0].focused_pane_id().unwrap();
+    let terminal_id = server.app.state.workspaces[0]
+        .terminal_id(pane_id)
+        .cloned()
+        .unwrap();
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .cwd = reused_cwd.clone();
+
+    let first_workspace_id = server.app.public_workspace_id(0);
+    let second_tab_id = server.app.public_tab_id(1, 0).unwrap();
+
+    let (first_control, _) = connect_test_shell(&mut server, 51, 100, 30);
+    let (second_control, _) = connect_test_shell(&mut server, 52, 80, 24);
+    let _ = first_control.recv().expect("first snapshot");
+    let _ = second_control.recv().expect("second snapshot");
+    assert!(server.focus_shell_client_on_tab(52, &second_tab_id));
+
+    let (respond_to, _response_rx) = std::sync::mpsc::channel();
+    server.handle_api_request_with_shutdown_check(crate::api::ApiRequestMessage {
+        request: crate::api::schema::Request {
+            id: "open-existing-space".into(),
+            method: crate::api::schema::Method::WorkspaceOpen(
+                crate::api::schema::WorkspaceOpenParams {
+                    source_workspace_id: None,
+                    cwd: Some(reused_cwd.display().to_string()),
+                    focus: true,
+                    label: None,
+                    env: Default::default(),
+                },
+            ),
+        },
+        respond_to,
+        response_write_complete: None,
+        stream_active: None,
+    });
+
+    assert_eq!(
+        server.app.state.workspaces.len(),
+        2,
+        "the space was reused, not created"
+    );
+    for client_id in [51, 52] {
+        assert_eq!(
+            server.clients[&client_id]
+                .shell_location
+                .as_ref()
+                .unwrap()
+                .focused_workspace_id
+                .as_deref(),
+            Some(first_workspace_id.as_str()),
+            "client {client_id} should follow the reused space"
+        );
+    }
+    shutdown_test_runtimes(&mut server);
+    let _ = std::fs::remove_dir_all(&reused_cwd);
+}
+
 #[tokio::test]
 async fn public_api_focus_replaces_every_client_shell_projection() {
     let mut server = test_headless_server();
