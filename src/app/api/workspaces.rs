@@ -86,6 +86,20 @@ impl App {
         )
     }
 
+    /// The space a `workspace.open` would land on when it reuses one, resolved
+    /// before the request runs.
+    ///
+    /// Reuse is a focus, not a creation: it can leave the default target
+    /// unchanged, and a caller that watches only for a changed target would
+    /// then miss it. `None` means the path has no space yet, so the call
+    /// creates and moves the target on its own.
+    pub(crate) fn workspace_open_reuse_idx(&self, params: &WorkspaceOpenParams) -> Option<usize> {
+        let cwd = self
+            .new_workspace_cwd(params.source_workspace_id.as_deref(), params.cwd.clone())
+            .ok()?;
+        self.workspace_idx_for_identity_cwd(&cwd)
+    }
+
     /// Focuses the space already on the requested path, or creates one there.
     ///
     /// This is the "open this path" intent. `workspace.create` keeps creating
