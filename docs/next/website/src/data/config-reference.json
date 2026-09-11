@@ -1154,6 +1154,18 @@
       ]
     },
     {
+      "id": "palette",
+      "title": "Command palette",
+      "keys": [
+        {
+          "key": "palette.destructive_actions",
+          "type": "array of strings",
+          "default": "[]",
+          "description": "Plugin actions to tag and confirm before running, as \"<plugin_id>:<action_id>\". Use this for a third-party plugin whose manifest does not set destructive itself; a manifest that does set it needs no entry here."
+        }
+      ]
+    },
+    {
       "id": "notifications",
       "title": "Notifications",
       "keys": [

@@ -1015,6 +1015,7 @@ fn plugin_link_list_unlink_round_trip() {
         }],
         startup: vec![],
         actions: vec![PluginManifestAction {
+            destructive: false,
             id: "bootstrap".into(),
             title: "Bootstrap worktree".into(),
             description: None,

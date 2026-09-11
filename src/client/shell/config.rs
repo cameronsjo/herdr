@@ -135,6 +135,7 @@ impl ClientShellConfig {
             theme_name: theme_runtime.manual_name.clone(),
             theme_runtime,
             palette: crate::app::client_palette_from_config(config),
+            destructive_palette_actions: config.palette.destructive_actions.clone(),
             keybinds: config
                 .live_keybinds_with_diagnostics()
                 .map(|(keybinds, _diagnostics)| keybinds)
@@ -352,6 +353,9 @@ impl ClientShellConfig {
         if !invalid_section("experimental") {
             self.switch_ascii_input_source_in_prefix =
                 config.experimental.switch_ascii_input_source_in_prefix;
+        }
+        if !invalid_section("palette") {
+            self.destructive_palette_actions = config.palette.destructive_actions.clone();
         }
 
         diagnostics

@@ -250,6 +250,12 @@ pub struct PluginManifestAction {
     pub contexts: Vec<PluginActionContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platforms: Option<Vec<PluginPlatform>>,
+    /// Whether running this action removes or replaces something the
+    /// operator would want back. The command palette tags such a row and
+    /// confirms before running it. Absent in an older manifest, which reads
+    /// as `false` — the palette behaves exactly as it did before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub destructive: bool,
     pub command: Vec<String>,
 }
 
