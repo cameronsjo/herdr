@@ -1064,11 +1064,32 @@ fn render_palette_overlay(
                 base.fg(p.text)
             };
             b.set_style(rect, style);
+            // The right column is resolved before the name is drawn: both it
+            // and the destructive tag are reserved out of the name's width, so
+            // a long plugin-chosen name is clipped rather than allowed to push
+            // either of them off the row.
+            let (right_text, right_style) = if let Some(key) = row.command.key.as_deref() {
+                let key_style = if selected { style } else { base.fg(p.overlay1) };
+                (format!("{key} "), key_style)
+            } else if let Some(keyword) = row.matched_keyword {
+                let reason_style = if selected { style } else { base.fg(p.overlay0) };
+                (format!("matched: {keyword} "), reason_style)
+            } else {
+                let dash_style = if selected { style } else { base.fg(p.overlay0) };
+                ("— ".to_string(), dash_style)
+            };
+            let tag = super::super::palette::DESTRUCTIVE_TAG;
+            let reserved = display_width(&right_text).saturating_add(if row.command.destructive {
+                display_width(tag)
+            } else {
+                0
+            });
+            let name_budget = rect.width.saturating_sub(reserved);
             put_text(
                 b,
                 rect.x,
                 rect.y,
-                rect.width,
+                name_budget,
                 &format!(" {}", row.command.name),
                 style,
             );
@@ -1076,8 +1097,7 @@ fn render_palette_overlay(
             // so the tag keeps the warning colour on an unselected row while
             // the selected row's own style still wins.
             if row.command.destructive {
-                let tag = super::super::palette::DESTRUCTIVE_TAG;
-                let offset = display_width(&format!(" {}", row.command.name));
+                let offset = display_width(&format!(" {}", row.command.name)).min(name_budget);
                 let tag_style = if selected {
                     style
                 } else {
@@ -1092,22 +1112,7 @@ fn render_palette_overlay(
                     tag_style,
                 );
             }
-            if let Some(key) = row.command.key.as_deref() {
-                let key_style = if selected { style } else { base.fg(p.overlay1) };
-                put_right_text(b, rect, rect.y, &format!("{key} "), key_style);
-            } else if let Some(keyword) = row.matched_keyword {
-                let reason_style = if selected { style } else { base.fg(p.overlay0) };
-                put_right_text(
-                    b,
-                    rect,
-                    rect.y,
-                    &format!("matched: {keyword} "),
-                    reason_style,
-                );
-            } else {
-                let dash_style = if selected { style } else { base.fg(p.overlay0) };
-                put_right_text(b, rect, rect.y, "— ", dash_style);
-            }
+            put_right_text(b, rect, rect.y, &right_text, right_style);
         }
     }
     if let Some(track) = track {

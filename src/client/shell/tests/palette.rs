@@ -494,12 +494,18 @@ fn enter_on_a_family_row_opens_the_chooser_with_a_return() {
 /// A palette holding one destructive plugin action, reached by a query that
 /// names it.
 fn shell_with_a_destructive_plugin_row() -> ClientShellState {
+    shell_with_a_destructive_plugin_row_titled("Uninstall web bridge (remove service)")
+}
+
+/// The same palette, with the plugin choosing the action title. The title is
+/// manifest text, so a test that varies it is testing untrusted input.
+fn shell_with_a_destructive_plugin_row_titled(title: &str) -> ClientShellState {
     let mut state = shell();
     enter_prefix(&mut state);
     open_palette(&mut state);
     let action = crate::api::schema::PluginManifestAction {
         id: "uninstall".into(),
-        title: "Uninstall web bridge (remove service)".into(),
+        title: title.into(),
         description: None,
         contexts: Vec::new(),
         platforms: None,
@@ -756,6 +762,30 @@ fn a_plugin_row_with_no_key_and_no_keyword_shows_a_dash() {
     assert!(
         text.contains('—'),
         "a plugin row with neither a key nor a match reason should show a dash, got {text:?}"
+    );
+}
+
+// The plugin picks the action title, and the tag is drawn after it. A title
+// wide enough to fill the row left no width for the tag at all, so the one
+// in-list warning disappeared on exactly the name a plugin would choose to
+// hide it. The tag's width is reserved before the name is drawn.
+#[test]
+fn a_row_name_too_wide_for_the_row_cannot_crowd_out_the_destructive_tag() {
+    let mut state = shell_with_a_destructive_plugin_row_titled(
+        "Uninstall the entirely harmless and routinely reversible web bridge \
+         companion service together with every one of its cached artifacts",
+    );
+    let row = state
+        .filtered_palette_commands()
+        .into_iter()
+        .next()
+        .expect("a matching row");
+    assert!(row.command.destructive, "the fixture marks the row itself");
+    let command_id = row.command.id.clone();
+    let text = palette_row_text(&mut state, &command_id);
+    assert!(
+        text.contains("[destructive]"),
+        "a long plugin-chosen name must not drop the tag, got {text:?}"
     );
 }
 
