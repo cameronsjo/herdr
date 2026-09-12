@@ -27,7 +27,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ### fix(api): stop workspace.merge reporting moved tabs as closed
 
-- **PR:** pending — branch `issue/53-merge-workspace-closed-tabs`
+- **PR:** [cameronsjo/herdr#78](https://github.com/cameronsjo/herdr/pull/78)
 - **Files:** `src/app/api/workspaces.rs`, `src/app/api/plugins/context.rs`, `docs/next/website/src/content/docs/socket-api.mdx`
 - **Replaces:** Upstream emits merge's `workspace.closed` with a pre-drain `WorkspaceInfo`, snapshotted before the source's tabs leave. That snapshot asserts tab and pane counts and an `active_tab_id` for content that moved to the target and is alive, so the event describes a loss that did not happen. The only in-repo consumer, `plugin_context_for_event`, then turns that `active_tab_id` into a plugin hook's `tab_id`, naming a tab that is open in the target. The fork collects ids only and emits `workspace: None`, matching `pane.move`, which already closes a drained workspace that way. The `TabMovedAcrossWorkspaces` events emitted just before carry every moved tab's source workspace, previous id, and new id, so no information is lost.
 - **Regression check:** `cargo nextest run --locked -E 'test(api_workspace_merge)'`.
