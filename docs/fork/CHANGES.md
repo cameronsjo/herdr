@@ -29,8 +29,8 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 - **PR:** [cameronsjo/herdr#76](https://github.com/cameronsjo/herdr/pull/76)
 - **Files:** `src/persist/restore.rs`
-- **Replaces:** Upstream drops a stored agent name silently when a pane restores through a fresh shell with no agent, which is the normal path under `resume_agents_on_restore = false`. Dropping the name is correct — `AppState::resolve_agent_target` matches on it with no liveness check, so a restored name would route `agent prompt` into an interactive shell — but a pane named only through `agent.start` comes back with no name and no label, because `agent.start` and `agent.rename` never set a manual label. The fork logs the dropped name at debug and carries it into the manual label when the pane stored no label of its own.
-- **Regression check:** `cargo nextest run --locked -E 'test(cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label)'`.
+- **Replaces:** Upstream drops a stored agent name silently when a pane restores through a fresh shell with no agent, which is the normal path under `resume_agents_on_restore = false`. Dropping the name is correct — `AppState::resolve_agent_target` matches on it with no liveness check, so a restored name would route `agent prompt` into an interactive shell — but a pane named only through `agent.start` comes back with no name and no label, because `agent.start` and `agent.rename` never set a manual label. The fork logs the dropped name at debug and carries it into the manual label when the pane came back with no label of its own.
+- **Regression check:** `cargo nextest run --locked -E 'test(cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label) + test(cold_restore_carries_the_agent_name_over_a_blank_stored_label)'`.
 
 ## Palette direction chooser, destructive confirm, and review findings (`docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md`)
 
