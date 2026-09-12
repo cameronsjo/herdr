@@ -1699,11 +1699,9 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > '{}.tmp' && mv '{}.tmp' '{}'"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display(),
-                capture.display(),
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -1813,11 +1811,9 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > '{}.tmp' && mv '{}.tmp' '{}'"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display(),
-                capture.display(),
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -2165,11 +2161,9 @@ title = "Plugin Popup"
 placement = "popup"
 width = "80%"
 height = "40%"
-command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}.tmp' && mv '{}.tmp' '{}'; sleep 1"]
+command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{p}.tmp' && mv '{p}.tmp' '{p}'; sleep 1"]
 "#,
-            env_capture.display(),
-            env_capture.display(),
-            env_capture.display()
+            p = env_capture.display()
         );
         write_manifest_content(&root, &manifest);
         link_manifest(&mut app, &root);
@@ -2683,11 +2677,9 @@ min_herdr_version = "0.6.10"
 platforms = ["linux", "macos"]
 
 [[startup]]
-command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > '{}.tmp' && mv '{}.tmp' '{}'"]
+command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display(),
-                capture.display(),
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -2733,11 +2725,9 @@ platforms = ["linux", "macos"]
 
 [[events]]
 on = "worktree.created"
-command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > '{}.tmp' && mv '{}.tmp' '{}'"]
+command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display(),
-                capture.display(),
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
