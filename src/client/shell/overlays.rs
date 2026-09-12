@@ -14,9 +14,8 @@ pub(crate) struct OverlayRender {
     pub(crate) palette_popup: Rect,
     pub(crate) palette_rows: Vec<(Rect, usize)>,
     pub(crate) palette_max_scroll: usize,
-    pub(crate) pane_split_popup: Rect,
-    pub(crate) pane_split_vertical: Rect,
-    pub(crate) pane_split_horizontal: Rect,
+    pub(crate) chooser_popup: Rect,
+    pub(crate) chooser_buttons: Vec<Rect>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
@@ -71,7 +70,7 @@ pub(crate) fn render_client_overlay(
             render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
         }
         ClientShellOverlay::Palette(v) => render_palette_overlay(b, v, s, k, p),
-        ClientShellOverlay::PaneSplitDirection(v) => render_pane_split_direction_overlay(b, v, p),
+        ClientShellOverlay::Chooser(v) => render_chooser_overlay(b, v, p),
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
@@ -1011,7 +1010,7 @@ fn render_palette_overlay(
         query_style,
     );
 
-    let commands = super::super::palette::filtered_palette_commands(
+    let rows = super::super::palette::filtered_palette_commands(
         &v.query,
         &v.recent_command_ids,
         k,
@@ -1019,7 +1018,7 @@ fn render_palette_overlay(
         s,
     );
     let viewport = usize::from(body.height.max(1));
-    let max_scroll = commands.len().saturating_sub(viewport);
+    let max_scroll = rows.len().saturating_sub(viewport);
     let scroll = v.scroll.min(max_scroll);
     let metrics = crate::pane::ScrollMetrics {
         offset_from_bottom: max_scroll.saturating_sub(scroll),
@@ -1031,8 +1030,8 @@ fn render_palette_overlay(
         .map(|_| Rect::new(body.x, body.y, body.width.saturating_sub(1), body.height))
         .unwrap_or(body);
 
-    let mut rows = Vec::new();
-    if commands.is_empty() {
+    let mut row_hits = Vec::new();
+    if rows.is_empty() {
         put_text(
             b,
             text_area.x,
@@ -1042,7 +1041,7 @@ fn render_palette_overlay(
             base.fg(p.overlay1),
         );
     } else {
-        for (visible, (index, command)) in commands
+        for (visible, (index, row)) in rows
             .iter()
             .enumerate()
             .skip(scroll)
@@ -1055,7 +1054,7 @@ fn render_palette_overlay(
                 text_area.width,
                 1,
             );
-            rows.push((rect, index));
+            row_hits.push((rect, index));
             let selected = index == v.selected;
             let style = if selected {
                 base.fg(contrast(p))
@@ -1065,18 +1064,55 @@ fn render_palette_overlay(
                 base.fg(p.text)
             };
             b.set_style(rect, style);
+            // The right column is resolved before the name is drawn: both it
+            // and the destructive tag are reserved out of the name's width, so
+            // a long plugin-chosen name is clipped rather than allowed to push
+            // either of them off the row.
+            let (right_text, right_style) = if let Some(key) = row.command.key.as_deref() {
+                let key_style = if selected { style } else { base.fg(p.overlay1) };
+                (format!("{key} "), key_style)
+            } else if let Some(keyword) = row.matched_keyword {
+                let reason_style = if selected { style } else { base.fg(p.overlay0) };
+                (format!("matched: {keyword} "), reason_style)
+            } else {
+                let dash_style = if selected { style } else { base.fg(p.overlay0) };
+                ("— ".to_string(), dash_style)
+            };
+            let tag = super::super::palette::DESTRUCTIVE_TAG;
+            let reserved = display_width(&right_text).saturating_add(if row.command.destructive {
+                display_width(tag)
+            } else {
+                0
+            });
+            let name_budget = rect.width.saturating_sub(reserved);
             put_text(
                 b,
                 rect.x,
                 rect.y,
-                rect.width,
-                &format!(" {}", command.name),
+                name_budget,
+                &format!(" {}", row.command.name),
                 style,
             );
-            if !command.key.is_empty() {
-                let key_style = if selected { style } else { base.fg(p.overlay1) };
-                put_right_text(b, rect, rect.y, &format!("{} ", command.key), key_style);
+            // Drawn over the name's trailing space rather than appended to it,
+            // so the tag keeps the warning colour on an unselected row while
+            // the selected row's own style still wins.
+            if row.command.destructive {
+                let offset = display_width(&format!(" {}", row.command.name)).min(name_budget);
+                let tag_style = if selected {
+                    style
+                } else {
+                    base.fg(p.peach).add_modifier(Modifier::BOLD)
+                };
+                put_text(
+                    b,
+                    rect.x.saturating_add(offset),
+                    rect.y,
+                    rect.width.saturating_sub(offset),
+                    tag,
+                    tag_style,
+                );
             }
+            put_right_text(b, rect, rect.y, &right_text, right_style);
         }
     }
     if let Some(track) = track {
@@ -1088,14 +1124,14 @@ fn render_palette_overlay(
         inner.x,
         inner.bottom().saturating_sub(1),
         inner.width,
-        " run enter · move ↑↓ · close esc",
+        " run enter · move ↑↓",
         base.fg(p.overlay0),
     );
 
     Some(OverlayRender {
         cancel: close,
         palette_popup: popup,
-        palette_rows: rows,
+        palette_rows: row_hits,
         palette_max_scroll: max_scroll,
         cursor: Some(crate::protocol::CursorState {
             x: (inner.x + 3 + display_width(&v.query)).min(inner.right().saturating_sub(1)),
@@ -1107,68 +1143,63 @@ fn render_palette_overlay(
     })
 }
 
-fn render_pane_split_direction_overlay(
+fn render_chooser_overlay(
     b: &mut Buffer,
-    v: &ClientPaneSplitOverlay,
+    v: &ClientChooserOverlay,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let (popup, inner, vertical, horizontal) =
-        super::super::palette::pane_split_direction_geometry(b.area)?;
+    let labels: Vec<&str> = v.choices.iter().map(|choice| choice.label).collect();
+    let (popup, inner, buttons) =
+        super::super::palette::chooser_geometry(b.area, &v.title, &labels)?;
     panel(b, popup, p.accent, p.panel_bg)?;
 
     let base = Style::default()
         .bg(p.panel_bg)
         .remove_modifier(Modifier::DIM);
+    // The title is the only runtime text here — a plugin's own row name
+    // reaches it — so it is drawn width-bounded rather than sized from.
     put_text(
         b,
         inner.x,
         inner.y,
         inner.width,
-        " split into tab",
+        &format!(" {}", v.title),
         base.fg(p.text).add_modifier(Modifier::BOLD),
     );
 
-    let selected_vertical = v.direction == crate::api::schema::SplitDirection::Right;
     let selected_style = base
         .fg(contrast(p))
         .bg(p.accent)
         .add_modifier(Modifier::BOLD);
     let unselected_style = base.fg(p.text).bg(p.surface0).add_modifier(Modifier::BOLD);
-    let (vertical_label, horizontal_label) = super::super::palette::split_button_labels();
-    button(
-        b,
-        vertical,
-        vertical_label,
-        if selected_vertical {
-            selected_style
-        } else {
-            unselected_style
-        },
-    );
-    button(
-        b,
-        horizontal,
-        horizontal_label,
-        if selected_vertical {
-            unselected_style
-        } else {
-            selected_style
-        },
-    );
+    for (index, rect) in buttons.iter().enumerate() {
+        button(
+            b,
+            *rect,
+            v.choices
+                .get(index)
+                .map(|choice| choice.label)
+                .unwrap_or_default(),
+            if index == v.selected {
+                selected_style
+            } else {
+                unselected_style
+            },
+        );
+    }
 
     put_text(
         b,
         inner.x,
         inner.bottom().saturating_sub(1),
         inner.width,
-        " ←→ choose · enter confirm · esc cancel",
+        " choose ←→ · confirm enter · cancel esc",
         base.fg(p.overlay0),
     );
 
     Some(OverlayRender {
-        pane_split_popup: popup,
-        pane_split_vertical: vertical,
-        pane_split_horizontal: horizontal,
+        chooser_popup: popup,
+        chooser_buttons: buttons,
         ..OverlayRender::default()
     })
 }
@@ -1186,7 +1217,11 @@ fn help_lines(
     );
     let key_width = groups
         .iter()
-        .flat_map(|(_, entries)| entries.iter().map(|entry| entry.key.chars().count()))
+        .flat_map(|(_, entries)| {
+            entries
+                .iter()
+                .map(|entry| entry.key.as_deref().unwrap_or("unset").chars().count())
+        })
         .max()
         .unwrap_or(8);
     if groups.is_empty() {
@@ -1213,7 +1248,7 @@ fn help_lines(
             )),
         ));
         for entry in entries {
-            let (key, label) = (entry.key, entry.label);
+            let (key, label) = (entry.key.unwrap_or_else(|| "unset".to_owned()), entry.label);
             let padded_key = format!(" {key:<key_width$} ");
             let width = padded_key.chars().count() + label.chars().count();
             lines.push((

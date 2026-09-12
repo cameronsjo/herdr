@@ -116,6 +116,28 @@ handlers can also declare their own `platforms`; item-level platforms override
 the top-level list. Local plugins without top-level `platforms` link with a
 warning.
 
+Set `destructive = true` on an action that removes or replaces something the
+user would want back — uninstalling a service, deleting state, resetting a
+configuration. The command palette tags such a row and asks before running it,
+with cancel selected by default:
+
+```toml
+[[actions]]
+id = "uninstall"
+title = "Uninstall web bridge"
+destructive = true
+command = ["node", "dist/uninstall.js"]
+```
+
+The key is optional and defaults to `false`, so a manifest written before it
+existed keeps working unchanged. A user can also mark a third-party action
+destructive from their own config with `palette.destructive_actions`.
+
+`destructive` binds the command palette only. The same action still runs
+without a confirm when it is reached another way — through a link handler, or
+through `herdr plugin action invoke` — so do not treat the key as an
+authorization boundary. It tells the palette to ask; it does not stop anything.
+
 `command` values are argv arrays. Herdr does not run them through a shell, so
 there is no shell expansion unless your command starts a shell itself. Put
 language-specific behavior in your script or binary.

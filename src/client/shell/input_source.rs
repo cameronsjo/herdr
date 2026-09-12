@@ -8,7 +8,7 @@ impl ClientShellState {
                 ClientShellOverlay::ConfirmClose(_)
                     | ClientShellOverlay::ConfirmMerge(_)
                     | ClientShellOverlay::Palette(_)
-                    | ClientShellOverlay::PaneSplitDirection(_)
+                    | ClientShellOverlay::Chooser(_)
                     | ClientShellOverlay::Help(_)
                     | ClientShellOverlay::Navigator(_)
                     | ClientShellOverlay::WorktreeRemove(_)

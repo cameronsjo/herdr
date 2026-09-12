@@ -39,6 +39,46 @@ pub(super) fn response(request_id: &str, socket_path: &Path) -> ErrorResponse {
     }
 }
 
+/// Builds the `server_api_not_accepting` ErrorResponse shown when the API
+/// socket exists and refuses connections while a herdr server is still
+/// answering on the paired client socket. Running `herdr` here would delete
+/// this stale-looking-but-live socket file and start a second server
+/// (`crate::ipc::prepare_socket_path`), so the message steers away from that
+/// remedy instead of repeating it.
+pub(super) fn not_accepting_response(request_id: &str, socket_path: &Path) -> ErrorResponse {
+    ErrorResponse {
+        id: request_id.to_string(),
+        error: ErrorBody {
+            code: "server_api_not_accepting".into(),
+            message: format!(
+                "the herdr server at {} is not accepting api connections, but a herdr server is still running; do not run `herdr` here (it would delete this socket and start a second server) — check `herdr status server` and restart the server deliberately if it is stuck",
+                socket_path.display()
+            ),
+        },
+    }
+}
+
+/// Builds the `server_api_not_responding` ErrorResponse shown when the API
+/// socket accepted the connection but the server never replied to the
+/// handshake ping within the probe timeout.
+pub(super) fn not_responding_response(
+    request_id: &str,
+    socket_path: &Path,
+    timeout: std::time::Duration,
+) -> ErrorResponse {
+    ErrorResponse {
+        id: request_id.to_string(),
+        error: ErrorBody {
+            code: "server_api_not_responding".into(),
+            message: format!(
+                "connected to the herdr server at {} but got no handshake reply after waiting {}s",
+                socket_path.display(),
+                timeout.as_secs()
+            ),
+        },
+    }
+}
+
 fn startup_command(socket_path: &Path) -> String {
     let session_socket =
         crate::session::api_socket_path_for(crate::session::active_name().as_deref());

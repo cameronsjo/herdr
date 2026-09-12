@@ -46,7 +46,7 @@ pub fn is_server_listening() -> bool {
 }
 
 /// Checks whether a herdr server is listening at a specific socket path.
-fn is_server_listening_at(socket_path: &Path) -> bool {
+pub(crate) fn is_server_listening_at(socket_path: &Path) -> bool {
     #[cfg(windows)]
     {
         let _ = socket_path;

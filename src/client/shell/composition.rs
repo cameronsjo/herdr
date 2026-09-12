@@ -596,9 +596,8 @@ impl ClientShellState {
                 self.hits.palette_popup = rendered.palette_popup;
                 self.hits.palette_rows = rendered.palette_rows;
                 self.hits.palette_max_scroll = rendered.palette_max_scroll;
-                self.hits.pane_split_popup = rendered.pane_split_popup;
-                self.hits.pane_split_vertical = rendered.pane_split_vertical;
-                self.hits.pane_split_horizontal = rendered.pane_split_horizontal;
+                self.hits.chooser_popup = rendered.chooser_popup;
+                self.hits.chooser_buttons = rendered.chooser_buttons;
                 self.hits.worktree_search = rendered.worktree_search;
                 self.hits.worktree_rows = rendered.worktree_rows;
                 self.hits.help_popup = rendered.help_popup;

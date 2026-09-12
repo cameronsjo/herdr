@@ -9176,6 +9176,10 @@
                 "null"
               ]
             },
+            "destructive": {
+              "description": "Whether running this action removes or replaces something the\noperator would want back. The command palette tags such a row and\nconfirms before running it. Absent in an older manifest, which reads\nas `false` — the palette behaves exactly as it did before.",
+              "type": "boolean"
+            },
             "id": {
               "type": "string"
             },
