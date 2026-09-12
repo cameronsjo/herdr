@@ -835,9 +835,10 @@ mod tests {
     /// partial write. Without that, shell `>` truncates the destination before
     /// the command's own writes land, and a reader can catch it between the
     /// truncate and a multi-line `printf` completing, returning a short read
-    /// that looks like a legitimate empty-file wait. The Windows capture at
-    /// `mod.rs:1533` already writes `capture-%1.tmp` then `move /y` for the
-    /// same reason. `pump` advances any event loop the command depends on.
+    /// that looks like a legitimate empty-file wait. The Windows capture in
+    /// `windows_plugin_pane_commands_resolve_from_plugin_root_with_cwd_override`
+    /// already writes `capture-%1.tmp` then `move /y` for the same reason.
+    /// `pump` advances any event loop the command depends on.
     fn read_capture_when_ready(path: &std::path::Path, mut pump: impl FnMut()) -> String {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
@@ -922,6 +923,11 @@ action = "bootstrap"
 
     #[test]
     fn plugin_link_creates_stable_config_and_state_dirs() {
+        // Same race as the two plugin-path tests below: this resolves
+        // config_dir()/state_dir() before link_manifest and asserts on those
+        // paths after it, while non_cli_plugin_consumers_refresh_global_enabled_state
+        // mutates XDG_CONFIG_HOME under the same lock.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-link-dirs");
         let config_dir = super::env::plugin_config_dir("example.config-dirs");
@@ -951,6 +957,11 @@ platforms = ["linux", "macos", "windows"]
 
     #[test]
     fn plugin_link_seeds_stable_config_dir_from_legacy_unhashed_dir() {
+        // Same race as the two plugin-path tests below, with a sharper edge:
+        // legacy_dir is derived from config_dir() here, while the seeding inside
+        // link_manifest re-resolves config_dir() — so an XDG_CONFIG_HOME swap
+        // between the two makes this create and read under different roots.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-link-legacy-config");
         let config_dir = super::env::plugin_config_dir("example.legacy-config");
@@ -2388,7 +2399,19 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{p}.tmp' && mv '{p
     #[test]
     fn non_cli_plugin_consumers_refresh_global_enabled_state() {
         let _guard = crate::config::test_config_env_lock().lock().unwrap();
-        let previous_config_home = std::env::var_os("XDG_CONFIG_HOME");
+        // Restore on unwind too: an assertion failure below must not leak
+        // XDG_CONFIG_HOME into every later test that resolves config_dir(),
+        // which would turn one real failure into a cascade of unrelated ones.
+        struct RestoreConfigHome(Option<std::ffi::OsString>);
+        impl Drop for RestoreConfigHome {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(previous) => std::env::set_var("XDG_CONFIG_HOME", previous),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
+                }
+            }
+        }
+        let _restore_config_home = RestoreConfigHome(std::env::var_os("XDG_CONFIG_HOME"));
         let base = unique_temp_path("plugin-global-refresh");
         std::env::set_var("XDG_CONFIG_HOME", &base);
         let root = base.join("plugin");
@@ -2473,10 +2496,6 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{p}.tmp' && mv '{p
         assert_eq!(app.state.plugin_command_logs.len(), logs_before);
 
         let _ = std::fs::remove_dir_all(&base);
-        match previous_config_home {
-            Some(previous) => std::env::set_var("XDG_CONFIG_HOME", previous),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
     }
 
     #[cfg(unix)]
