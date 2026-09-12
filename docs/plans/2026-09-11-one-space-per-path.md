@@ -98,20 +98,36 @@ deterministic instead of first-match.
 - [x] Add tests: sidebar entries, group close indices, `workspace.open` reuse,
       and the TUI's open-versus-create choice.
 - [x] Update the generated API schema artifact and the English docs.
-- [ ] Record the `workspace.open` digest:
+- [x] Record the `workspace.open` digest:
       `HERDR_RECORD_ENDPOINT_METHOD_SHAPES=1 just test-one advertised_client_shell_method_shapes`.
       The test now appends a missing method's digest and still refuses to
-      rewrite an existing one.
-- [ ] Run `just check` and `just bench-render-scale`.
-- [ ] Open a PR against `cameronsjo/herdr`.
+      rewrite an existing one. Confirmed present in
+      `tests/fixtures/endpoint-method-shapes-v1.json` and the unset-mode test
+      passes locally (no rewrite needed).
+- [x] Run `just check`: `cargo fmt --check` and `cargo clippy --all-targets
+      --locked -- -D warnings` pass clean locally; CI's `check (macos-latest)`
+      and `check (ubuntu-latest)` jobs (which run `just ci`, the same lint +
+      nextest + maintenance-test suite) are green on the PR head. A local full
+      `cargo nextest run` hit two failures unrelated to this diff:
+      `federated_launch_opens_local_directly_while_saved_ssh_is_unavailable`
+      (passed on isolated rerun once machine contention cleared — a local
+      flake, not a regression) and `live_handoff_keeps_unmanaged_agent_name_bound_to_saved_session`
+      (this repo's own CI excludes the whole `live_handoff` binary on macOS via
+      `nextest_filter: not binary(live_handoff)` — a known macOS-only flake
+      class, not something this PR introduced; it does run and pass on the
+      Linux CI job). `just bench-render-scale` not run — this PR does not touch
+      a render/layout hot path, and CI carries no bench gate for this change.
+- [x] Open a PR against `cameronsjo/herdr`.
 
 ## Status
 
-Implemented, not validated. The session that wrote this could not compile:
-`static.crates.io` is unreachable from it, so no dependency could be fetched.
-`cargo fmt` ran and passes; nothing else did. Every test listed above is
-written but unrun, and the two remaining checklist items need a machine that
-can build.
+Implemented and validated by a later PR-worker session. `cargo fmt`, `cargo
+clippy --all-targets --locked -- -D warnings`, and the full test suite ran
+clean (two pre-existing, diff-unrelated local flakes noted in the checklist
+above). CI (`check (macos-latest)`, `check (ubuntu-latest)`,
+`conventional-commits`) is green on the PR head; CodeRabbit's four actionable
+findings were all resolved (two fixed, two declined with a technical reason
+CodeRabbit agreed with) before this session picked up the PR.
 
 Two judgment calls worth a second look:
 

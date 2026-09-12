@@ -1011,6 +1011,88 @@ mod tests {
         app
     }
 
+    // `workspace.open` must resolve its reuse target through
+    // `preferred_workspace_idx` deterministically when more than one existing,
+    // non-linked space already sits on the same identity path: the focused
+    // space wins over an earlier one, and the lowest index wins when neither
+    // is focused.
+    #[test]
+    fn workspace_open_reuse_prefers_focused_space_over_lowest_index() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let shared_cwd = std::env::temp_dir().join(format!(
+            "herdr-ws-open-reuse-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&shared_cwd).unwrap();
+
+        let mut first = Workspace::test_new("first");
+        first.identity_cwd = shared_cwd.clone();
+        let mut second = Workspace::test_new("second");
+        second.identity_cwd = shared_cwd.clone();
+        app.state.workspaces = vec![first, second];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+
+        // Neither existing space is focused: the lowest index wins.
+        let response = app.handle_workspace_open(
+            "req-lowest".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(shared_cwd.to_string_lossy().into_owned()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceOpened {
+            workspace,
+            already_open,
+        } = success.result
+        else {
+            panic!("expected workspace_opened response");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, app.state.workspaces[0].id);
+
+        // Focusing the second space makes it the preferred reuse target,
+        // ahead of the lower-index first space.
+        app.state.active = Some(1);
+        let response = app.handle_workspace_open(
+            "req-focused".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(shared_cwd.to_string_lossy().into_owned()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceOpened {
+            workspace,
+            already_open,
+        } = success.result
+        else {
+            panic!("expected workspace_opened response");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, app.state.workspaces[1].id);
+
+        let _ = std::fs::remove_dir_all(&shared_cwd);
+    }
+
     #[test]
     fn api_workspace_close_parent_group_requires_explicit_group_intent() {
         for confirm_close in [true, false] {
