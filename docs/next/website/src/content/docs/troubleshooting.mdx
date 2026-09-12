@@ -87,6 +87,20 @@ herdr
 
 Stopping the server exits its pane processes. Herdr panes inherit the long-lived server's macOS launch context, so a server started through SSH or a background job may not have access to interactive Keychain services. See [Herdr issue #966](https://github.com/herdrdev/herdr/issues/966) for details.
 
+## `herdr agent list` says no server is running but my panes are live
+
+A herdr server has two sockets: the api socket used by the CLI, and a paired client socket used by the panes attached to it. If the server's api accept loop dies while the rest of the server keeps running, the CLI reports one of two new codes instead of the generic "no server is running" message:
+
+- `server_api_not_accepting` — the api socket exists and refuses connections, but the client socket is still answering, so a server is definitely still up.
+- `server_api_not_responding` — the api socket accepted the connection, but no handshake reply arrived.
+
+**Do not run `herdr` in this state.** It would delete the refused socket file and start a second server, leaving the original one (and any panes attached to it) orphaned. Instead, check `herdr status server` and restart the stuck server deliberately:
+
+```bash
+herdr server stop
+herdr
+```
+
 ## The `herdr` command is not found
 
 Restart the terminal so it reloads its environment, then confirm the Herdr install directory is on `PATH`. For package-manager installs, use that package manager to update Herdr and expose it on `PATH`. See [Install Herdr](/docs/install/#verify).

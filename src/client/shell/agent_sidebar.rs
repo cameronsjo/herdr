@@ -435,13 +435,18 @@ pub(super) fn render_agent_row(
         status_icon(row.status, config.status_indicators),
         Style::default().fg(status_color(row.status, palette)),
     );
-    let rows = if row.rows.is_empty() {
-        vec![vec![crate::ui::ResolvedToken {
+    // A row with no resolved tokens still draws its status icon. Building the
+    // fallback inside that branch lets the common path borrow the entry's rows
+    // instead of copying every token, per agent, per frame.
+    let fallback: Vec<Vec<crate::ui::ResolvedToken>>;
+    let rows: &[Vec<crate::ui::ResolvedToken>] = if row.rows.is_empty() {
+        fallback = vec![vec![crate::ui::ResolvedToken {
             kind: crate::ui::ResolvedTokenKind::StateIcon,
             style: Default::default(),
-        }]]
+        }]];
+        &fallback
     } else {
-        row.rows.clone()
+        &row.rows
     };
     if let (1, Some(label)) = (header_rows, row.header.as_deref()) {
         // The header labels the whole run, so it never carries the active-row

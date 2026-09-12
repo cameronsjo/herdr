@@ -74,11 +74,49 @@ impl ApiClient {
         read_json_line(&mut reader)
     }
 
+    // Public API kept for external use; every in-crate caller now goes
+    // through `status_with_timeout` so a wedged server's silent accept
+    // cannot hang the CLI (mirrors `is_server_listening` in
+    // src/server/autodetect.rs).
+    #[allow(dead_code)]
     pub fn status(&self) -> Result<crate::api::RuntimeStatus, ApiClientError> {
         let response = self.request(Request {
             id: "api-client:status".into(),
             method: Method::Ping(PingParams::default()),
         })?;
+        match response.result {
+            ResponseResult::Pong {
+                version,
+                protocol,
+                capabilities,
+            } => Ok(crate::api::RuntimeStatus {
+                version: Some(version),
+                protocol: Some(protocol),
+                capabilities,
+            }),
+            result => Err(ApiClientError::UnexpectedResult(format!("{result:?}"))),
+        }
+    }
+
+    /// Like `status()`, but bounds the wait for a handshake reply. Used to
+    /// probe a connection that accepted but never answers, so a wedged
+    /// server's accept-but-silent socket does not hang the caller forever.
+    /// Built on `request_value_with_timeout` rather than adding a timeout
+    /// to `status()` itself: a blanket timeout there would also apply to
+    /// `request_value()`/`status()` callers that stream long-lived responses
+    /// (events.subscribe, agent-wait), which must not time out mid-wait.
+    pub fn status_with_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<crate::api::RuntimeStatus, ApiClientError> {
+        let value = self.request_value_with_timeout(
+            &Request {
+                id: "api-client:status".into(),
+                method: Method::Ping(PingParams::default()),
+            },
+            timeout,
+        )?;
+        let response = parse_response_value(value)?;
         match response.result {
             ResponseResult::Pong {
                 version,
@@ -204,5 +242,54 @@ mod tests {
         let path = PathBuf::from("/tmp/herdr-test.sock");
         let client = ApiClient::for_target(ConnectionTarget::SocketPath(path.clone()));
         assert_eq!(client.socket_path(), path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_with_timeout_times_out_when_server_never_replies() {
+        use std::os::unix::net::UnixListener;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = PathBuf::from(format!("/tmp/hac-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket_path = dir.join("wedged.sock");
+
+        // Accept the connection but never write a reply — simulates a
+        // server whose accept loop is alive but the handshake never comes.
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            // Hold the connection open without responding.
+            std::thread::sleep(Duration::from_secs(2));
+            drop(stream);
+        });
+
+        let client = ApiClient::for_target(ConnectionTarget::SocketPath(socket_path));
+        let err = client
+            .status_with_timeout(Duration::from_millis(200))
+            .expect_err("a server that never replies should time out, not hang");
+
+        match err {
+            // Platform-dependent: a Unix domain socket recv timeout surfaces
+            // as `WouldBlock` on macOS/BSD and `TimedOut` elsewhere. Both are
+            // exactly the pair `map_handshake_probe_error` (src/cli.rs)
+            // treats as "connected but never replied".
+            ApiClientError::Io(io_err) => {
+                assert!(
+                    matches!(
+                        io_err.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                    ),
+                    "expected a timeout-shaped io error, got: {io_err:?}"
+                );
+            }
+            other => panic!("expected a timeout-shaped io error, got: {other}"),
+        }
+
+        let _ = handle.join();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

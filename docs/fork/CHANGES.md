@@ -31,6 +31,26 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/platform/unix_common.rs`
 - **Replaces:** The issue's premise — a pty write losing its reader — was wrong. `begin_cli_output()` flips SIGPIPE to `SIG_DFL` so a piped `herdr --help | head` dies quietly on purpose; correct for the shipped CLI. `cargo test --bin herdr` runs every test in one process, so once a test that prints and then drops a reading peer calls it, SIGPIPE stays fatal for every later write-to-closed-pipe in the same run, and the suite exits 141 partway through. Which test dies moves between runs because the process-wide disposition, not any one test, is what changed. `cargo nextest run` hides this because it isolates each test in its own process. Restoring the disposition inside just the one offending test was rejected: it silently re-breaks the next time any test exercises a CLI print path. The fix gates `begin_cli_output`/`end_cli_output`'s bodies on `#[cfg(not(test))]` so the test harness never touches the process-wide disposition.
 - **Regression check:** `cargo test --bin herdr > log 2>&1; echo $?` — prints a `test result:` line and no longer exits 141.
+||||||| d28a9a60
+
+## Split server_not_running into three states
+
+### fix(cli): split server_not_running into three states so a wedged api socket is not misdiagnosed
+
+- **PR:** [cameronsjo/herdr#70](https://github.com/cameronsjo/herdr/pull/70)
+- **Files:** `src/cli/server_not_running.rs`, `src/cli.rs`, `src/server/autodetect.rs`, `src/api/client.rs`, `src/cli/status.rs`, `tests/cli/sessions.rs`
+- **Replaces:** Upstream reports the single code `server_not_running` for three distinct states: (a) no socket at all, (b) a stale socket file left by a crashed server, and (c) a live api socket that refuses connections while the server itself is still up (its api accept loop died) — for which the existing remedy, running `herdr`, is actively harmful because it deletes the refused socket and starts a second server. The fork adds `server_api_not_accepting` (api socket refuses, but the paired client socket still answers — discriminated via the existing `is_server_listening_at` probe against the derived client socket) and `server_api_not_responding` (the socket accepts but the handshake ping never replies — discriminated with a new bounded `ApiClient::status_with_timeout`, 10s, so a merely-slow server is not misdiagnosed against the server's own 5s `INITIAL_REQUEST_TIMEOUT`). Case (b), stale socket + no live client socket, is unchanged and still reports `server_not_running` with the original `run \`herdr\`` remedy. `herdr status`/`herdr status server` gain a matching `NotAccepting` runtime-status variant (`status: running but not accepting api connections`, `running: false` in JSON so existing scripts stay correct). No wire-protocol impact: the codes are CLI-local strings, never cross the network. On Windows the wedged case still falls back to the pre-existing message, because `is_server_listening_at`'s Windows branch already probes through the api socket itself; the handshake-timeout code path works identically on every platform.
+- **Regression check:** `just test-one dead_server` (3 passed, up from 2), `just test-one classifier_ignores_unrelated_io_kinds`, `just test-one status_with_timeout`, `just test-one server_status`, `just lint`.
+||||||| d28a9a60
+
+## Fix flaky plugin-path capture tests (issue #38)
+
+### fix(tests): publish plugin capture files by atomic rename
+
+- **PR:** [cameronsjo/herdr#68](https://github.com/cameronsjo/herdr/pull/68)
+- **Files:** `src/app/api/plugins/mod.rs`
+- **Replaces:** Every test capture in this file redirected a shell `printf` straight into its destination file (`> {capture}`), so a reader could observe the file between the shell's truncating `>` open and the command's writes landing — a partial-read race, not a config-dir race. `plugin_pane_open_injects_plugin_paths_and_protects_overrides` was the one that hit it (~1.5% flake rate; a probe of 300 runs of the old shape read a partial line 20 times). Every capture writer now redirects to a sibling `.tmp` path and renames it into place, matching the pattern the Windows sibling test already used, so `read_capture_when_ready`'s first non-empty read is always a complete one. Also serializes every test in this file that resolves `config_dir()`/`state_dir()` — the two plugin-path tests plus `plugin_link_creates_stable_config_and_state_dirs` and `plugin_link_seeds_stable_config_dir_from_legacy_unhashed_dir` — against `non_cli_plugin_consumers_refresh_global_enabled_state`'s `XDG_CONFIG_HOME` mutation via the existing `test_config_env_lock`, a real (if unrelated) race under plain `cargo test`. That mutating test now restores `XDG_CONFIG_HOME` from a `Drop` guard, so a failed assertion inside it can no longer leak a temp config home into every later test.
+- **Regression check:** `python3` probe comparing the old and new writer shape 300 times each (old: 20/300 partial reads; new: 0/300) — see the plan for the script. Also `just test-one 'app::api::plugins::tests::'`.
 
 ## Palette direction chooser, destructive confirm, and review findings (`docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md`)
 
