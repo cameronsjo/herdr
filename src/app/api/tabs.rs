@@ -482,6 +482,7 @@ impl App {
         let tabs = self.tab_list_info(target_ws_idx);
         let source_tabs = self.tab_list_info(source_ws_idx);
 
+        self.state.repoint_pane_records_to_workspace(target_ws_idx);
         self.state.mark_session_dirty();
         self.schedule_session_save();
         // Tab-bar scroll state used to live on AppState, so this nudged it to
@@ -761,6 +762,7 @@ mod tests {
         app.state.workspaces = vec![source, target];
         app.state.active = Some(0);
         app.state.selected = 0;
+        app.state.ensure_test_terminals();
     }
 
     #[test]
@@ -814,6 +816,96 @@ mod tests {
 
         app.state.workspaces[0].assert_invariants_for_test();
         app.state.workspaces[1].assert_invariants_for_test();
+        app.state.assert_invariants_for_test();
+    }
+
+    /// A record naming a pane by workspace id must follow that pane when its
+    /// tab moves to an existing workspace, or it dangles at the workspace the
+    /// tab left.
+    #[test]
+    fn api_tab_move_to_workspace_repoints_pane_records() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
+        seed_two_workspaces(&mut app);
+
+        let moved = app.state.workspaces[0].tabs[1].root_pane;
+        let source_key = app.state.workspaces[0].id.clone();
+        let target_key = app.state.workspaces[1].id.clone();
+        app.state.previous_pane_focus = Some(crate::app::state::PaneFocusTarget {
+            workspace_id: source_key.clone(),
+            pane_id: moved,
+        });
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "waiting".into(),
+            context: String::new(),
+            position: None,
+            target: Some(crate::app::state::ToastTarget {
+                workspace_id: source_key.clone(),
+                pane_id: moved,
+            }),
+        });
+        app.state.pending_agent_notifications.insert(
+            moved,
+            crate::app::state::PendingAgentNotification {
+                pane_id: moved,
+                workspace_id: source_key.clone(),
+                agent_label: "agent".into(),
+                known_agent: None,
+                kind: crate::app::state::ToastKind::NeedsAttention,
+                state: crate::detect::AgentState::Blocked,
+                deadline: std::time::Instant::now(),
+            },
+        );
+
+        let previous_tab_id = app.public_tab_id(0, 1).unwrap();
+        let target_workspace_id = app.public_workspace_id(1);
+
+        let response = app.handle_api_request(crate::api::schema::Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::TabMoveToDestination(
+                crate::api::schema::TabMoveToDestinationParams {
+                    tab_id: previous_tab_id,
+                    destination: TabMoveDestination::Workspace {
+                        workspace_id: target_workspace_id,
+                        insert_index: None,
+                    },
+                },
+            ),
+        });
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::TabMove { move_result, .. } = success.result else {
+            panic!("expected tab move result");
+        };
+        assert!(move_result.changed);
+
+        assert_eq!(
+            app.state
+                .previous_pane_focus
+                .as_ref()
+                .map(|focus| focus.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.target.as_ref())
+                .map(|target| target.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state.pending_agent_notifications[&moved].workspace_id,
+            target_key
+        );
+        app.state.assert_invariants_for_test();
     }
 
     #[test]
@@ -866,6 +958,7 @@ mod tests {
             "moved tab must not reuse a public number already live in the target"
         );
         app.state.workspaces[1].assert_invariants_for_test();
+        app.state.assert_invariants_for_test();
     }
 
     #[test]
@@ -1173,6 +1266,96 @@ mod tests {
                 } if prev == &previous_tab_id && src == &source_workspace_id
             )
         }));
+    }
+
+    /// The same repoint must fire for a tab move that creates its target
+    /// workspace, not only one that lands in an existing one.
+    #[test]
+    fn api_tab_move_to_new_workspace_repoints_pane_records() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub,
+        );
+        let mut source = Workspace::test_new("source");
+        source.test_add_tab(Some("movable"));
+        app.state.workspaces = vec![source];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+
+        let moved = app.state.workspaces[0].tabs[1].root_pane;
+        let source_key = app.state.workspaces[0].id.clone();
+        app.state.previous_pane_focus = Some(crate::app::state::PaneFocusTarget {
+            workspace_id: source_key.clone(),
+            pane_id: moved,
+        });
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "waiting".into(),
+            context: String::new(),
+            position: None,
+            target: Some(crate::app::state::ToastTarget {
+                workspace_id: source_key.clone(),
+                pane_id: moved,
+            }),
+        });
+        app.state.pending_agent_notifications.insert(
+            moved,
+            crate::app::state::PendingAgentNotification {
+                pane_id: moved,
+                workspace_id: source_key.clone(),
+                agent_label: "agent".into(),
+                known_agent: None,
+                kind: crate::app::state::ToastKind::NeedsAttention,
+                state: crate::detect::AgentState::Blocked,
+                deadline: std::time::Instant::now(),
+            },
+        );
+
+        let previous_tab_id = app.public_tab_id(0, 1).unwrap();
+
+        let response = app.handle_tab_move(
+            "req".into(),
+            TabMoveParams {
+                tab_id: previous_tab_id,
+                insert_index: None,
+                destination: Some(TabMoveDestination::NewWorkspace {
+                    label: Some("split off".into()),
+                }),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::TabMove { move_result, .. } = success.result else {
+            panic!("expected tab move result");
+        };
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 2);
+        let target_key = app.state.workspaces[1].id.clone();
+
+        assert_eq!(
+            app.state
+                .previous_pane_focus
+                .as_ref()
+                .map(|focus| focus.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.target.as_ref())
+                .map(|target| target.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state.pending_agent_notifications[&moved].workspace_id,
+            target_key
+        );
+        app.state.assert_invariants_for_test();
     }
 
     #[test]
