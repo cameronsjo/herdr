@@ -2,109 +2,114 @@ use super::*;
 
 impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
-        use ClientContextMenuAction as Action;
+        context_menu_items(&self.target)
+    }
+}
 
-        let item = |label, action| ClientContextMenuItem { label, action };
-        match &self.target {
-            ClientContextMenuTarget::Workspace { is_git: false, .. } => vec![
-                item("Rename", Action::Rename),
-                item("Move up", Action::MoveWorkspacePrevious),
-                item("Move down", Action::MoveWorkspaceNext),
-                item("Close", Action::Close),
-            ],
-            ClientContextMenuTarget::Workspace {
-                is_linked_worktree: false,
-                has_worktree_children: false,
-                ..
-            } => vec![
-                item("Rename", Action::Rename),
-                item("Move up", Action::MoveWorkspacePrevious),
-                item("Move down", Action::MoveWorkspaceNext),
-                item("Close", Action::Close),
-                item("New worktree", Action::NewWorktree),
-                item("Open worktree...", Action::OpenWorktree),
-            ],
-            ClientContextMenuTarget::Workspace {
-                is_linked_worktree: true,
-                ..
-            } => vec![
-                item("Rename", Action::Rename),
-                item("Close", Action::Close),
-                item("Delete worktree checkout...", Action::RemoveWorktree),
-            ],
-            ClientContextMenuTarget::Workspace {
-                has_worktree_children: true,
-                collapsed,
-                ..
-            } => vec![
-                item("Rename", Action::Rename),
-                item("Move group up", Action::MoveWorkspacePrevious),
-                item("Move group down", Action::MoveWorkspaceNext),
-                item("Close group", Action::Close),
-                item("New worktree", Action::NewWorktree),
-                item("Open worktree...", Action::OpenWorktree),
-                item(
-                    if *collapsed { "Expand" } else { "Collapse" },
-                    Action::ToggleGroup,
-                ),
-            ],
-            ClientContextMenuTarget::Tab { .. } => vec![
-                item("New tab", Action::NewTab),
-                item("Rename", Action::Rename),
-                item("Move left", Action::MoveTabPrevious),
-                item("Move right", Action::MoveTabNext),
-                item("Move to space...", Action::MoveTabToSpace),
-                item("Move to new space", Action::MoveTabToNewSpace),
-                item("Close", Action::Close),
-            ],
-            ClientContextMenuTarget::Pane {
-                source_pane_id,
-                has_manual_label,
-                right_click_passthrough,
-                ..
-            } => {
-                let mut items = vec![item("Rename pane", Action::RenamePane)];
-                if *has_manual_label {
-                    items.push(item("Clear pane name", Action::ClearPaneName));
-                }
-                if source_pane_id.is_some() {
-                    items.push(item("Swap with focused pane", Action::SwapWithFocusedPane));
-                }
-                items.extend([
-                    item("Move to space...", Action::MovePaneToSpace),
-                    item("Move to new space", Action::MovePaneToNewSpace),
-                    item("Move to new tab", Action::MovePaneToNewTab),
-                    item("Split right", Action::SplitRight),
-                    item("Split down", Action::SplitDown),
-                    item("Zoom", Action::Zoom),
-                    item(
-                        if *right_click_passthrough {
-                            "Use Herdr right-click menu"
-                        } else {
-                            "Send right-clicks to pane"
-                        },
-                        Action::ToggleRightClickPassthrough,
-                    ),
-                    item("Close pane", Action::ClosePane),
-                ]);
-                items
+/// The item list a target renders to. Pulled out of `ClientContextMenuOverlay::items`
+/// so `reconcile_context_menu` can compare a freshly rebuilt target's items
+/// against the currently open menu's items without needing a whole overlay.
+pub(super) fn context_menu_items(target: &ClientContextMenuTarget) -> Vec<ClientContextMenuItem> {
+    use ClientContextMenuAction as Action;
+
+    let item = |label, action| ClientContextMenuItem { label, action };
+    match target {
+        ClientContextMenuTarget::Workspace { is_git: false, .. } => vec![
+            item("Rename", Action::Rename),
+            item("Move up", Action::MoveWorkspacePrevious),
+            item("Move down", Action::MoveWorkspaceNext),
+            item("Close", Action::Close),
+        ],
+        ClientContextMenuTarget::Workspace {
+            is_linked_worktree: false,
+            has_worktree_children: false,
+            ..
+        } => vec![
+            item("Rename", Action::Rename),
+            item("Move up", Action::MoveWorkspacePrevious),
+            item("Move down", Action::MoveWorkspaceNext),
+            item("Close", Action::Close),
+            item("New worktree", Action::NewWorktree),
+            item("Open worktree...", Action::OpenWorktree),
+        ],
+        ClientContextMenuTarget::Workspace {
+            is_linked_worktree: true,
+            ..
+        } => vec![
+            item("Rename", Action::Rename),
+            item("Close", Action::Close),
+            item("Delete worktree checkout...", Action::RemoveWorktree),
+        ],
+        ClientContextMenuTarget::Workspace {
+            has_worktree_children: true,
+            collapsed,
+            ..
+        } => vec![
+            item("Rename", Action::Rename),
+            item("Move group up", Action::MoveWorkspacePrevious),
+            item("Move group down", Action::MoveWorkspaceNext),
+            item("Close group", Action::Close),
+            item("New worktree", Action::NewWorktree),
+            item("Open worktree...", Action::OpenWorktree),
+            item(
+                if *collapsed { "Expand" } else { "Collapse" },
+                Action::ToggleGroup,
+            ),
+        ],
+        ClientContextMenuTarget::Tab { .. } => vec![
+            item("New tab", Action::NewTab),
+            item("Rename", Action::Rename),
+            item("Move left", Action::MoveTabPrevious),
+            item("Move right", Action::MoveTabNext),
+            item("Move to space...", Action::MoveTabToSpace),
+            item("Move to new space", Action::MoveTabToNewSpace),
+            item("Close", Action::Close),
+        ],
+        ClientContextMenuTarget::Pane {
+            source_pane_id,
+            has_manual_label,
+            right_click_passthrough,
+            ..
+        } => {
+            let mut items = vec![item("Rename pane", Action::RenamePane)];
+            if *has_manual_label {
+                items.push(item("Clear pane name", Action::ClearPaneName));
             }
+            if source_pane_id.is_some() {
+                items.push(item("Swap with focused pane", Action::SwapWithFocusedPane));
+            }
+            items.extend([
+                item("Move to space...", Action::MovePaneToSpace),
+                item("Move to new space", Action::MovePaneToNewSpace),
+                item("Move to new tab", Action::MovePaneToNewTab),
+                item("Split right", Action::SplitRight),
+                item("Split down", Action::SplitDown),
+                item("Zoom", Action::Zoom),
+                item(
+                    if *right_click_passthrough {
+                        "Use Herdr right-click menu"
+                    } else {
+                        "Send right-clicks to pane"
+                    },
+                    Action::ToggleRightClickPassthrough,
+                ),
+                item("Close pane", Action::ClosePane),
+            ]);
+            items
         }
     }
 }
 
 impl ClientShellState {
-    pub(super) fn open_workspace_context_menu(&mut self, workspace_id: String, x: u16, y: u16) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
-            return;
-        };
-        let Some(workspace) = snapshot
+    fn workspace_context_target(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        workspace_id: String,
+    ) -> Option<ClientContextMenuTarget> {
+        let workspace = snapshot
             .workspaces
             .iter()
-            .find(|workspace| workspace.workspace_id == workspace_id)
-        else {
-            return;
-        };
+            .find(|workspace| workspace.workspace_id == workspace_id)?;
         let worktree = workspace.worktree.as_ref();
         let has_worktree_children = worktree.is_some_and(|worktree| {
             !worktree.is_linked_worktree
@@ -123,14 +128,105 @@ impl ClientShellState {
         let collapsed = worktree.is_some_and(|worktree| {
             self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
         });
+        Some(ClientContextMenuTarget::Workspace {
+            workspace_id,
+            is_git: worktree.is_some() || workspace.branch.is_some(),
+            is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
+            has_worktree_children,
+            collapsed,
+        })
+    }
+
+    fn tab_context_target(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        tab_id: String,
+    ) -> Option<ClientContextMenuTarget> {
+        let tab = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)?;
+        Some(ClientContextMenuTarget::Tab {
+            tab_id,
+            workspace_id: tab.workspace_id.clone(),
+        })
+    }
+
+    fn pane_context_target(
+        &self,
+        snapshot: &ClientShellSnapshot,
+        pane_id: String,
+    ) -> Option<ClientContextMenuTarget> {
+        let pane = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id)?;
+        let source_pane_id = snapshot
+            .focused_pane_id
+            .clone()
+            .filter(|focused| focused != &pane_id);
+        Some(ClientContextMenuTarget::Pane {
+            pane_id,
+            workspace_id: pane.workspace_id.clone(),
+            source_pane_id,
+            has_manual_label: pane.label.is_some(),
+            right_click_passthrough: pane.right_click_passthrough,
+        })
+    }
+
+    /// Rebuilds the open context menu's target against the just-applied
+    /// snapshot, keyed on the target's own entity id. Runs in the snapshot
+    /// path (`apply_active_snapshot`), never in render: `compute_view`
+    /// mutates state, `render` only draws, and this reconcile is the mutation
+    /// half of that split for the context menu.
+    ///
+    /// A menu closes rather than silently drifting stale in two cases: its
+    /// entity is gone from the new snapshot, or the item list the rebuilt
+    /// target would render differs from the one currently shown. Comparing
+    /// item labels is enough because labels are 1:1 with actions except
+    /// `ToggleGroup` and `ToggleRightClickPassthrough`, whose labels flip
+    /// exactly when the captured bool they depend on flips — which is
+    /// exactly the case this reconcile needs to catch and close on.
+    pub(super) fn reconcile_context_menu(&mut self, snapshot: &ClientShellSnapshot) {
+        let Some(ClientShellOverlay::ContextMenu(menu)) = self.overlay.as_ref() else {
+            return;
+        };
+        let rebuilt = match &menu.target {
+            ClientContextMenuTarget::Workspace { workspace_id, .. } => {
+                self.workspace_context_target(snapshot, workspace_id.clone())
+            }
+            ClientContextMenuTarget::Tab { tab_id, .. } => {
+                self.tab_context_target(snapshot, tab_id.clone())
+            }
+            ClientContextMenuTarget::Pane { pane_id, .. } => {
+                self.pane_context_target(snapshot, pane_id.clone())
+            }
+        };
+        let Some(rebuilt) = rebuilt else {
+            self.overlay = None;
+            return;
+        };
+        let current_labels: Vec<&'static str> = context_menu_items(&menu.target)
+            .iter()
+            .map(|item| item.label)
+            .collect();
+        let rebuilt_labels: Vec<&'static str> = context_menu_items(&rebuilt)
+            .iter()
+            .map(|item| item.label)
+            .collect();
+        if current_labels != rebuilt_labels {
+            self.overlay = None;
+            return;
+        }
+        let Some(ClientShellOverlay::ContextMenu(menu)) = self.overlay.as_mut() else {
+            return;
+        };
+        menu.target = rebuilt;
+    }
+
+    pub(super) fn open_workspace_context_menu(&mut self, workspace_id: String, x: u16, y: u16) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let Some(target) = self.workspace_context_target(snapshot, workspace_id) else {
+            return;
+        };
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-            target: ClientContextMenuTarget::Workspace {
-                workspace_id,
-                is_git: worktree.is_some() || workspace.branch.is_some(),
-                is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
-                has_worktree_children,
-                collapsed,
-            },
+            target,
             x,
             y,
             highlighted: 0,
@@ -138,18 +234,14 @@ impl ClientShellState {
     }
 
     pub(super) fn open_tab_context_menu(&mut self, tab_id: String, x: u16, y: u16) {
-        let Some(tab) = self
-            .snapshot
-            .as_deref()
-            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
-        else {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let Some(target) = self.tab_context_target(snapshot, tab_id) else {
             return;
         };
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-            target: ClientContextMenuTarget::Tab {
-                tab_id,
-                workspace_id: tab.workspace_id.clone(),
-            },
+            target,
             x,
             y,
             highlighted: 0,
@@ -160,21 +252,11 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
-        let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
+        let Some(target) = self.pane_context_target(snapshot, pane_id) else {
             return;
         };
-        let source_pane_id = snapshot
-            .focused_pane_id
-            .clone()
-            .filter(|focused| focused != &pane_id);
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
-            target: ClientContextMenuTarget::Pane {
-                pane_id,
-                workspace_id: pane.workspace_id.clone(),
-                source_pane_id,
-                has_manual_label: pane.label.is_some(),
-                right_click_passthrough: pane.right_click_passthrough,
-            },
+            target,
             x,
             y,
             highlighted: 0,
