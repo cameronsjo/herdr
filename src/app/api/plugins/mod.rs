@@ -829,8 +829,15 @@ mod tests {
             .to_string()
     }
 
-    /// Wait for non-empty contents at `path`. Shell `>` creates the file empty
-    /// before the command writes, so waiting on existence alone can read EOF.
+    /// Wait for non-empty contents at `path`. Any non-empty read is treated as
+    /// complete: the writer must publish its capture by writing to a sibling
+    /// `.tmp` path and renaming it into place, so a reader can never observe a
+    /// partial write. Without that, shell `>` truncates the destination before
+    /// the command's own writes land, and a reader can catch it between the
+    /// truncate and a multi-line `printf` completing, returning a short read
+    /// that looks like a legitimate empty-file wait. The Windows capture in
+    /// `windows_plugin_pane_commands_resolve_from_plugin_root_with_cwd_override`
+    /// already writes `capture-%1.tmp` then `move /y` for the same reason.
     /// `pump` advances any event loop the command depends on.
     fn read_capture_when_ready(path: &std::path::Path, mut pump: impl FnMut()) -> String {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -916,6 +923,11 @@ action = "bootstrap"
 
     #[test]
     fn plugin_link_creates_stable_config_and_state_dirs() {
+        // Same race as the two plugin-path tests below: this resolves
+        // config_dir()/state_dir() before link_manifest and asserts on those
+        // paths after it, while non_cli_plugin_consumers_refresh_global_enabled_state
+        // mutates XDG_CONFIG_HOME under the same lock.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-link-dirs");
         let config_dir = super::env::plugin_config_dir("example.config-dirs");
@@ -945,6 +957,11 @@ platforms = ["linux", "macos", "windows"]
 
     #[test]
     fn plugin_link_seeds_stable_config_dir_from_legacy_unhashed_dir() {
+        // Same race as the two plugin-path tests below, with a sharper edge:
+        // legacy_dir is derived from config_dir() here, while the seeding inside
+        // link_manifest re-resolves config_dir() — so an XDG_CONFIG_HOME swap
+        // between the two makes this create and read under different roots.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-link-legacy-config");
         let config_dir = super::env::plugin_config_dir("example.legacy-config");
@@ -1693,9 +1710,9 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -1779,6 +1796,11 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \
     #[cfg(unix)]
     #[tokio::test]
     async fn plugin_pane_open_injects_plugin_paths_and_protects_overrides() {
+        // Hardening, not the fix: this reads config_dir()/state_dir() while
+        // non_cli_plugin_consumers_refresh_global_enabled_state mutates
+        // XDG_CONFIG_HOME under the same lock. Harmless under nextest (own
+        // process per test); a real race under plain `cargo test`.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-path-env")];
         app.state.ensure_test_terminals();
@@ -1800,9 +1822,9 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -2150,9 +2172,9 @@ title = "Plugin Popup"
 placement = "popup"
 width = "80%"
 height = "40%"
-command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
+command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{p}.tmp' && mv '{p}.tmp' '{p}'; sleep 1"]
 "#,
-            env_capture.display()
+            p = env_capture.display()
         );
         write_manifest_content(&root, &manifest);
         link_manifest(&mut app, &root);
@@ -2377,7 +2399,19 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
     #[test]
     fn non_cli_plugin_consumers_refresh_global_enabled_state() {
         let _guard = crate::config::test_config_env_lock().lock().unwrap();
-        let previous_config_home = std::env::var_os("XDG_CONFIG_HOME");
+        // Restore on unwind too: an assertion failure below must not leak
+        // XDG_CONFIG_HOME into every later test that resolves config_dir(),
+        // which would turn one real failure into a cascade of unrelated ones.
+        struct RestoreConfigHome(Option<std::ffi::OsString>);
+        impl Drop for RestoreConfigHome {
+            fn drop(&mut self) {
+                match self.0.take() {
+                    Some(previous) => std::env::set_var("XDG_CONFIG_HOME", previous),
+                    None => std::env::remove_var("XDG_CONFIG_HOME"),
+                }
+            }
+        }
+        let _restore_config_home = RestoreConfigHome(std::env::var_os("XDG_CONFIG_HOME"));
         let base = unique_temp_path("plugin-global-refresh");
         std::env::set_var("XDG_CONFIG_HOME", &base);
         let root = base.join("plugin");
@@ -2462,10 +2496,6 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
         assert_eq!(app.state.plugin_command_logs.len(), logs_before);
 
         let _ = std::fs::remove_dir_all(&base);
-        match previous_config_home {
-            Some(previous) => std::env::set_var("XDG_CONFIG_HOME", previous),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
     }
 
     #[cfg(unix)]
@@ -2538,6 +2568,11 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_ACTION_ID\""]
     #[cfg(unix)]
     #[test]
     fn manifest_action_invoke_injects_plugin_paths() {
+        // Hardening, not the fix: this reads config_dir()/state_dir() while
+        // non_cli_plugin_consumers_refresh_global_enabled_state mutates
+        // XDG_CONFIG_HOME under the same lock. Harmless under nextest (own
+        // process per test); a real race under plain `cargo test`.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-action-path-env");
         write_manifest_content(
@@ -2661,9 +2696,9 @@ min_herdr_version = "0.6.10"
 platforms = ["linux", "macos"]
 
 [[startup]]
-command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > {}"]
+command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);
@@ -2709,9 +2744,9 @@ platforms = ["linux", "macos"]
 
 [[events]]
 on = "worktree.created"
-command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
+command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > '{p}.tmp' && mv '{p}.tmp' '{p}'"]
 "#,
-                capture.display()
+                p = capture.display()
             ),
         );
         link_manifest(&mut app, &root);

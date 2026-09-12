@@ -1668,6 +1668,7 @@ impl ClientShellState {
             self.navigate_workspace_id = snapshot.focused_workspace_id.clone();
             self.reveal_mobile_workspace = self.mobile_layout_active();
         }
+        self.reconcile_context_menu(&snapshot);
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
         self.pane_scroll_in_flight
