@@ -829,9 +829,15 @@ mod tests {
             .to_string()
     }
 
-    /// Wait for non-empty contents at `path`. Shell `>` creates the file empty
-    /// before the command writes, so waiting on existence alone can read EOF.
-    /// `pump` advances any event loop the command depends on.
+    /// Wait for non-empty contents at `path`. Any non-empty read is treated as
+    /// complete: the writer must publish its capture by writing to a sibling
+    /// `.tmp` path and renaming it into place, so a reader can never observe a
+    /// partial write. Without that, shell `>` truncates the destination before
+    /// the command's own writes land, and a reader can catch it between the
+    /// truncate and a multi-line `printf` completing, returning a short read
+    /// that looks like a legitimate empty-file wait. The Windows capture at
+    /// `mod.rs:1533` already writes `capture-%1.tmp` then `move /y` for the
+    /// same reason. `pump` advances any event loop the command depends on.
     fn read_capture_when_ready(path: &std::path::Path, mut pump: impl FnMut()) -> String {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
@@ -1693,8 +1699,10 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_ENTRYPOINT_ID\" \"$HERDR_WORKSPACE_ID\" \"$HERDR_PANE_ID\" \"$HERDR_BIN_PATH\" \"$HERDR_PLUGIN_CONTEXT_JSON\" \"${{HERDR_CELL_WIDTH_PX-unset}}\" \"${{HERDR_CELL_HEIGHT_PX-unset}}\" > '{}.tmp' && mv '{}.tmp' '{}'"]
 "#,
+                capture.display(),
+                capture.display(),
                 capture.display()
             ),
         );
@@ -1779,6 +1787,11 @@ command = ["sh", "-c", "printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \"$PWD\" \
     #[cfg(unix)]
     #[tokio::test]
     async fn plugin_pane_open_injects_plugin_paths_and_protects_overrides() {
+        // Hardening, not the fix: this reads config_dir()/state_dir() while
+        // non_cli_plugin_consumers_refresh_global_enabled_state mutates
+        // XDG_CONFIG_HOME under the same lock. Harmless under nextest (own
+        // process per test); a real race under plain `cargo test`.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         app.state.workspaces = vec![crate::workspace::Workspace::test_new("plugin-path-env")];
         app.state.ensure_test_terminals();
@@ -1800,8 +1813,10 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "board"
 title = "Plugin Board"
-command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > {}"]
+command = ["sh", "-c", "printf '%s\n%s\n%s\n' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUGIN_CONFIG_DIR\" \"$HERDR_PLUGIN_STATE_DIR\" > '{}.tmp' && mv '{}.tmp' '{}'"]
 "#,
+                capture.display(),
+                capture.display(),
                 capture.display()
             ),
         );
@@ -2150,8 +2165,10 @@ title = "Plugin Popup"
 placement = "popup"
 width = "80%"
 height = "40%"
-command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
+command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}.tmp' && mv '{}.tmp' '{}'; sleep 1"]
 "#,
+            env_capture.display(),
+            env_capture.display(),
             env_capture.display()
         );
         write_manifest_content(&root, &manifest);
@@ -2538,6 +2555,11 @@ command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_ACTION_ID\""]
     #[cfg(unix)]
     #[test]
     fn manifest_action_invoke_injects_plugin_paths() {
+        // Hardening, not the fix: this reads config_dir()/state_dir() while
+        // non_cli_plugin_consumers_refresh_global_enabled_state mutates
+        // XDG_CONFIG_HOME under the same lock. Harmless under nextest (own
+        // process per test); a real race under plain `cargo test`.
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
         let mut app = test_app();
         let root = unique_temp_path("plugin-action-path-env");
         write_manifest_content(
@@ -2661,8 +2683,10 @@ min_herdr_version = "0.6.10"
 platforms = ["linux", "macos"]
 
 [[startup]]
-command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > {}"]
+command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > '{}.tmp' && mv '{}.tmp' '{}'"]
 "#,
+                capture.display(),
+                capture.display(),
                 capture.display()
             ),
         );
@@ -2709,8 +2733,10 @@ platforms = ["linux", "macos"]
 
 [[events]]
 on = "worktree.created"
-command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > {}"]
+command = ["sh", "-c", "printf '%s' \"$HERDR_PLUGIN_CONTEXT_JSON\" > '{}.tmp' && mv '{}.tmp' '{}'"]
 "#,
+                capture.display(),
+                capture.display(),
                 capture.display()
             ),
         );
