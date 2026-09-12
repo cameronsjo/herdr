@@ -465,16 +465,13 @@ impl App {
             );
         }
 
-        // Snapshot every closing workspace before its tabs leave: a drained
-        // workspace derefs through an active tab it no longer has.
-        let closed_workspaces = merge_indices
+        // Merge sends no final snapshot: the sources' tabs and panes move to the
+        // target rather than closing, so any pre-drain `workspace_info` would report
+        // live tabs as closed. `pane.move` closes a drained workspace the same way
+        // and emits `workspace: None` for the same reason.
+        let closed_workspace_ids = merge_indices
             .iter()
-            .map(|index| {
-                (
-                    self.public_workspace_id(*index),
-                    self.workspace_info(*index),
-                )
-            })
+            .map(|index| self.public_workspace_id(*index))
             .collect::<Vec<_>>();
         // Follow the operator's own view by id, not by index. `workspace.close`
         // sets `selected` to the closing workspace, which would yank the view
@@ -650,12 +647,12 @@ impl App {
                 },
             });
         }
-        for (workspace_id, workspace) in closed_workspaces {
+        for workspace_id in closed_workspace_ids {
             self.emit_event(EventEnvelope {
                 event: EventKind::WorkspaceClosed,
                 data: EventData::WorkspaceClosed {
                     workspace_id,
-                    workspace: Some(workspace),
+                    workspace: None,
                 },
             });
         }
@@ -1423,6 +1420,147 @@ mod tests {
         expected.extend(source_root_panes);
         assert_eq!(merged_root_panes, expected);
         app.state.assert_invariants_for_test();
+    }
+
+    /// Merge relocates the source's tabs and panes into the target, so a final
+    /// `WorkspaceInfo` on `workspace.closed` would report live tabs, live panes,
+    /// and an active tab id that all still exist in the target.
+    #[test]
+    fn api_workspace_merge_closed_event_carries_no_stale_workspace_snapshot() {
+        let mut app = merge_test_app(&["source", "target"]);
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.workspaces[0].test_add_tab(Some("three"));
+        app.state.ensure_test_terminals();
+        let source_id = app.state.workspaces[0].id.clone();
+
+        merge_request(&mut app, 0, 1, false);
+
+        let events = app.event_hub.events_after(0);
+        let closed = events
+            .iter()
+            .filter_map(|(_, event)| match &event.data {
+                EventData::WorkspaceClosed {
+                    workspace_id,
+                    workspace,
+                } if workspace_id == &source_id => Some(workspace),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            closed.len(),
+            1,
+            "merge should close the source exactly once"
+        );
+        assert!(
+            closed[0].is_none(),
+            "merge's workspace.closed must omit the snapshot, not describe tabs that moved"
+        );
+    }
+
+    /// The moved tabs are the closed workspace's replacement narrative, so a
+    /// consumer must see them before the close that would otherwise read as loss.
+    #[test]
+    fn api_workspace_merge_emits_tab_moves_before_the_close() {
+        let mut app = merge_test_app(&["source", "target"]);
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.workspaces[0].test_add_tab(Some("three"));
+        app.state.ensure_test_terminals();
+
+        merge_request(&mut app, 0, 1, false);
+
+        let events = app.event_hub.events_after(0);
+        let closed_index = events
+            .iter()
+            .position(|(_, event)| matches!(&event.data, EventData::WorkspaceClosed { .. }))
+            .expect("merge should close the source");
+        let move_indices = events
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, event))| {
+                matches!(&event.data, EventData::TabMovedAcrossWorkspaces { .. })
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            move_indices.len(),
+            3,
+            "every source tab should report a move"
+        );
+        assert!(
+            move_indices.iter().all(|index| *index < closed_index),
+            "tab moves must precede the source's close"
+        );
+    }
+
+    #[test]
+    fn api_workspace_merge_group_closed_events_cover_every_source() {
+        let mut app = app_with_worktree_group();
+        app.state.workspaces.push(Workspace::test_new("target"));
+        app.state.ensure_test_terminals();
+        let expected_ids = app
+            .state
+            .workspace_close_indices(0)
+            .into_iter()
+            .map(|index| app.state.workspaces[index].id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(expected_ids.len(), 2, "the group should hold two members");
+
+        merge_request(&mut app, 0, 2, true);
+
+        let closed = app
+            .event_hub
+            .events_after(0)
+            .into_iter()
+            .filter_map(|(_, event)| match event.data {
+                EventData::WorkspaceClosed {
+                    workspace_id,
+                    workspace,
+                } => Some((workspace_id, workspace)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            closed
+                .iter()
+                .map(|(workspace_id, _)| workspace_id.clone())
+                .collect::<Vec<_>>(),
+            expected_ids
+        );
+        assert!(
+            closed.iter().all(|(_, workspace)| workspace.is_none()),
+            "every merged group member closes without a snapshot"
+        );
+    }
+
+    /// The concrete harm: the snapshot's `active_tab_id` became a plugin hook's
+    /// `tab_id`, naming a tab that is open in the target.
+    #[test]
+    fn api_workspace_merge_closed_event_plugin_context_has_no_tab() {
+        let mut app = merge_test_app(&["source", "target"]);
+        app.state.workspaces[0].test_add_tab(Some("two"));
+        app.state.ensure_test_terminals();
+        let source_id = app.state.workspaces[0].id.clone();
+
+        merge_request(&mut app, 0, 1, false);
+
+        let events = app.event_hub.events_after(0);
+        let (_, closed_event) = events
+            .iter()
+            .find(|(_, event)| {
+                matches!(
+                    &event.data,
+                    EventData::WorkspaceClosed { workspace_id, .. } if workspace_id == &source_id
+                )
+            })
+            .expect("merge should close the source");
+
+        let context = app.plugin_context_for_event(closed_event, "corr");
+
+        assert_eq!(context.workspace_id.as_deref(), Some(source_id.as_str()));
+        assert!(
+            context.tab_id.is_none(),
+            "a closed workspace must not hand a plugin a tab id that is alive in the target"
+        );
     }
 
     #[test]
