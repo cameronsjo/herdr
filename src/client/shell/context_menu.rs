@@ -222,8 +222,7 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
-        let target = self.workspace_context_target(snapshot, workspace_id);
-        let Some(target) = target else {
+        let Some(target) = self.workspace_context_target(snapshot, workspace_id) else {
             return;
         };
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
@@ -238,8 +237,7 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
-        let target = self.tab_context_target(snapshot, tab_id);
-        let Some(target) = target else {
+        let Some(target) = self.tab_context_target(snapshot, tab_id) else {
             return;
         };
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
@@ -254,8 +252,7 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
-        let target = self.pane_context_target(snapshot, pane_id);
-        let Some(target) = target else {
+        let Some(target) = self.pane_context_target(snapshot, pane_id) else {
             return;
         };
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
