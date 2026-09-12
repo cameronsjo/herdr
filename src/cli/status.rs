@@ -377,7 +377,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             server_binary_stale: Some(false),
         },
         ServerRuntimeStatus::NotAccepting => ServerStatusJson {
-            status: "not accepting",
+            status: "not_accepting",
             running: false,
             version: None,
             protocol: None,

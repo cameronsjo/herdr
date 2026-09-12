@@ -23,7 +23,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
-## Split server_not_running into three states (`docs/plans/2026-09-11-server-socket-not-accepting.md`)
+## Split server_not_running into three states
 
 ### fix(cli): split server_not_running into three states so a wedged api socket is not misdiagnosed
 
