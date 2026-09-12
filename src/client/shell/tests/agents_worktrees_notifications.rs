@@ -580,6 +580,59 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
 }
 
 #[test]
+fn agent_row_with_no_resolved_tokens_still_draws_the_status_icon() {
+    // The base snapshot has a single, non-custom-labeled tab, so a configured
+    // row of only a Tab token resolves to nothing (`tab_label` is `None`
+    // whenever there is one tab and it isn't custom-labeled) and the whole row
+    // is filtered out of `AgentRow::rows`, leaving it empty.
+    let mut projected = snapshot();
+    projected.agents = vec![ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("pi one".into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    }];
+    let mut config = Config::default();
+    config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+    config.ui.sidebar.agents.rows_by_agent.insert(
+        "pi".into(),
+        vec![vec![crate::config::AgentSidebarToken::Tab]],
+    );
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+
+    let frame = state.compose(106, 20).expect("agent sidebar frame");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains(status_icon(
+            AgentStatus::Working,
+            crate::config::StatusIndicatorStyle::Symbols
+        )),
+        "expected the status icon fallback for an agent row with no resolved tokens, frame: {text}"
+    );
+}
+
+#[test]
 fn active_agent_view_controls_sidebar_order_and_focus_indices() {
     let mut projected = snapshot();
     let mut second_pane = projected.panes[0].clone();

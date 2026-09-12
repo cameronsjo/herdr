@@ -7,6 +7,10 @@ impl ClientShellState {
     ) {
         self.overlay = Some(ClientShellOverlay::Palette(ClientPaletteOverlay {
             recent_command_ids: self.recent_command_ids.clone(),
+            plugins: super::PalettePlugins {
+                destructive_actions: self.config.destructive_palette_actions.clone(),
+                ..super::PalettePlugins::default()
+            },
             ..ClientPaletteOverlay::default()
         }));
         self.chrome_drag = None;
@@ -33,19 +37,21 @@ impl ClientShellState {
         installed: Vec<crate::api::schema::InstalledPluginInfo>,
         host_platform: Option<crate::api::schema::PluginPlatform>,
     ) -> bool {
+        let destructive_actions = self.config.destructive_palette_actions.clone();
         let Some(ClientShellOverlay::Palette(palette)) = self.overlay.as_mut() else {
             return false;
         };
         palette.plugins = super::PalettePlugins {
             installed,
             host_platform,
+            destructive_actions,
         };
         palette.selected = 0;
         palette.scroll = 0;
         true
     }
 
-    pub(in crate::client::shell) fn filtered_palette_commands(&self) -> Vec<super::PaletteCommand> {
+    pub(in crate::client::shell) fn filtered_palette_commands(&self) -> Vec<super::PaletteRow> {
         let (Some(snapshot), Some(ClientShellOverlay::Palette(palette))) =
             (self.snapshot.as_deref(), self.overlay.as_ref())
         else {
@@ -113,21 +119,59 @@ impl ClientShellState {
         &mut self,
         outcome: &mut ClientShellInput,
     ) {
-        let selected = match self.overlay.as_ref() {
-            Some(ClientShellOverlay::Palette(palette)) => palette.selected,
+        let (query, selected) = match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Palette(palette)) => (palette.query.clone(), palette.selected),
             _ => return,
         };
-        let commands = self.filtered_palette_commands();
-        let Some(command) = commands.into_iter().nth(selected) else {
+        let rows = self.filtered_palette_commands();
+        let Some(row) = rows.into_iter().nth(selected) else {
             return;
         };
         self.overlay = None;
-        self.remember_palette_command(command.id);
-        self.run_palette_action(command.action, outcome);
         outcome.repaint = true;
+
+        // A family row runs nothing on its own — it asks. Recording it here
+        // would put a question at the head of the empty palette and record
+        // the leaf a second time when the chooser runs it.
+        if let super::PaletteAction::Chooser(family) = row.command.action {
+            self.open_chooser_overlay(
+                family.chooser_title().to_owned(),
+                family.choices(),
+                Some(PaletteReturn { query, selected }),
+            );
+            return;
+        }
+
+        // Cancel is offered first and selected by default, so the reflex
+        // second Enter backs out rather than running the thing. History
+        // records inside the "run anyway" outcome, never here — a cancelled
+        // row must not lead the next empty palette.
+        if row.command.destructive {
+            self.open_chooser_overlay(
+                row.command.name.into_owned(),
+                vec![
+                    ChooserChoice {
+                        label: " cancel ",
+                        outcome: ChooserOutcome::Cancel,
+                    },
+                    ChooserChoice {
+                        label: " run anyway ",
+                        outcome: ChooserOutcome::Palette {
+                            action: row.command.action,
+                            command_id: row.command.id,
+                        },
+                    },
+                ],
+                Some(PaletteReturn { query, selected }),
+            );
+            return;
+        }
+
+        self.remember_palette_command(row.command.id);
+        self.run_palette_action(row.command.action, outcome);
     }
 
-    fn remember_palette_command(&mut self, command_id: String) {
+    pub(in crate::client::shell) fn remember_palette_command(&mut self, command_id: String) {
         crate::palette_history::remember(&mut self.recent_command_ids, command_id);
         self.persist_palette_history();
     }
@@ -147,7 +191,11 @@ impl ClientShellState {
     #[cfg(test)]
     fn persist_palette_history(&self) {}
 
-    fn run_palette_action(&mut self, action: super::PaletteAction, outcome: &mut ClientShellInput) {
+    pub(in crate::client::shell) fn run_palette_action(
+        &mut self,
+        action: super::PaletteAction,
+        outcome: &mut ClientShellInput,
+    ) {
         match action {
             super::PaletteAction::Keybind(action) => {
                 self.record_binding(crate::input::KeybindMatch::Action(action), outcome);
@@ -170,6 +218,9 @@ impl ClientShellState {
                     outcome,
                 );
             }
+            // Reached only through a chooser button, which resolves the
+            // family to a leaf action before running anything.
+            super::PaletteAction::Chooser(_) => {}
             super::PaletteAction::PluginPane {
                 plugin_id,
                 entrypoint,

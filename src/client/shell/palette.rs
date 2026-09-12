@@ -21,7 +21,12 @@ use crate::protocol::ClientShellSnapshot;
 const EMPTY_PALETTE_LIMIT: usize = 12;
 
 const PALETTE_MODAL_SIZE: (u16, u16) = (76, 22);
-const SPLIT_MODAL_SIZE: (u16, u16) = (44, 6);
+const CHOOSER_MIN_MODAL_WIDTH: u16 = 44;
+const CHOOSER_MODAL_HEIGHT: u16 = 6;
+/// Borders, title and footer — what a stacked chooser costs on top of one row
+/// per choice.
+const CHOOSER_MODAL_CHROME_HEIGHT: u16 = 5;
+const CHOOSER_BUTTON_GAP: u16 = 2;
 const SPLIT_VERTICAL_LABEL: &str = " v vertical ";
 const SPLIT_HORIZONTAL_LABEL: &str = " h horizontal ";
 
@@ -43,33 +48,85 @@ pub(super) fn palette_geometry(area: Rect) -> Option<(Rect, Rect, Rect)> {
     Some((popup, inner, body))
 }
 
-/// The split-direction picker's popup, panel-inner and two button rects,
-/// shared between the renderer and the mouse hit-test for the same reason.
-pub(super) fn pane_split_direction_geometry(area: Rect) -> Option<(Rect, Rect, Rect, Rect)> {
-    let popup = crate::ui::centered_popup_rect(area, SPLIT_MODAL_SIZE.0, SPLIT_MODAL_SIZE.1)?;
-    let inner = Rect::new(
+/// The chooser's popup, panel-inner and one rect per button, shared between
+/// the renderer and the mouse hit-test for the same reason.
+///
+/// Buttons sit on one row while that row fits, and stack into a column when it
+/// does not. Stacking rather than refusing matters: a family row whose chooser
+/// returns nothing is a dead end, because collapsing the leaf rows took away
+/// the only other way to reach them.
+///
+/// The popup is also widened to fit `title`. A confirm dialog that truncates
+/// the thing it is asking about lets a plugin front-load innocuous text and
+/// hide the rest, so the operator must be able to read the whole name they are
+/// approving.
+pub(super) fn chooser_geometry(
+    area: Rect,
+    title: &str,
+    labels: &[&str],
+) -> Option<(Rect, Rect, Vec<Rect>)> {
+    if labels.is_empty() {
+        return None;
+    }
+    // One leading space, drawn by the renderer, plus the panel borders.
+    let title_popup_width = super::render::display_width(title).saturating_add(3);
+    let widths: Vec<u16> = labels
+        .iter()
+        .map(|label| super::render::display_width(label))
+        .collect();
+    let count = labels.len() as u16;
+    let row_width: u16 = widths
+        .iter()
+        .copied()
+        .sum::<u16>()
+        .saturating_add(CHOOSER_BUTTON_GAP.saturating_mul(count.saturating_sub(1)));
+    let widest = widths.iter().copied().max().unwrap_or(0);
+
+    let row_popup_width = CHOOSER_MIN_MODAL_WIDTH
+        .max(row_width.saturating_add(4))
+        .max(title_popup_width);
+    if let Some(popup) = crate::ui::centered_popup_rect(area, row_popup_width, CHOOSER_MODAL_HEIGHT)
+    {
+        let inner = chooser_inner(popup);
+        if inner.height >= 3 && inner.width >= row_width {
+            let mut x = inner.x + (inner.width - row_width) / 2;
+            let y = inner.y.saturating_add(1);
+            let mut buttons = Vec::with_capacity(labels.len());
+            for width in &widths {
+                buttons.push(Rect::new(x, y, *width, 1));
+                x = x.saturating_add(*width).saturating_add(CHOOSER_BUTTON_GAP);
+            }
+            return Some((popup, inner, buttons));
+        }
+    }
+
+    let stacked_popup_width = CHOOSER_MIN_MODAL_WIDTH
+        .max(widest.saturating_add(4))
+        .max(title_popup_width);
+    let stacked_popup_height = count.saturating_add(CHOOSER_MODAL_CHROME_HEIGHT);
+    let popup = crate::ui::centered_popup_rect(area, stacked_popup_width, stacked_popup_height)?;
+    let inner = chooser_inner(popup);
+    if inner.width < widest || inner.height < count.saturating_add(2) {
+        return None;
+    }
+    let x = inner.x + (inner.width - widest) / 2;
+    let buttons = (0..count)
+        .map(|row| Rect::new(x, inner.y.saturating_add(1 + row), widest, 1))
+        .collect();
+    Some((popup, inner, buttons))
+}
+
+fn chooser_inner(popup: Rect) -> Rect {
+    Rect::new(
         popup.x.saturating_add(1),
         popup.y.saturating_add(1),
         popup.width.saturating_sub(2),
         popup.height.saturating_sub(2),
-    );
-    let vertical_width = SPLIT_VERTICAL_LABEL.len() as u16;
-    let horizontal_width = SPLIT_HORIZONTAL_LABEL.len() as u16;
-    let gap = 2;
-    let total = vertical_width + gap + horizontal_width;
-    if inner.height < 3 || inner.width < total {
-        return None;
-    }
-    let x = inner.x + (inner.width - total) / 2;
-    let y = inner.y.saturating_add(1);
-    Some((
-        popup,
-        inner,
-        Rect::new(x, y, vertical_width, 1),
-        Rect::new(x + vertical_width + gap, y, horizontal_width, 1),
-    ))
+    )
 }
 
+/// The two labels the pane-split chooser offers, in the order its outcomes are
+/// built — vertical first.
 pub(super) fn split_button_labels() -> (&'static str, &'static str) {
     (SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL)
 }
@@ -105,14 +162,139 @@ pub(crate) enum PaletteAction {
         plugin_id: String,
         entrypoint: String,
     },
+    /// Asks which direction before running one of the family's leaf actions.
+    Chooser(DirectionFamily),
+}
+
+/// A set of actions that differ only by direction. Each is one palette row
+/// that asks, rather than four that wall the list — nine directional rows
+/// answering `move` was what the palette looked like before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectionFamily {
+    MoveTab,
+    MoveWorkspace,
+    SwapPane,
+}
+
+/// The direction words a query can name to reach a family's leaf rows. One
+/// character is enough, so `move tab l` reaches `move tab left`.
+const DIRECTION_WORDS: [&str; 4] = ["left", "right", "up", "down"];
+
+impl DirectionFamily {
+    /// Derived from the leaf action rather than declared alongside it: one
+    /// source, so a family and its leaves cannot drift apart.
+    fn of(action: KeybindAction) -> Option<Self> {
+        match action {
+            KeybindAction::MoveTabPrevious | KeybindAction::MoveTabNext => Some(Self::MoveTab),
+            KeybindAction::MoveWorkspacePrevious | KeybindAction::MoveWorkspaceNext => {
+                Some(Self::MoveWorkspace)
+            }
+            KeybindAction::SwapPaneLeft
+            | KeybindAction::SwapPaneDown
+            | KeybindAction::SwapPaneUp
+            | KeybindAction::SwapPaneRight => Some(Self::SwapPane),
+            _ => None,
+        }
+    }
+
+    /// The row label, which ends in an ellipsis for the same reason `merge
+    /// workspace into...` does: it asks you something next.
+    fn row_name(&self) -> &'static str {
+        match self {
+            Self::MoveTab => "move tab...",
+            Self::MoveWorkspace => "move workspace...",
+            Self::SwapPane => "swap pane...",
+        }
+    }
+
+    /// The chooser's title — the row name without the ellipsis, since the
+    /// chooser is the question the ellipsis promised.
+    pub(super) fn chooser_title(&self) -> &'static str {
+        self.row_name().trim_end_matches('.')
+    }
+
+    fn keywords(&self) -> &'static [&'static str] {
+        match self {
+            Self::MoveTab => &["reorder tab", "tab left", "tab right"],
+            Self::MoveWorkspace => &["reorder workspace", "workspace up", "workspace down"],
+            Self::SwapPane => &["move pane", "reorder pane"],
+        }
+    }
+
+    fn id(&self) -> &'static str {
+        match self {
+            Self::MoveTab => "core:move-tab-family",
+            Self::MoveWorkspace => "core:move-workspace-family",
+            Self::SwapPane => "core:swap-pane-family",
+        }
+    }
+
+    fn leaves(&self) -> &'static [(&'static str, KeybindAction)] {
+        match self {
+            Self::MoveTab => &[
+                (" left ", KeybindAction::MoveTabPrevious),
+                (" right ", KeybindAction::MoveTabNext),
+            ],
+            Self::MoveWorkspace => &[
+                (" up ", KeybindAction::MoveWorkspacePrevious),
+                (" down ", KeybindAction::MoveWorkspaceNext),
+            ],
+            Self::SwapPane => &[
+                (" left ", KeybindAction::SwapPaneLeft),
+                (" down ", KeybindAction::SwapPaneDown),
+                (" up ", KeybindAction::SwapPaneUp),
+                (" right ", KeybindAction::SwapPaneRight),
+            ],
+        }
+    }
+
+    /// One chooser button per leaf, each running exactly what the leaf row
+    /// would have run — including recording that leaf in palette history, so
+    /// reaching an action through the chooser and through its own row leave
+    /// the same trace.
+    pub(super) fn choices(&self) -> Vec<super::state::ChooserChoice> {
+        self.leaves()
+            .iter()
+            .filter_map(|(label, action)| {
+                Some(super::state::ChooserChoice {
+                    label,
+                    outcome: super::state::ChooserOutcome::Palette {
+                        action: PaletteAction::Keybind(*action),
+                        command_id: action.palette_id()?.to_string(),
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn all() -> [Self; 3] {
+        [Self::MoveTab, Self::MoveWorkspace, Self::SwapPane]
+    }
 }
 
 pub(crate) struct PaletteCommand {
     pub id: String,
     pub name: Cow<'static, str>,
-    pub key: String,
+    pub key: Option<String>,
     pub action: PaletteAction,
     pub keywords: &'static [&'static str],
+    /// Set on a leaf row of a direction family. Such a row is hidden unless
+    /// the query names a direction, because its family row answers for it.
+    pub family: Option<DirectionFamily>,
+    /// Running this removes or replaces something. The row carries a tag and
+    /// Enter asks before it runs.
+    pub destructive: bool,
+}
+
+/// The suffix a destructive row wears in the palette list.
+pub(super) const DESTRUCTIVE_TAG: &str = " [destructive]";
+
+/// A command that matched, with why it matched. The keyword is what the
+/// renderer shows when a row has no key of its own — a hit with no visible
+/// reason reads as the palette guessing.
+pub(crate) struct PaletteRow {
+    pub command: PaletteCommand,
+    pub matched_keyword: Option<&'static str>,
 }
 
 struct PluginPaletteCommand {
@@ -126,6 +308,11 @@ struct PluginPaletteCommand {
 #[derive(Debug, Default)]
 pub(crate) struct PalettePlugins {
     pub installed: Vec<InstalledPluginInfo>,
+    /// The operator's own `[palette] destructive_actions` list, carried
+    /// alongside the endpoint's report because a row is destructive when
+    /// either source says so — and the manifest is the side we do not
+    /// control.
+    pub destructive_actions: Vec<String>,
     /// The platform the answering server runs on. `None` against a server too
     /// old to report it, which means "do not filter" — see
     /// [`platform_supported`].
@@ -206,6 +393,24 @@ fn plugin_command_name(plugin_name: &str, title: &str) -> String {
     }
 }
 
+/// Whether the operator's override list names this action.
+///
+/// Compared against the joined `"<plugin_id>:<action_id>"` rather than by
+/// splitting the entry, because BOTH halves may themselves contain a colon —
+/// the manifest's identifier rules allow it. Splitting on the first colon made
+/// a namespaced plugin id (`acme:tools`) impossible to mark at all, and made
+/// the same entry mark a different plugin's action instead. This is the only
+/// lever the operator has against a plugin that declines to mark itself, so a
+/// hole here is a hole in the whole control.
+fn action_is_marked_destructive(
+    destructive_actions: &[String],
+    plugin_id: &str,
+    action_id: &str,
+) -> bool {
+    let qualified = format!("{plugin_id}:{action_id}");
+    destructive_actions.contains(&qualified)
+}
+
 fn disambiguate_plugin_labels(plugin_commands: &mut [PluginPaletteCommand]) {
     let mut label_counts: HashMap<String, usize> = HashMap::new();
     for plugin_command in plugin_commands.iter() {
@@ -253,16 +458,24 @@ fn plugin_palette_commands(
             .collect();
         actions.sort_by(|left, right| left.id.cmp(&right.id));
         for action in actions {
+            let destructive = action.destructive
+                || action_is_marked_destructive(
+                    &plugins.destructive_actions,
+                    &plugin.plugin_id,
+                    &action.id,
+                );
             plugin_commands.push(PluginPaletteCommand {
                 command: PaletteCommand {
                     id: format!("plugin-action:{}.{}", plugin.plugin_id, action.id),
                     name: Cow::Owned(plugin_command_name(&plugin.name, &action.title)),
-                    key: String::new(),
+                    key: None,
                     action: PaletteAction::PluginAction {
                         plugin_id: plugin.plugin_id.clone(),
                         action_id: action.id.clone(),
                     },
                     keywords: &[],
+                    family: None,
+                    destructive,
                 },
                 kind: "action",
             });
@@ -286,12 +499,15 @@ fn plugin_palette_commands(
                 command: PaletteCommand {
                     id: format!("plugin-pane:{}.{}", plugin.plugin_id, pane.id),
                     name: Cow::Owned(plugin_command_name(&plugin.name, &pane.title)),
-                    key: String::new(),
+                    key: None,
                     action: PaletteAction::PluginPane {
                         plugin_id: plugin.plugin_id.clone(),
                         entrypoint: pane.id.clone(),
                     },
                     keywords: &[],
+                    family: None,
+                    // Opening a pane shows something; it removes nothing.
+                    destructive: false,
                 },
                 kind: "pane",
             });
@@ -322,9 +538,26 @@ pub(crate) fn palette_commands(
                     key: entry.key,
                     action: PaletteAction::Keybind(action),
                     keywords: entry.keywords,
+                    family: DirectionFamily::of(action),
+                    // Core actions are confirmed where they need it — closing
+                    // a pane already has its own dialog.
+                    destructive: false,
                 })
             })
             .collect();
+    commands.extend(DirectionFamily::all().into_iter().map(|family| {
+        PaletteCommand {
+            id: family.id().to_string(),
+            name: Cow::Borrowed(family.row_name()),
+            // A family row is a question, not a binding — its leaves keep
+            // whatever keys they were bound to.
+            key: None,
+            action: PaletteAction::Chooser(family),
+            keywords: family.keywords(),
+            family: None,
+            destructive: false,
+        }
+    }));
     commands.extend(plugin_palette_commands(plugins, snapshot));
     commands
 }
@@ -334,36 +567,67 @@ pub(crate) fn palette_commands(
 /// `MAX_NAME_RANK` is the worst (highest) rank this function returns —
 /// `command_match_rank` derives its keyword-tier offset from it so the two
 /// stay coupled structurally instead of by two files agreeing on a number.
-const MAX_NAME_RANK: u8 = 3;
+const MAX_NAME_RANK: u8 = 2;
 
+/// Matching stops at a word boundary. A query landing mid-word is deliberately
+/// not a match: it is how `remove` inside "uninstall web bridge (remove
+/// service)" answered a query for `move`, putting a destructive plugin action
+/// in front of an operator who was reordering tabs.
+///
+/// The boundary is any non-alphanumeric character, not whitespace alone. That
+/// keeps a multi-word query working mid-name (`new tab` still finds "move pane
+/// to new tab") and keeps a word reachable through punctuation (`remove` still
+/// finds "(remove service)"), while `move` inside `remove` stays out.
 fn match_rank(name: &str, query: &str) -> Option<u8> {
     let name = name.to_lowercase();
     if name == query {
         Some(0)
     } else if name.starts_with(query) {
         Some(1)
-    } else if name.split_whitespace().any(|word| word.starts_with(query)) {
-        Some(2)
-    } else if name.contains(query) {
+    } else if word_starts(&name).any(|offset| name[offset..].starts_with(query)) {
         Some(MAX_NAME_RANK)
     } else {
         None
     }
 }
 
+/// Every byte offset in `name` that begins a word — index 0, and any character
+/// whose predecessor is not alphanumeric.
+fn word_starts(name: &str) -> impl Iterator<Item = usize> + '_ {
+    let mut previous_was_alphanumeric = false;
+    name.char_indices().filter_map(move |(offset, character)| {
+        let boundary = !previous_was_alphanumeric;
+        previous_was_alphanumeric = character.is_alphanumeric();
+        boundary.then_some(offset)
+    })
+}
+
 /// A keyword match (e.g. "split right" finding the "split vertical" command)
 /// always ranks below every name match, so a command whose own name answers
-/// the query is never outranked by a synonym on a different command.
-fn command_match_rank(command: &PaletteCommand, query: &str) -> Option<u8> {
+/// the query is never outranked by a synonym on a different command. The
+/// matched keyword comes back with the rank so the row can say why it is
+/// there.
+fn command_match_rank(command: &PaletteCommand, query: &str) -> Option<(u8, Option<&'static str>)> {
     if let Some(rank) = match_rank(&command.name, query) {
-        return Some(rank);
+        return Some((rank, None));
     }
     command
         .keywords
         .iter()
-        .filter_map(|keyword| match_rank(keyword, query))
-        .min()
-        .map(|rank| rank + MAX_NAME_RANK + 1)
+        .filter_map(|keyword| match_rank(keyword, query).map(|rank| (rank, *keyword)))
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(rank, keyword)| (rank + MAX_NAME_RANK + 1, Some(keyword)))
+}
+
+/// Whether the query asks for a specific direction, which is what releases a
+/// family's leaf rows. Any whitespace token that prefixes a direction word
+/// counts, so `move tab l` reaches `move tab left`.
+fn query_names_a_direction(query: &str) -> bool {
+    query.split_whitespace().any(|token| {
+        DIRECTION_WORDS
+            .iter()
+            .any(|direction| direction.starts_with(token))
+    })
 }
 
 fn compact_palette_commands(
@@ -389,22 +653,38 @@ pub(crate) fn filtered_palette_commands(
     keybinds: &LiveKeybindConfig,
     plugins: &PalettePlugins,
     snapshot: &ClientShellSnapshot,
-) -> Vec<PaletteCommand> {
+) -> Vec<PaletteRow> {
     let query = query.trim().to_lowercase();
     let commands = palette_commands(keybinds, plugins, snapshot);
     if query.is_empty() {
-        return compact_palette_commands(commands, recent_command_ids);
+        return compact_palette_commands(commands, recent_command_ids)
+            .into_iter()
+            .map(|command| PaletteRow {
+                command,
+                matched_keyword: None,
+            })
+            .collect();
     }
 
-    let mut ranked: Vec<(u8, usize, PaletteCommand)> = commands
+    let directional = query_names_a_direction(&query);
+    let mut ranked: Vec<(u8, usize, PaletteRow)> = commands
         .into_iter()
+        .filter(|command| directional || command.family.is_none())
         .enumerate()
         .filter_map(|(index, command)| {
-            command_match_rank(&command, &query).map(|rank| (rank, index, command))
+            let (rank, matched_keyword) = command_match_rank(&command, &query)?;
+            Some((
+                rank,
+                index,
+                PaletteRow {
+                    command,
+                    matched_keyword,
+                },
+            ))
         })
         .collect();
     ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
-    ranked.into_iter().map(|(_, _, command)| command).collect()
+    ranked.into_iter().map(|(_, _, row)| row).collect()
 }
 
 #[cfg(test)]
@@ -422,7 +702,7 @@ mod tests {
         let snapshot = super::super::tests::snapshot();
         filtered_palette_commands(query, &[], &keybinds(), &no_plugins(), &snapshot)
             .into_iter()
-            .map(|command| command.name.into_owned())
+            .map(|row| row.command.name.into_owned())
             .collect()
     }
 
@@ -430,9 +710,11 @@ mod tests {
         PaletteCommand {
             id: format!("test:{name}"),
             name: Cow::Borrowed(name),
-            key: String::new(),
+            key: None,
             action: PaletteAction::Keybind(KeybindAction::ClosePane),
             keywords,
+            family: None,
+            destructive: false,
         }
     }
 
@@ -450,15 +732,54 @@ mod tests {
         );
     }
 
+    // A mid-word hit is what put a destructive plugin action — "uninstall web
+    // bridge (remove service)" — in front of a query for "move".
     #[test]
-    fn a_word_prefix_outranks_a_mid_word_substring() {
-        let matches = names("pane");
-        let first = matches.first().map(String::as_str).unwrap_or_default();
-        assert!(
-            first
-                .split_whitespace()
-                .any(|word| word.starts_with("pane")),
-            "got {matches:?}"
+    fn a_mid_word_substring_does_not_match() {
+        assert_eq!(
+            command_match_rank(&command("remove service", &[]), "move"),
+            None
+        );
+        assert_eq!(
+            command_match_rank(&command("xxsplitxx", &[]), "split"),
+            None
+        );
+        // The real row from the review, verbatim.
+        assert_eq!(
+            command_match_rank(
+                &command("Collie — Uninstall web bridge (remove service)", &[]),
+                "move"
+            ),
+            None
+        );
+
+        // A keyword can still carry a row whose own name never says "pane",
+        // so this asserts on the name only where the name is what matched.
+        let name_matched = command("close pane", &[]);
+        assert_eq!(
+            command_match_rank(&name_matched, "pane"),
+            Some((MAX_NAME_RANK, None))
+        );
+    }
+
+    // The boundary is punctuation-aware, not whitespace-only: three cases the
+    // two rules disagree on, all of them real palette rows.
+    #[test]
+    fn a_word_boundary_match_survives_punctuation_and_multiple_words() {
+        // A multi-word query mid-name still matches.
+        assert_eq!(
+            command_match_rank(&command("move pane to new tab", &[]), "new tab"),
+            Some((MAX_NAME_RANK, None))
+        );
+        // A word reachable only through punctuation still matches.
+        assert_eq!(
+            command_match_rank(&command("uninstall bridge (remove service)", &[]), "remove"),
+            Some((MAX_NAME_RANK, None))
+        );
+        // But its interior does not.
+        assert_eq!(
+            command_match_rank(&command("uninstall bridge (remove service)", &[]), "emove"),
+            None
         );
     }
 
@@ -485,7 +806,7 @@ mod tests {
         ];
         let commands =
             filtered_palette_commands("", &recent, &keybinds(), &no_plugins(), &snapshot);
-        let ids: Vec<&str> = commands.iter().map(|command| command.id.as_str()).collect();
+        let ids: Vec<&str> = commands.iter().map(|row| row.command.id.as_str()).collect();
 
         assert_eq!(ids.first().copied(), Some("core:resize-pane-left"));
         assert_eq!(ids.get(1).copied(), Some("core:new-tab"));
@@ -537,6 +858,16 @@ mod tests {
             assert!(
                 actions.contains(&PaletteAction::Keybind(expected)),
                 "{expected:?} is missing from the palette"
+            );
+        }
+
+        // The three family rows ride alongside their leaves: the leaves stay
+        // runnable and searchable, the family row is what a directionless
+        // query reaches.
+        for family in DirectionFamily::all() {
+            assert!(
+                actions.contains(&PaletteAction::Chooser(family)),
+                "{family:?} has no family row"
             );
         }
     }
@@ -591,28 +922,21 @@ mod tests {
         );
     }
 
-    // The context menu and the sidebar say "move pane"; the API says "swap".
-    // Without the keyword bridge the palette answers nothing to the wording a
-    // user arrives with.
     #[test]
-    fn move_pane_left_matches_swap_pane_left_via_keyword() {
+    fn move_pane_left_still_reaches_the_swap_pane_left_leaf() {
         let matches = names("move pane left");
-        assert_eq!(
-            matches.first().map(String::as_str),
-            Some("swap pane left"),
-            "got {matches:?}"
+        assert!(
+            matches.iter().any(|name| name == "swap pane left"),
+            "naming a direction releases the leaf, got {matches:?}"
         );
     }
 
     #[test]
-    fn reorder_workspace_matches_both_workspace_move_commands_via_keywords() {
+    fn reorder_workspace_ranks_the_workspace_family_row_first() {
         let matches = names("reorder workspace");
-        assert!(
-            matches.iter().any(|name| name == "move workspace up"),
-            "got {matches:?}"
-        );
-        assert!(
-            matches.iter().any(|name| name == "move workspace down"),
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("move workspace..."),
             "got {matches:?}"
         );
     }
@@ -672,27 +996,71 @@ mod tests {
     #[test]
     fn keyword_matching_lowercases_the_keyword_like_name_matching() {
         let cmd = command("split vertical", &["Split Right"]);
-        assert_eq!(command_match_rank(&cmd, "split right"), Some(4));
+        assert_eq!(
+            command_match_rank(&cmd, "split right"),
+            Some((MAX_NAME_RANK + 1, Some("Split Right")))
+        );
+    }
+
+    #[test]
+    fn a_keyword_only_match_reports_its_keyword() {
+        let cmd = command("close pane", &["dismiss"]);
+        assert_eq!(
+            command_match_rank(&cmd, "dismiss"),
+            Some((MAX_NAME_RANK + 1, Some("dismiss")))
+        );
+        assert_eq!(
+            command_match_rank(&cmd, "close").map(|(_, keyword)| keyword),
+            Some(None),
+            "a name match has no keyword to report"
+        );
+
+        // And the reason survives the filter, which is the only path the
+        // renderer sees it through.
+        let snapshot = super::super::tests::snapshot();
+        let rows = filtered_palette_commands("combine", &[], &keybinds(), &no_plugins(), &snapshot);
+        let merge = rows
+            .iter()
+            .find(|row| row.command.name == "merge workspace into...")
+            .expect("merge workspace matches 'combine' only by keyword");
+        assert_eq!(
+            merge
+                .matched_keyword
+                .map(|keyword| keyword.contains("combine")),
+            Some(true),
+            "got {:?}",
+            merge.matched_keyword
+        );
+        let named = rows.iter().find(|row| row.command.name.contains("combine"));
+        assert!(
+            named.is_none_or(|row| row.matched_keyword.is_none()),
+            "a row matched by its own name reports no keyword"
+        );
     }
 
     #[test]
     fn the_best_matching_keyword_wins_when_several_keywords_match() {
         // The command name itself must not match "split" (or the test would
         // exercise the name branch instead of the keyword branch). First
-        // keyword only word-prefix-matches (rank 2); second is an exact match
-        // (rank 0). The overall keyword rank should reflect the best of the
-        // two, not list order.
+        // keyword only word-prefix-matches; second is an exact match. The
+        // overall keyword rank should reflect the best of the two, not list
+        // order.
         let cmd = command("close pane", &["foo split bar", "split"]);
-        assert_eq!(command_match_rank(&cmd, "split"), Some(MAX_NAME_RANK + 1));
+        assert_eq!(
+            command_match_rank(&cmd, "split"),
+            Some((MAX_NAME_RANK + 1, Some("split")))
+        );
     }
 
     #[test]
-    fn a_substring_only_name_match_still_outranks_any_keyword_match() {
-        let name_match = command("xxsplitxx", &[]);
-        let keyword_match = command("close pane", &["split"]);
-        let name_rank = command_match_rank(&name_match, "split").expect("name should match");
-        let keyword_rank =
-            command_match_rank(&keyword_match, "split").expect("keyword should match");
+    fn the_weakest_name_match_still_outranks_any_keyword_match() {
+        // "zoom pane" matches "pane" only at its second word — the weakest
+        // name tier — while "close tab" matches it by keyword alone.
+        let name_match = command("zoom pane", &[]);
+        let keyword_match = command("close tab", &["pane"]);
+        let (name_rank, _) = command_match_rank(&name_match, "pane").expect("name should match");
+        let (keyword_rank, _) =
+            command_match_rank(&keyword_match, "pane").expect("keyword should match");
         assert_eq!(name_rank, MAX_NAME_RANK);
         assert!(
             name_rank < keyword_rank,
@@ -703,15 +1071,106 @@ mod tests {
     #[test]
     fn empty_query_keyword_lookup_does_not_panic() {
         let cmd = command("split vertical", &["split right"]);
-        assert_eq!(command_match_rank(&cmd, ""), Some(1));
+        assert_eq!(command_match_rank(&cmd, ""), Some((1, None)));
     }
 
-    // `pane_split_direction_geometry` sizes each button from the label's byte
-    // length, which only equals its rendered width while the labels stay
-    // ASCII. A wide or multi-byte glyph would silently mis-size the rect the
-    // mouse hit-test shares with the renderer.
     #[test]
-    fn split_button_labels_are_ascii_so_byte_length_is_their_rendered_width() {
+    fn a_move_query_shows_one_row_per_family() {
+        let matches = names("move");
+        for family in ["move tab...", "move workspace..."] {
+            assert_eq!(
+                matches.iter().filter(|name| *name == family).count(),
+                1,
+                "exactly one {family} row, got {matches:?}"
+            );
+        }
+        for leaf in [
+            "move tab left",
+            "move tab right",
+            "move workspace up",
+            "move workspace down",
+            "swap pane left",
+            "swap pane right",
+        ] {
+            assert!(
+                !matches.iter().any(|name| name == leaf),
+                "{leaf} should be behind its family row, got {matches:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_query_naming_a_direction_prefix_reaches_the_leaf_row() {
+        let matches = names("move tab l");
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some("move tab left"),
+            "got {matches:?}"
+        );
+        // The full word works the same way; the prefix is a shortcut, not a
+        // different path.
+        assert_eq!(
+            names("move tab left").first().map(String::as_str),
+            Some("move tab left")
+        );
+    }
+
+    #[test]
+    fn move_pane_reaches_the_swap_family_row() {
+        // The context menu and the sidebar say "move pane"; the API says
+        // "swap". Without the keyword bridge the palette answers nothing to
+        // the wording a user arrives with.
+        let matches = names("move pane");
+        assert!(
+            matches.iter().any(|name| name == "swap pane..."),
+            "got {matches:?}"
+        );
+    }
+
+    #[test]
+    fn a_family_row_offers_one_choice_per_leaf_carrying_that_leaf_s_command_id() {
+        use super::super::state::ChooserOutcome;
+
+        let choices = DirectionFamily::SwapPane.choices();
+        let ids: Vec<&str> = choices
+            .iter()
+            .filter_map(|choice| match &choice.outcome {
+                ChooserOutcome::Palette { command_id, .. } => Some(command_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "core:swap-pane-left",
+                "core:swap-pane-down",
+                "core:swap-pane-up",
+                "core:swap-pane-right",
+            ]
+        );
+        assert_eq!(DirectionFamily::SwapPane.chooser_title(), "swap pane");
+    }
+
+    #[test]
+    fn every_family_leaf_reaches_the_palette_so_no_choice_is_dropped() {
+        // `choices` drops a leaf whose action has no palette id, which would
+        // silently make a direction unreachable now that the leaf rows are
+        // hidden behind the family row.
+        for family in DirectionFamily::all() {
+            assert_eq!(
+                family.choices().len(),
+                family.leaves().len(),
+                "{family:?} lost a leaf to a missing palette id"
+            );
+        }
+    }
+
+    // Chooser labels stay ASCII so a terminal cannot disagree with the
+    // geometry about how wide a button is. The rect is shared with the mouse
+    // hit-test, so a glyph that renders wider than measured moves the target
+    // out from under the drawn button rather than failing anything.
+    #[test]
+    fn chooser_labels_are_ascii_so_every_terminal_renders_them_the_measured_width() {
         for label in [SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL] {
             assert!(label.is_ascii(), "{label:?} must stay ASCII");
             assert_eq!(
@@ -723,9 +1182,16 @@ mod tests {
     }
 
     #[test]
-    fn the_split_picker_fits_its_two_buttons() {
-        let (_, _, vertical, horizontal) =
-            pane_split_direction_geometry(Rect::new(0, 0, 120, 40)).expect("geometry");
+    fn the_split_chooser_fits_its_two_buttons() {
+        let (_, _, buttons) = chooser_geometry(
+            Rect::new(0, 0, 120, 40),
+            "split into tab",
+            &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL],
+        )
+        .expect("geometry");
+        let [vertical, horizontal] = buttons.as_slice() else {
+            panic!("two buttons, got {buttons:?}");
+        };
         assert_eq!(usize::from(vertical.width), SPLIT_VERTICAL_LABEL.len());
         assert_eq!(usize::from(horizontal.width), SPLIT_HORIZONTAL_LABEL.len());
         assert!(
@@ -736,9 +1202,19 @@ mod tests {
     }
 
     #[test]
+    fn a_chooser_with_no_choices_has_no_geometry() {
+        assert!(chooser_geometry(Rect::new(0, 0, 120, 40), "anything", &[]).is_none());
+    }
+
+    #[test]
     fn a_terminal_too_small_for_the_palette_yields_no_geometry() {
         assert!(palette_geometry(Rect::new(0, 0, 10, 4)).is_none());
-        assert!(pane_split_direction_geometry(Rect::new(0, 0, 10, 4)).is_none());
+        assert!(chooser_geometry(
+            Rect::new(0, 0, 10, 4),
+            "split into tab",
+            &[SPLIT_VERTICAL_LABEL, SPLIT_HORIZONTAL_LABEL]
+        )
+        .is_none());
     }
 
     #[test]
@@ -817,6 +1293,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: Some(PluginPlatform::Windows),
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(commands
@@ -832,6 +1309,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: Some(PluginPlatform::Linux),
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(commands
@@ -858,6 +1336,7 @@ mod tests {
         let plugins = PalettePlugins {
             installed: vec![plugin],
             host_platform: None,
+            destructive_actions: Vec::new(),
         };
         let commands = plugin_palette_commands(&plugins, &snapshot);
         assert!(
@@ -900,7 +1379,136 @@ mod tests {
         PalettePlugins {
             installed,
             host_platform: Some(this_binarys_platform()),
+            destructive_actions: Vec::new(),
         }
+    }
+
+    /// The action `test_plugin` carries that removes something.
+    fn uninstall_action() -> crate::api::schema::PluginManifestAction {
+        crate::api::schema::PluginManifestAction {
+            id: "uninstall".into(),
+            title: "Uninstall web bridge (remove service)".into(),
+            description: None,
+            contexts: Vec::new(),
+            platforms: None,
+            destructive: false,
+            command: vec!["true".into()],
+        }
+    }
+
+    fn find_command<'a>(commands: &'a [PaletteCommand], id: &str) -> Option<&'a PaletteCommand> {
+        commands.iter().find(|command| command.id == id)
+    }
+
+    #[test]
+    fn a_destructive_manifest_action_carries_its_tag() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        let mut action = uninstall_action();
+        action.destructive = true;
+        plugin.actions.push(action);
+
+        let commands = plugin_palette_commands(&host_plugins(vec![plugin]), &snapshot);
+        let uninstall = find_command(&commands, "plugin-action:demo.uninstall")
+            .expect("the uninstall row reaches the palette");
+        assert!(uninstall.destructive, "the manifest said so");
+        assert!(
+            !find_command(&commands, "plugin-action:demo.build")
+                .expect("build row")
+                .destructive,
+            "its sibling is untouched"
+        );
+    }
+
+    #[test]
+    fn a_config_override_marks_a_third_party_action_destructive() {
+        let snapshot = super::super::tests::snapshot();
+        let mut plugin = test_plugin();
+        // The manifest does NOT set it — this is the third-party case the
+        // override exists for.
+        plugin.actions.push(uninstall_action());
+        let plugins = PalettePlugins {
+            installed: vec![plugin],
+            host_platform: Some(this_binarys_platform()),
+            destructive_actions: vec!["demo:uninstall".into()],
+        };
+
+        let commands = plugin_palette_commands(&plugins, &snapshot);
+        assert!(
+            find_command(&commands, "plugin-action:demo.uninstall")
+                .expect("uninstall row")
+                .destructive
+        );
+        assert!(
+            !find_command(&commands, "plugin-action:demo.build")
+                .expect("build row")
+                .destructive,
+            "marking one action must not mark its siblings"
+        );
+    }
+
+    #[test]
+    fn a_destructive_override_matches_the_whole_pair_not_either_half() {
+        assert!(action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "demo",
+            "uninstall"
+        ));
+        // Same action id under a different plugin.
+        assert!(!action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "other",
+            "uninstall"
+        ));
+        // Same plugin, different action.
+        assert!(!action_is_marked_destructive(
+            &["demo:uninstall".to_string()],
+            "demo",
+            "build"
+        ));
+        // A malformed entry marks nothing rather than everything.
+        assert!(!action_is_marked_destructive(
+            &["demo".to_string()],
+            "demo",
+            "uninstall"
+        ));
+    }
+
+    // Both halves may contain a colon — `normalize_identifier` and
+    // `normalize_local_identifier` allow it. Splitting the entry on the first
+    // colon left a namespaced plugin id unmarkable, which is the fail-OPEN
+    // direction: the override is the only lever against a plugin that declines
+    // to mark itself.
+    //
+    // Joining instead means two different id pairs can share one string
+    // (`acme:tools` + `uninstall` and `acme` + `tools:uninstall`). That
+    // collision over-marks, which costs an extra confirm and never skips one —
+    // the safe direction, and the reason this is a comparison rather than a
+    // parse.
+    #[test]
+    fn a_colon_in_either_id_is_markable_and_a_collision_errs_toward_confirming() {
+        let marked = ["acme:tools:uninstall".to_string()];
+
+        assert!(
+            action_is_marked_destructive(&marked, "acme:tools", "uninstall"),
+            "a namespaced plugin id must be markable"
+        );
+        assert!(
+            action_is_marked_destructive(&marked, "acme", "tools:uninstall"),
+            "the joined-string collision confirms too often, never too rarely"
+        );
+        assert!(
+            !action_is_marked_destructive(&marked, "acme:tools", "build"),
+            "an unrelated action is still unmarked"
+        );
+    }
+
+    #[test]
+    fn an_old_manifest_without_the_field_parses_as_not_destructive() {
+        let manifest: crate::api::schema::PluginManifestAction =
+            serde_json::from_str(r#"{"id":"build","title":"Build","command":["true"]}"#)
+                .expect("a manifest predating the field still parses");
+        assert!(!manifest.destructive);
     }
 
     // Two plugins, because the sort is across plugins as well as within one:
@@ -916,6 +1524,7 @@ mod tests {
         second
             .actions
             .push(crate::api::schema::PluginManifestAction {
+                destructive: false,
                 id: "aaa-first".into(),
                 title: "Aaa first".into(),
                 description: None,
@@ -975,6 +1584,7 @@ mod tests {
             build: Vec::new(),
             startup: Vec::new(),
             actions: vec![crate::api::schema::PluginManifestAction {
+                destructive: false,
                 id: "build".into(),
                 title: "Build".into(),
                 description: None,

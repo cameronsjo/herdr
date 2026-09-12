@@ -12,7 +12,7 @@ use crate::{
 /// becomes searchable by gaining a row here.
 #[derive(Debug, Clone)]
 pub(crate) struct KeybindHelpEntry {
-    pub key: String,
+    pub key: Option<String>,
     pub label: Cow<'static, str>,
     pub action: Option<KeybindAction>,
     /// Extra search terms the command palette matches this entry against
@@ -37,9 +37,9 @@ pub(crate) fn keybind_help_text_char(key: &TerminalKey) -> Option<char> {
     Some(character)
 }
 
-fn entry(key: impl Into<String>, label: &'static str) -> KeybindHelpEntry {
+fn entry(key: Option<String>, label: &'static str) -> KeybindHelpEntry {
     KeybindHelpEntry {
-        key: key.into(),
+        key,
         label: Cow::Borrowed(label),
         action: None,
         keywords: &[],
@@ -47,12 +47,12 @@ fn entry(key: impl Into<String>, label: &'static str) -> KeybindHelpEntry {
 }
 
 fn action_entry(
-    key: impl Into<String>,
+    key: Option<String>,
     label: &'static str,
     action: KeybindAction,
 ) -> KeybindHelpEntry {
     KeybindHelpEntry {
-        key: key.into(),
+        key,
         label: Cow::Borrowed(label),
         action: Some(action),
         keywords: &[],
@@ -60,26 +60,26 @@ fn action_entry(
 }
 
 fn action_entry_kw(
-    key: impl Into<String>,
+    key: Option<String>,
     label: &'static str,
     action: KeybindAction,
     keywords: &'static [&'static str],
 ) -> KeybindHelpEntry {
     KeybindHelpEntry {
-        key: key.into(),
+        key,
         label: Cow::Borrowed(label),
         action: Some(action),
         keywords,
     }
 }
 
-fn binding_label(bindings: &ActionKeybinds) -> String {
-    bindings.label().unwrap_or_else(|| "unset".to_owned())
+fn binding_label(bindings: &ActionKeybinds) -> Option<String> {
+    bindings.label()
 }
 
-fn indexed_label(bindings: &[IndexedKeybind]) -> String {
+fn indexed_label(bindings: &[IndexedKeybind]) -> Option<String> {
     if bindings.is_empty() {
-        return "unset".to_owned();
+        return None;
     }
     let mut parts = Vec::new();
     let mut index = 0;
@@ -92,7 +92,7 @@ fn indexed_label(bindings: &[IndexedKeybind]) -> String {
             index += 1;
         }
     }
-    parts.join(" / ")
+    Some(parts.join(" / "))
 }
 
 fn indexed_range_prefix(bindings: &[IndexedKeybind]) -> Option<&str> {
@@ -115,7 +115,7 @@ pub(crate) fn keybind_help_groups(
         (
             "global",
             vec![
-                entry(crate::config::format_key_combo(prefix), "prefix mode"),
+                entry(Some(crate::config::format_key_combo(prefix)), "prefix mode"),
                 entry(binding_label(&keybinds.help), "keybinds"),
                 action_entry(
                     binding_label(&keybinds.settings),
@@ -142,28 +142,34 @@ pub(crate) fn keybind_help_groups(
         (
             "navigation",
             vec![
-                entry("esc", "back"),
+                entry(Some("esc".to_owned()), "back"),
                 entry(
-                    format!(
+                    Some(format!(
                         "{} / {}",
-                        binding_label(&keybinds.navigate.workspace_up),
+                        binding_label(&keybinds.navigate.workspace_up)
+                            .unwrap_or_else(|| "unset".to_owned()),
                         binding_label(&keybinds.navigate.workspace_down)
-                    ),
+                            .unwrap_or_else(|| "unset".to_owned())
+                    )),
                     "workspace list",
                 ),
                 entry(
-                    format!(
+                    Some(format!(
                         "{} / {} / {} / {} / left / right",
-                        binding_label(&keybinds.navigate.pane_left),
-                        binding_label(&keybinds.navigate.pane_down),
-                        binding_label(&keybinds.navigate.pane_up),
+                        binding_label(&keybinds.navigate.pane_left)
+                            .unwrap_or_else(|| "unset".to_owned()),
+                        binding_label(&keybinds.navigate.pane_down)
+                            .unwrap_or_else(|| "unset".to_owned()),
+                        binding_label(&keybinds.navigate.pane_up)
+                            .unwrap_or_else(|| "unset".to_owned()),
                         binding_label(&keybinds.navigate.pane_right)
-                    ),
+                            .unwrap_or_else(|| "unset".to_owned())
+                    )),
                     "move focus",
                 ),
-                entry("tab / shift+tab", "cycle pane"),
-                entry("enter", "open workspace"),
-                entry("1..9", "switch workspace"),
+                entry(Some("tab / shift+tab".to_owned()), "cycle pane"),
+                entry(Some("enter".to_owned()), "open workspace"),
+                entry(Some("1..9".to_owned()), "switch workspace"),
             ],
         ),
         (
@@ -465,7 +471,7 @@ pub(crate) fn keybind_help_groups(
                 .custom_commands
                 .iter()
                 .map(|binding| KeybindHelpEntry {
-                    key: binding.label.clone(),
+                    key: Some(binding.label.clone()),
                     label: binding
                         .description
                         .clone()
@@ -494,7 +500,10 @@ pub(crate) fn filter_keybind_help_groups(
             let entries = entries
                 .into_iter()
                 .filter(|entry| {
-                    entry.key.to_lowercase().contains(&query)
+                    entry
+                        .key
+                        .as_deref()
+                        .is_some_and(|key| key.to_lowercase().contains(&query))
                         || entry.label.to_lowercase().contains(&query)
                         || entry
                             .keywords
@@ -511,15 +520,25 @@ pub(crate) fn filter_keybind_help_groups(
 mod tests {
     use super::*;
 
+    fn key(label: &str) -> Option<String> {
+        Some(label.to_owned())
+    }
+
     fn groups() -> Vec<KeybindHelpGroup> {
         vec![
             (
                 "workspaces / tabs",
-                vec![entry("w", "workspace navigation"), entry("c", "new tab")],
+                vec![
+                    entry(key("w"), "workspace navigation"),
+                    entry(key("c"), "new tab"),
+                ],
             ),
             (
                 "panes",
-                vec![entry("v", "split vertical"), entry("x", "close pane")],
+                vec![
+                    entry(key("v"), "split vertical"),
+                    entry(key("x"), "close pane"),
+                ],
             ),
         ]
     }
@@ -539,7 +558,7 @@ mod tests {
     #[test]
     fn filter_also_matches_a_palette_keyword() {
         let entries = vec![action_entry_kw(
-            "v",
+            key("v"),
             "split vertical",
             KeybindAction::SplitVertical,
             &["split right"],
@@ -551,11 +570,13 @@ mod tests {
 
     #[test]
     fn plain_and_action_entries_carry_no_keywords_by_default() {
-        assert!(entry("k", "some entry").keywords.is_empty());
-        assert!(entry("k", "some entry").action.is_none());
-        assert!(action_entry("k", "some action", KeybindAction::ClosePane)
-            .keywords
-            .is_empty());
+        assert!(entry(key("k"), "some entry").keywords.is_empty());
+        assert!(entry(key("k"), "some entry").action.is_none());
+        assert!(
+            action_entry(key("k"), "some action", KeybindAction::ClosePane)
+                .keywords
+                .is_empty()
+        );
     }
 
     #[test]

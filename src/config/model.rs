@@ -315,6 +315,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub update: UpdateConfig,
     pub keys: KeysConfig,
+    pub palette: PaletteConfig,
     pub ui: UiConfig,
     pub worktrees: WorktreesConfig,
     pub advanced: AdvancedConfig,
@@ -1086,6 +1087,17 @@ impl Default for RemoteConfig {
             manage_ssh_config: true,
         }
     }
+}
+
+/// Command palette behaviour. Unrelated to `[theme]`, which owns colours.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(default)]
+pub struct PaletteConfig {
+    /// Plugin actions to tag and confirm before running, as
+    /// `"<plugin_id>:<action_id>"`. Use this for a third-party plugin whose
+    /// manifest does not set `destructive` itself; a manifest that does set it
+    /// needs no entry here. Default: empty.
+    pub destructive_actions: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

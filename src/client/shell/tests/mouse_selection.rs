@@ -1015,8 +1015,12 @@ fn pane_dragged_onto_another_tab_asks_which_way_it_splits() {
     assert!(release.actions.is_empty());
     assert!(matches!(
         state.overlay,
-        Some(ClientShellOverlay::PaneSplitDirection(ref pending))
-            if pending.pane_id == "pane_1" && pending.tab_id == "tab_2"
+        Some(ClientShellOverlay::Chooser(ref chooser))
+            if matches!(
+                chooser.choices.first().map(|choice| &choice.outcome),
+                Some(ChooserOutcome::PaneSplit { pane_id, tab_id, .. })
+                    if pane_id == "pane_1" && tab_id == "tab_2"
+            )
     ));
     assert!(state.chrome_drag.is_none());
 }
