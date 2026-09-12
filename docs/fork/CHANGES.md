@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Cold restore keeps the agent name as a label ([#35](https://github.com/cameronsjo/herdr/issues/35))
+
+### fix: keep a cold-restored agent name as a label and log the dropped routing key
+
+- **PR:** [cameronsjo/herdr#PR_PLACEHOLDER](https://github.com/cameronsjo/herdr/pull/PR_PLACEHOLDER)
+- **Files:** `src/persist/restore.rs`
+- **Replaces:** Upstream drops a stored agent name silently when a pane restores through a fresh shell with no agent, which is the normal path under `resume_agents_on_restore = false`. Dropping the name is correct — `AppState::resolve_agent_target` matches on it with no liveness check, so a restored name would route `agent prompt` into an interactive shell — but a pane named only through `agent.start` comes back with no name and no label, because `agent.start` and `agent.rename` never set a manual label. The fork logs the dropped name at debug and carries it into the manual label when the pane stored no label of its own.
+- **Regression check:** `cargo nextest run --locked -E 'test(cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label)'`.
+
 ## Palette direction chooser, destructive confirm, and review findings (`docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md`)
 
 ### feat(client): collapse move and swap rows into a direction chooser

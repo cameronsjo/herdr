@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use ratatui::layout::Direction;
 use tokio::sync::{mpsc, Notify};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 use crate::detect::AgentState;
 use crate::events::AppEvent;
@@ -121,6 +121,37 @@ impl AgentNameLedger {
             "dropped stored agent names during session restore; \
              affected panes keep their agent but lose the name"
         );
+    }
+}
+
+/// Drops a cold-restored agent name, keeping it as a manual label when it can.
+///
+/// The agent name is the routing key for `agent.prompt` and `agent.send-keys`:
+/// `AppState::resolve_agent_target` matches on `agent_name` alone, with no
+/// liveness gate. A pane reaching this path restored through a fresh shell with
+/// no agent process, so keeping the key would route prompts into an interactive
+/// shell. The name is dropped, and the pane stays identifiable through a manual
+/// label instead — `effective_agent_label` derives from hook authority and the
+/// detected agent, never from `manual_label`, so the label creates no routing
+/// surface.
+///
+/// The name is not run through `AgentNameLedger::accept`: accepting inserts into
+/// the ledger's claimed set, which is shared across the whole restore pass, so a
+/// cold pane claiming a name would make a later warm pane restoring the same
+/// name look like a duplicate and lose it. `valid_agent_name` is called directly
+/// instead.
+///
+/// A label the user set always wins, so the carry reads the label the terminal
+/// actually ended up with rather than the stored one: `set_manual_label` drops a
+/// blank label, so a stored `Some("")` leaves the pane unlabelled and the carry
+/// should still fire.
+fn drop_cold_agent_name_into_label(terminal: &mut TerminalState, agent_name: String) {
+    debug!(
+        name = %agent_name.escape_debug(),
+        "dropped a stored agent name: this pane restored through a fresh shell with no agent"
+    );
+    if terminal.manual_label.is_none() && crate::app::valid_agent_name(&agent_name) {
+        terminal.set_manual_label(agent_name);
     }
 }
 
@@ -719,7 +750,13 @@ fn restore_tab(
                         let agent_name = agent_names.accept(agent_name).unwrap_or_default();
                         terminal.restore_managed_agent(agent_name, agent)
                     }
-                    (Some(_), Some(_)) => {}
+                    // Not imported: no live PTY and no native resume plan, so
+                    // this pane came back as a fresh shell with no agent. See
+                    // `drop_cold_agent_name_into_label` for why the routing key
+                    // cannot survive that.
+                    (Some(agent_name), Some(_)) => {
+                        drop_cold_agent_name_into_label(&mut terminal, agent_name);
+                    }
                     (Some(agent_name), None) if was_imported => {
                         // No managed-agent record rides on this one, so a
                         // rejected name can simply be skipped.
@@ -727,7 +764,10 @@ fn restore_tab(
                             terminal.set_agent_name(agent_name);
                         }
                     }
-                    (Some(_), None) => {}
+                    // The non-imported twin of the arm above, same reasoning.
+                    (Some(agent_name), None) => {
+                        drop_cold_agent_name_into_label(&mut terminal, agent_name);
+                    }
                     (None, _) => {}
                 }
                 if let Some(agent) = initial_restore_agent {
@@ -1421,6 +1461,155 @@ mod tests {
         assert_eq!(
             terminal.managed_agent_kind(),
             Some(crate::detect::Agent::Pi)
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label() {
+        // resume_agents_on_restore = false, so this pane comes back as a fresh
+        // shell with no agent. The name is the routing key for agent.prompt, so
+        // it must not survive; the label must, or the pane is unidentifiable.
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([(
+                0,
+                super::super::snapshot::PaneSnapshot {
+                    cwd: std::env::current_dir().unwrap(),
+                    label: None,
+                    agent_name: Some("reviewer".into()),
+                    managed_agent_kind: Some("opencode".into()),
+                    agent_session: None,
+                    launch_argv: None,
+                },
+            )]),
+            LayoutSnapshot::Pane(0),
+        );
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert_eq!(
+            terminal.agent_name, None,
+            "a cold-restored pane must not keep the agent routing key"
+        );
+        assert_eq!(
+            terminal.managed_agent_kind(),
+            None,
+            "a cold-restored pane is a plain shell, not a managed agent"
+        );
+        assert_eq!(
+            terminal.manual_label.as_deref(),
+            Some("reviewer"),
+            "the dropped name must stay visible as a label"
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_restore_carries_the_agent_name_over_a_blank_stored_label() {
+        // `set_manual_label` drops a blank label, so a stored `Some("")` leaves
+        // the pane unlabelled. The carry reads the label the terminal actually
+        // has, not the stored one, so it still fires here.
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([(
+                0,
+                super::super::snapshot::PaneSnapshot {
+                    cwd: std::env::current_dir().unwrap(),
+                    label: Some("   ".into()),
+                    agent_name: Some("reviewer".into()),
+                    managed_agent_kind: None,
+                    agent_session: None,
+                    launch_argv: None,
+                },
+            )]),
+            LayoutSnapshot::Pane(0),
+        );
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert_eq!(terminal.agent_name, None);
+        assert_eq!(
+            terminal.manual_label.as_deref(),
+            Some("reviewer"),
+            "a blank stored label must not suppress the carry"
+        );
+    }
+
+    #[tokio::test]
+    async fn cold_restore_keeps_a_distinct_stored_label_over_the_dropped_name() {
+        // The label and the agent name differ here on purpose: with identical
+        // strings a carry that clobbered the label would still pass. This is
+        // the case that proves "a label the user set always wins".
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([(
+                0,
+                super::super::snapshot::PaneSnapshot {
+                    cwd: std::env::current_dir().unwrap(),
+                    label: Some("explorer".into()),
+                    agent_name: Some("reviewer".into()),
+                    managed_agent_kind: Some("opencode".into()),
+                    agent_session: None,
+                    launch_argv: None,
+                },
+            )]),
+            LayoutSnapshot::Pane(0),
+        );
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert_eq!(terminal.agent_name, None);
+        assert_eq!(
+            terminal.manual_label.as_deref(),
+            Some("explorer"),
+            "a stored label must win over the dropped agent name"
         );
     }
 
