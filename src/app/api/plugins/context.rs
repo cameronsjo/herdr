@@ -36,7 +36,7 @@ impl App {
         self.plugin_context_for_workspace(ws_idx, correlation_id)
     }
 
-    pub(super) fn plugin_context_for_event(
+    pub(in crate::app::api) fn plugin_context_for_event(
         &self,
         event: &crate::api::schema::EventEnvelope,
         correlation_id: &str,
