@@ -143,8 +143,10 @@ Two judgment calls worth a second look:
 ## Risks
 
 - The sidebar grouping change touches a rendering path that runs per space per
-  frame. The grouping pass keeps the same shape and cardinality, so no new
-  scaling cost is expected; `just bench-render-scale` confirms.
+  frame. The grouping pass keeps the same shape and cardinality, and
+  `displayed_workspace_status` already scanned every space per row before this
+  change, so no new scaling cost is expected. `just bench-render-scale` was not
+  run, per the checklist above; the cardinality here is spaces, not panes.
 - Reuse changes what the new-space key does for a repeat path, as above.
 
 ## Notes
