@@ -75,6 +75,7 @@ pub(super) fn read_terminal_grid_size() -> std::io::Result<(u16, u16)> {
     crossterm::terminal::window_size().map(|size| (size.columns, size.rows))
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn set_sigpipe_disposition(handler: libc::sighandler_t) {
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     action.sa_sigaction = handler;
@@ -87,10 +88,15 @@ fn set_sigpipe_disposition(handler: libc::sighandler_t) {
 }
 
 pub(crate) fn begin_cli_output() {
+    // The unit-test harness shares one process across all tests. Flipping
+    // SIGPIPE to SIG_DFL here would make any later write to a closed pipe
+    // kill the whole test binary before it prints results (refs #39).
+    #[cfg(not(test))]
     set_sigpipe_disposition(libc::SIG_DFL);
 }
 
 pub(crate) fn end_cli_output() {
+    #[cfg(not(test))]
     set_sigpipe_disposition(libc::SIG_IGN);
 }
 
@@ -329,5 +335,15 @@ mod tests {
     fn remote_ssh_config_dir_rejects_overlong_control_socket_name() {
         let err = create_remote_ssh_config_dir(&"x".repeat(200)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn begin_cli_output_leaves_sigpipe_ignored_in_the_test_harness() {
+        begin_cli_output();
+        // SAFETY: `sigaction` is zero-initialized before the query fills it in,
+        // and the null `act` pointer only reads the current disposition.
+        let mut current: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(libc::SIGPIPE, std::ptr::null(), &mut current) };
+        assert_eq!(current.sa_sigaction, libc::SIG_IGN);
     }
 }
