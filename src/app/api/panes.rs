@@ -1203,9 +1203,9 @@ impl App {
                 workspace_id,
                 label,
             } => {
-                // `parse_workspace_id` falls back to positional parsing without a
-                // bounds check, so a bare numeric id yields an index past the end
-                // — indexing it below would panic the whole server.
+                // `parse_workspace_id` bounds the positional fallback to the live
+                // workspace list; this check is redundant defense in depth before
+                // the index below is used.
                 let target_ws_idx = match self.parse_workspace_id(&workspace_id) {
                     Some(idx) if idx < self.state.workspaces.len() => idx,
                     _ => {
@@ -3415,6 +3415,49 @@ mod tests {
             app.state.workspaces[0].tabs[0].terminal_id(source),
             Some(&source_terminal)
         );
+    }
+
+    #[test]
+    fn api_pane_move_to_new_tab_rejects_an_out_of_range_workspace_id_without_panicking() {
+        let mut app = app_with_linked_worktree();
+        app.state.workspaces.push(Workspace::test_new("other"));
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        seed_terminal_states(&mut app);
+        // The fixture leaves `active` unset; the state invariant check at the
+        // end requires one on a non-empty app.
+        app.state.active = Some(0);
+        let source_public = app.public_pane_id(0, source).unwrap();
+
+        // `parse_workspace_id` bounds the positional fallback to the live
+        // workspace list, so a bare numeric id past the end resolves to `None`.
+        // Unbounded, this indexed a Vec and panicked the whole server from one
+        // socket request.
+        let response = app.handle_pane_move(
+            "req".into(),
+            PaneMoveParams {
+                pane_id: source_public.clone(),
+                destination: PaneMoveDestination::NewTab {
+                    workspace_id: Some("999999".into()),
+                    label: None,
+                },
+                focus: true,
+            },
+        );
+
+        assert!(
+            response.contains("workspace_not_found"),
+            "expected a workspace_not_found error, got: {response}"
+        );
+        // The source pane must still be attached — nothing may be detached
+        // before the destination is known good.
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 1);
+        assert_eq!(
+            app.public_pane_id(0, source).as_deref(),
+            Some(&*source_public)
+        );
+        app.state.workspaces[0].assert_invariants_for_test();
+        app.state.assert_invariants_for_test();
     }
 
     #[test]

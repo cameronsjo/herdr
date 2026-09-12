@@ -2291,6 +2291,27 @@ mod tests {
     }
 
     #[test]
+    fn positional_workspace_id_is_bounded_to_the_live_list() {
+        let mut app = test_app();
+        app.state.workspaces = vec![Workspace::test_new("first"), Workspace::test_new("second")];
+
+        // The documented positional convenience still resolves.
+        assert_eq!(app.parse_workspace_id("2"), Some(1));
+        assert_eq!(app.parse_workspace_id("w_2"), Some(1));
+
+        // Past the end it must be `None`, not an index that panics an indexing
+        // caller.
+        assert_eq!(app.parse_workspace_id("3"), None);
+        assert_eq!(app.parse_workspace_id("999999"), None);
+        assert_eq!(app.parse_workspace_id("w_9"), None);
+
+        // Exact ids are unaffected, and a non-positional unknown id still fails.
+        let second_id = app.state.workspaces[1].id.clone();
+        assert_eq!(app.parse_workspace_id(&second_id), Some(1));
+        assert_eq!(app.parse_workspace_id("wZZZ"), None);
+    }
+
+    #[test]
     fn legacy_bare_tab_id_uses_tab_position_not_public_tab_number() {
         let mut app = test_app();
         let mut workspace = Workspace::test_new("legacy-tab-id");

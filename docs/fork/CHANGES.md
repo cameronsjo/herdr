@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Positional workspace id fallback is bounded to the live list (issue [#77](https://github.com/cameronsjo/herdr/issues/77))
+
+### fix(api): bound the positional workspace id fallback to the live list
+
+- **PR:** [cameronsjo/herdr#81](https://github.com/cameronsjo/herdr/pull/81)
+- **Files:** `src/app/ids.rs`, `src/app/api/workspaces.rs`, `src/app/api/tabs.rs`, `src/app/api/panes.rs`
+- **Replaces:** Upstream's `parse_workspace_id` accepts `w_N` and a bare `N` as a documented positional convenience (the Nth workspace in display order) but returns the parsed index without checking it against the live workspace list, so `"999999"` resolves to `Some(999998)`. Three call sites re-check `< len` by hand; the ones that do not index `self.state.workspaces` directly through `public_workspace_id`, so one socket request panics the whole server — reachable through `pane.move` with `destination.type = "new_tab"` (the hand-rolled guard further down that arm is dead code, the panic fires first) and through `Method::WorkspaceFocus` in the headless client-view path, which has no guard at all. The fork adds one `.filter(|index| *index < len)` to the parser, so every caller gets `None` for an out-of-range positional id and maps it to the `workspace_not_found` error it already returns for an unknown id. The positional convenience itself is unchanged and still documented. The three hand-rolled `< len` guards are kept deliberately as defense in depth at their indexing calls; only their now-false comments are corrected.
+- **Regression check:** `cargo nextest run --locked -E 'test(positional_workspace_id) + test(api_pane_move_to_new_tab_rejects)'`.
+
 ## Keyboard and palette workspace reorder respects worktree grouping (issue [#48](https://github.com/cameronsjo/herdr/issues/48))
 
 ### fix(client): move a worktree group as a block from the keyboard and palette
