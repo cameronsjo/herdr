@@ -794,9 +794,9 @@ fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
     assert_eq!(state.mode, ClientShellMode::Terminal);
 }
 
-// Workspace reorder indexes the endpoint's own workspace list. The sidebar's
-// grouped view is a different order, so a reorder computed from it would move
-// the workspace somewhere the user did not ask for.
+// With no worktree group in play, a keyboard reorder is a plain
+// `WorkspaceMove` over the endpoint's own workspace list, wrapping at either
+// end. The group cases are covered by the tests below.
 #[test]
 fn workspace_reorder_actions_dispatch_workspace_move_with_wrapping_indices() {
     use crate::api::schema::{Method, WorkspaceMoveParams};
@@ -847,4 +847,90 @@ fn workspace_reorder_actions_dispatch_workspace_move_with_wrapping_indices() {
     assert!(single
         .endpoint_method_for_action(KeybindAction::MoveWorkspaceNext)
         .is_none());
+}
+
+/// Four workspaces where `ws_2` owns a worktree group whose only linked member
+/// is `ws_3`; `ws_1` and `ws_4` are plain. The sidebar renders `ws_3` indented
+/// under `ws_2`, so the roots are `ws_1`, `ws_2`, `ws_4`.
+fn grouped_workspaces_state(focused: &str) -> ClientShellState {
+    let worktree = |is_linked_worktree| {
+        Some(crate::protocol::ClientShellWorktree {
+            key: "k".into(),
+            label: "repo".into(),
+            is_linked_worktree,
+        })
+    };
+    let mut snapshot = snapshot();
+    let template = snapshot.workspaces[0].clone();
+    snapshot.workspaces = (1..=4)
+        .map(|number| {
+            let mut workspace = template.clone();
+            workspace.workspace_id = format!("ws_{number}");
+            workspace.number = number;
+            workspace.focused = false;
+            workspace.worktree = match number {
+                2 => worktree(false),
+                3 => worktree(true),
+                _ => None,
+            };
+            workspace
+        })
+        .collect();
+    snapshot.focused_workspace_id = Some(focused.to_string());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot));
+    state
+}
+
+#[test]
+fn workspace_reorder_action_moves_a_worktree_group_as_a_block() {
+    use crate::api::schema::{Method, WorkspaceMoveBlockParams};
+    use crate::input::KeybindAction;
+
+    let method = grouped_workspaces_state("ws_2")
+        .endpoint_method_for_action(KeybindAction::MoveWorkspaceNext)
+        .expect("a group root reorders");
+    assert_eq!(
+        method,
+        Method::WorkspaceMoveBlock(WorkspaceMoveBlockParams {
+            workspace_ids: vec!["ws_2".to_string(), "ws_3".to_string()],
+            before_workspace_id: None,
+        })
+    );
+}
+
+#[test]
+fn workspace_reorder_action_moves_a_group_backward_before_the_previous_root() {
+    use crate::api::schema::{Method, WorkspaceMoveBlockParams};
+    use crate::input::KeybindAction;
+
+    let method = grouped_workspaces_state("ws_2")
+        .endpoint_method_for_action(KeybindAction::MoveWorkspacePrevious)
+        .expect("a group root reorders");
+    assert_eq!(
+        method,
+        Method::WorkspaceMoveBlock(WorkspaceMoveBlockParams {
+            workspace_ids: vec!["ws_2".to_string(), "ws_3".to_string()],
+            before_workspace_id: Some("ws_1".to_string()),
+        })
+    );
+}
+
+#[test]
+fn workspace_reorder_action_on_a_linked_worktree_does_nothing() {
+    use crate::input::KeybindAction;
+
+    // A linked worktree has no row of its own to move: the drag and context
+    // menu paths already refuse it, and the keyboard now refuses it too.
+    for action in [
+        KeybindAction::MoveWorkspacePrevious,
+        KeybindAction::MoveWorkspaceNext,
+    ] {
+        assert!(
+            grouped_workspaces_state("ws_3")
+                .endpoint_method_for_action(action)
+                .is_none(),
+            "{action:?} on a linked worktree"
+        );
+    }
 }

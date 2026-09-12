@@ -1,9 +1,9 @@
 use super::*;
 
-/// The `insert_index` that moves the item at `source` one slot toward the front
-/// or the back of a list of `len` items, wrapping at either end. The keyboard
-/// reorder actions and the tab context menu's share this so a keyboard reorder
-/// and a menu reorder cannot land in different places.
+/// The `insert_index` that moves the tab at `source` one slot toward the front
+/// or the back of a list of `len` tabs, wrapping at either end. The keyboard tab
+/// reorder actions and the tab context menu share this so a keyboard reorder and
+/// a menu reorder cannot land in different places.
 pub(super) fn reorder_insert_index(len: usize, source: usize, forward: bool) -> Option<usize> {
     if len <= 1 {
         return None;
@@ -1000,7 +1000,7 @@ impl ClientShellState {
             Method, PaneDirection, PaneFocusDirectionParams, PaneMoveDestination, PaneMoveParams,
             PaneResizeParams, PaneSplitParams, PaneSwapParams, PaneTarget, PaneZoomMode,
             PaneZoomParams, SplitDirection, TabCreateParams, TabMoveDestination, TabMoveParams,
-            TabTarget, WorkspaceMoveParams, WorkspaceTarget,
+            TabTarget, WorkspaceTarget,
         };
         use crate::input::KeybindAction;
 
@@ -1098,25 +1098,11 @@ impl ClientShellState {
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }
-            KeybindAction::MoveWorkspacePrevious | KeybindAction::MoveWorkspaceNext => {
-                // Reorder uses the endpoint's own workspace order, not the
-                // sidebar's grouped view: `insert_index` indexes the list the
-                // server keeps, so a filtered or grouped position would move
-                // the workspace somewhere else entirely.
-                let source = snapshot
-                    .workspaces
-                    .iter()
-                    .position(|workspace| workspace.workspace_id == focused_workspace)?;
-                let insert_index = reorder_insert_index(
-                    snapshot.workspaces.len(),
-                    source,
+            KeybindAction::MoveWorkspacePrevious | KeybindAction::MoveWorkspaceNext => self
+                .workspace_reorder_method(
+                    &focused_workspace,
                     action == KeybindAction::MoveWorkspaceNext,
-                )?;
-                Some(Method::WorkspaceMove(WorkspaceMoveParams {
-                    workspace_id: focused_workspace,
-                    insert_index,
-                }))
-            }
+                ),
             KeybindAction::SwitchTab(index) => {
                 let tabs = snapshot
                     .tabs
