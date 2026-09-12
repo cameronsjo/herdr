@@ -23,7 +23,7 @@ fn shell_new_controls_use_the_same_client_action_routes_as_keybinds() {
     };
     assert!(matches!(
         request.method,
-        crate::api::schema::Method::WorkspaceCreate(_)
+        crate::api::schema::Method::WorkspaceOpen(_)
     ));
 
     let new_tab = state.hits.new_tab;

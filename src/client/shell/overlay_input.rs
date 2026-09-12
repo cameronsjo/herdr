@@ -1409,15 +1409,10 @@ impl ClientShellState {
                 source_workspace_id,
                 cwd,
                 suggested_name,
-            } => Some(crate::api::schema::Method::WorkspaceCreate(
-                crate::api::schema::WorkspaceCreateParams {
-                    source_workspace_id,
-                    cwd,
-                    focus: true,
-                    label: (!trimmed.is_empty() && trimmed != suggested_name)
-                        .then(|| trimmed.to_owned()),
-                    env: Default::default(),
-                },
+            } => Some(self.new_workspace_method(
+                source_workspace_id,
+                cwd,
+                (!trimmed.is_empty() && trimmed != suggested_name).then(|| trimmed.to_owned()),
             )),
             ClientRenameTarget::Workspace { workspace_id } => (!trimmed.is_empty()).then(|| {
                 crate::api::schema::Method::WorkspaceRename(
@@ -1497,25 +1492,7 @@ impl ClientShellState {
         if source_workspace_id == target_workspace_id {
             return false;
         }
-        let group_key = source
-            .worktree
-            .as_ref()
-            .filter(|worktree| !worktree.is_linked_worktree)
-            .map(|worktree| worktree.key.as_str());
-        let group = group_key
-            .map(|key| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .filter(|member| {
-                        member
-                            .worktree
-                            .as_ref()
-                            .is_some_and(|worktree| worktree.key == key)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| vec![source]);
+        let group = super::sidebar::workspace_group_members(snapshot, &source_workspace_id);
         let merge_group = group.len() > 1;
         let tab_count = group
             .iter()
@@ -1581,25 +1558,7 @@ impl ClientShellState {
         else {
             return;
         };
-        let group_key = workspace
-            .worktree
-            .as_ref()
-            .filter(|worktree| !worktree.is_linked_worktree)
-            .map(|worktree| worktree.key.as_str());
-        let group = group_key
-            .map(|key| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .filter(|member| {
-                        member
-                            .worktree
-                            .as_ref()
-                            .is_some_and(|worktree| worktree.key == key)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| vec![workspace]);
+        let group = super::sidebar::workspace_group_members(snapshot, &workspace_id);
         let closes_group = group.len() > 1;
         let pane_count = group
             .iter()

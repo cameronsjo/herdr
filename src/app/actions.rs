@@ -972,23 +972,39 @@ impl AppState {
         self.apply_pane_zoom(ws_idx, pane_id, PaneZoomCommand::Toggle);
     }
 
+    /// The workspaces a group close or group merge takes with `ws_idx`: the
+    /// workspace itself plus every LINKED worktree on the same repo key.
+    ///
+    /// Another non-linked workspace on that key is a second space opened on the
+    /// same checkout, not a worktree of it. Including it would close or merge an
+    /// independent space the user never named, so membership is linked-only.
     pub(crate) fn workspace_close_indices(&self, ws_idx: usize) -> Vec<usize> {
         self.workspaces
             .get(ws_idx)
             .and_then(|ws| ws.worktree_space())
             .filter(|space| !space.is_linked_worktree)
+            .filter(|space| {
+                // Only the FIRST non-linked workspace on a repo key owns the
+                // group. A later one is a second space on the same checkout and
+                // owns nothing, so closing it never reaches the worktrees.
+                self.workspaces.iter().position(|ws| {
+                    ws.worktree_space()
+                        .is_some_and(|member| member.key == space.key && !member.is_linked_worktree)
+                }) == Some(ws_idx)
+            })
             .map(|space| {
                 self.workspaces
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, ws)| {
-                        ws.worktree_space()
-                            .is_some_and(|member| member.key == space.key)
-                            .then_some(idx)
+                        (idx == ws_idx
+                            || ws.worktree_space().is_some_and(|member| {
+                                member.key == space.key && member.is_linked_worktree
+                            }))
+                        .then_some(idx)
                     })
                     .collect::<Vec<_>>()
             })
-            .filter(|indices| indices.len() >= 2)
             .unwrap_or_else(|| vec![ws_idx])
     }
 
@@ -4146,6 +4162,20 @@ mod tests {
         assert_eq!(state.workspaces[0].display_name(), "selected");
         assert!(!state.terminals.contains_key(&active_terminal_id));
         state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn group_close_skips_a_second_space_on_the_same_checkout() {
+        let mut state = app_with_workspaces(&["parent", "child", "duplicate"]);
+        mark_parent_worktree(&mut state, 0);
+        mark_linked_worktree(&mut state, 1);
+        // A second space opened on the parent's own checkout, sharing its repo
+        // key. It is not a worktree of the repo and is nobody's group member.
+        mark_parent_worktree(&mut state, 2);
+
+        assert_eq!(state.workspace_close_indices(0), vec![0, 1]);
+        assert_eq!(state.workspace_close_indices(2), vec![2]);
+        assert!(!state.workspace_close_would_close_worktree_group(2));
     }
 
     #[test]

@@ -230,6 +230,15 @@ fn workspace_command() -> Command {
                 .arg(flag("focus"))
                 .arg(flag("no-focus")),
         )
+        .subcommand(
+            Command::new("open")
+                .about("Focus the workspace already on a path, or create one there")
+                .arg(path_option("cwd", "PATH"))
+                .arg(option("label", "TEXT"))
+                .arg(env_option())
+                .arg(flag("focus"))
+                .arg(flag("no-focus")),
+        )
         .subcommand(id_command("get", "workspace_id", "Show a workspace"))
         .subcommand(id_command("focus", "workspace_id", "Focus a workspace"))
         .subcommand(

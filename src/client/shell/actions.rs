@@ -124,18 +124,9 @@ impl ClientShellState {
                     if self.config.prompt_new_workspace_name {
                         self.open_new_workspace_overlay();
                     } else {
-                        self.push_endpoint_method(
-                            crate::api::schema::Method::WorkspaceCreate(
-                                crate::api::schema::WorkspaceCreateParams {
-                                    source_workspace_id: self.workspace_action_id(),
-                                    cwd: None,
-                                    focus: true,
-                                    label: None,
-                                    env: Default::default(),
-                                },
-                            ),
-                            outcome,
-                        );
+                        let method =
+                            self.new_workspace_method(self.workspace_action_id(), None, None);
+                        self.push_endpoint_method(method, outcome);
                     }
                     outcome.repaint = true;
                     return;
@@ -382,6 +373,41 @@ impl ClientShellState {
         ) {
             self.pending_word_selection = None;
         }
+    }
+
+    /// The method behind the new-space action.
+    ///
+    /// Without a typed name, a path that already has a space focuses that space
+    /// instead of opening a second one on it. A typed name is a deliberate
+    /// second space and still creates. A server that does not advertise
+    /// `workspace.open` creates either way, exactly as before.
+    pub(super) fn new_workspace_method(
+        &self,
+        source_workspace_id: Option<String>,
+        cwd: Option<String>,
+        label: Option<String>,
+    ) -> crate::api::schema::Method {
+        if label.is_none() {
+            let open = crate::api::schema::Method::WorkspaceOpen(
+                crate::api::schema::WorkspaceOpenParams {
+                    source_workspace_id: source_workspace_id.clone(),
+                    cwd: cwd.clone(),
+                    focus: true,
+                    label: None,
+                    env: Default::default(),
+                },
+            );
+            if self.supports_endpoint_method(&open) {
+                return open;
+            }
+        }
+        crate::api::schema::Method::WorkspaceCreate(crate::api::schema::WorkspaceCreateParams {
+            source_workspace_id,
+            cwd,
+            focus: true,
+            label,
+            env: Default::default(),
+        })
     }
 
     pub(super) fn push_endpoint_method(

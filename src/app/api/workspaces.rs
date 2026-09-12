@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceMergeParams, WorkspaceMoveBlockParams, WorkspaceMoveParams,
-    WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceOpenParams, WorkspaceRenameParams, WorkspaceReportMetadataParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -37,31 +37,129 @@ impl App {
         )
     }
 
+    /// The cwd a new space would take, from an explicit `cwd` or the `follow`
+    /// policy of a source workspace. `Err` carries an unresolvable source id.
+    fn new_workspace_cwd(
+        &self,
+        source_workspace_id: Option<&str>,
+        cwd: Option<String>,
+    ) -> Result<PathBuf, String> {
+        if let Some(cwd) = cwd {
+            return Ok(PathBuf::from(cwd));
+        }
+        let source_workspace_index = match source_workspace_id {
+            Some(workspace_id) => match self
+                .parse_workspace_id(workspace_id)
+                .filter(|index| self.state.workspaces.get(*index).is_some())
+            {
+                Some(index) => Some(index),
+                None => return Err(workspace_id.to_owned()),
+            },
+            None => self.workspace_creation_source(),
+        };
+        Ok(source_workspace_index.map_or_else(
+            || self.resolve_new_terminal_cwd(None),
+            |index| self.resolved_new_workspace_cwd_from(index),
+        ))
+    }
+
+    /// The space already open on `cwd`, by identity path.
+    ///
+    /// Path equality, not repository membership: a space sitting in a
+    /// subdirectory of the same repo is a different place to work and keeps its
+    /// own space.
+    pub(super) fn workspace_idx_for_identity_cwd(&self, cwd: &Path) -> Option<usize> {
+        let canonical = crate::worktree::canonical_or_original(cwd);
+        self.preferred_workspace_idx(
+            self.state
+                .workspaces
+                .iter()
+                .enumerate()
+                .filter(|(_, ws)| {
+                    ws.resolved_identity_cwd_from(&self.state.terminals, &self.terminal_runtimes)
+                        .as_deref()
+                        .is_some_and(|identity| {
+                            crate::worktree::canonical_or_original(identity) == canonical
+                        })
+                })
+                .map(|(index, _)| index),
+        )
+    }
+
+    /// The space a `workspace.open` would land on when it reuses one, resolved
+    /// before the request runs.
+    ///
+    /// Reuse is a focus, not a creation: it can leave the default target
+    /// unchanged, and a caller that watches only for a changed target would
+    /// then miss it. `None` means the path has no space yet, so the call
+    /// creates and moves the target on its own.
+    pub(crate) fn workspace_open_reuse_idx(&self, params: &WorkspaceOpenParams) -> Option<usize> {
+        let cwd = self
+            .new_workspace_cwd(params.source_workspace_id.as_deref(), params.cwd.clone())
+            .ok()?;
+        self.workspace_idx_for_identity_cwd(&cwd)
+    }
+
+    /// Focuses the space already on the requested path, or creates one there.
+    ///
+    /// This is the "open this path" intent. `workspace.create` keeps creating
+    /// unconditionally, so a client that wants a second space on a path still
+    /// has a way to ask for one.
+    pub(super) fn handle_workspace_open(
+        &mut self,
+        id: String,
+        params: WorkspaceOpenParams,
+    ) -> String {
+        let cwd = match self.new_workspace_cwd(params.source_workspace_id.as_deref(), params.cwd) {
+            Ok(cwd) => cwd,
+            Err(workspace_id) => return workspace_not_found(id, &workspace_id),
+        };
+        if let Some(index) = self.workspace_idx_for_identity_cwd(&cwd) {
+            if params.focus {
+                self.state.switch_workspace(index);
+            }
+            return encode_success(
+                id,
+                ResponseResult::WorkspaceOpened {
+                    workspace: self.workspace_info(index),
+                    already_open: true,
+                },
+            );
+        }
+        let extra_env = match super::env::normalize_launch_env(params.env) {
+            Ok(env) => env,
+            Err((code, message)) => return encode_error(id, &code, message),
+        };
+        match self.create_workspace_with_launch_env(cwd, params.focus, extra_env) {
+            Ok(index) => {
+                if let Some(label) = params.label {
+                    if let Some(workspace) = self.state.workspaces.get_mut(index) {
+                        workspace.set_custom_name(label);
+                        crate::logging::workspace_renamed(&workspace.id);
+                    }
+                }
+                self.emit_workspace_open_events(index);
+                encode_success(
+                    id,
+                    ResponseResult::WorkspaceOpened {
+                        workspace: self.workspace_info(index),
+                        already_open: false,
+                    },
+                )
+            }
+            Err(err) => encode_error(id, "workspace_create_failed", err.to_string()),
+        }
+    }
+
     pub(super) fn handle_workspace_create(
         &mut self,
         id: String,
         params: WorkspaceCreateParams,
     ) -> String {
-        let source_workspace_index = if params.cwd.is_some() {
-            None
-        } else {
-            match params.source_workspace_id.as_deref() {
-                Some(workspace_id) => match self
-                    .parse_workspace_id(workspace_id)
-                    .filter(|index| self.state.workspaces.get(*index).is_some())
-                {
-                    Some(index) => Some(index),
-                    None => return workspace_not_found(id, workspace_id),
-                },
-                None => self.workspace_creation_source(),
-            }
+        let cwd = match self.new_workspace_cwd(params.source_workspace_id.as_deref(), params.cwd) {
+            Ok(cwd) => cwd,
+            Err(workspace_id) => return workspace_not_found(id, &workspace_id),
         };
-        let cwd = params.cwd.map(PathBuf::from).unwrap_or_else(|| {
-            source_workspace_index.map_or_else(
-                || self.resolve_new_terminal_cwd(None),
-                |index| self.resolved_new_workspace_cwd_from(index),
-            )
-        });
         let extra_env = match super::env::normalize_launch_env(params.env) {
             Ok(env) => env,
             Err((code, message)) => return encode_error(id, &code, message),
@@ -724,6 +822,114 @@ mod tests {
         let _ = std::fs::remove_dir_all(&focused_cwd);
     }
 
+    /// The whole point of the method: a path that already has a space gets that
+    /// space, not a second one on top of it.
+    #[tokio::test]
+    async fn workspace_open_focuses_the_space_already_on_the_path() {
+        use super::super::test_support::{exiting_test_command, shutdown_test_runtimes};
+        use crate::config::ShellModeConfig;
+
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.default_shell = exiting_test_command().into();
+        app.state.shell_mode = ShellModeConfig::NonLogin;
+        app.state.workspaces = vec![Workspace::test_new("first"), Workspace::test_new("project")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        shutdown_test_runtimes(&mut app);
+
+        let project_cwd =
+            std::env::temp_dir().join(format!("herdr-ws-open-{}", std::process::id()));
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        let pane_id = app.state.workspaces[1].focused_pane_id().unwrap();
+        let terminal_id = app.state.workspaces[1]
+            .terminal_id(pane_id)
+            .cloned()
+            .unwrap();
+        app.state.terminals.get_mut(&terminal_id).unwrap().cwd = project_cwd.clone();
+        let project_workspace_id = app.public_workspace_id(1);
+
+        let response = app.handle_workspace_open(
+            "req".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(project_cwd.display().to_string()),
+                focus: true,
+                label: Some("ignored".into()),
+                env: Default::default(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceOpened {
+            workspace,
+            already_open,
+        } = success.result
+        else {
+            panic!("expected a workspace open result");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, project_workspace_id);
+        assert_eq!(app.state.workspaces.len(), 2, "no duplicate space");
+        assert_eq!(app.state.active, Some(1), "the existing space is focused");
+        assert_eq!(
+            app.state.workspaces[1].custom_name.as_deref(),
+            Some("project"),
+            "reuse never renames the space the user already has"
+        );
+
+        // An unopened path still creates, and `workspace.create` keeps creating
+        // on a path that already has a space.
+        let other_cwd = project_cwd.join("nested");
+        std::fs::create_dir_all(&other_cwd).unwrap();
+        let created = app.handle_workspace_open(
+            "req-2".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(other_cwd.display().to_string()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&created).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceOpened {
+                already_open: false,
+                ..
+            }
+        ));
+        assert_eq!(app.state.workspaces.len(), 3);
+
+        let duplicate = app.handle_workspace_create(
+            "req-3".into(),
+            WorkspaceCreateParams {
+                source_workspace_id: None,
+                cwd: Some(project_cwd.display().to_string()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&duplicate).unwrap();
+        assert!(matches!(
+            success.result,
+            ResponseResult::WorkspaceCreated { .. }
+        ));
+        assert_eq!(app.state.workspaces.len(), 4);
+
+        shutdown_test_runtimes(&mut app);
+        let _ = std::fs::remove_dir_all(&project_cwd);
+    }
+
     #[tokio::test]
     async fn workspace_create_uses_explicit_source_workspace() {
         use super::super::test_support::{exiting_test_command, shutdown_test_runtimes};
@@ -847,6 +1053,88 @@ mod tests {
         app.state.selected = 1;
         app.state.mode = crate::app::Mode::Terminal;
         app
+    }
+
+    // `workspace.open` must resolve its reuse target through
+    // `preferred_workspace_idx` deterministically when more than one existing,
+    // non-linked space already sits on the same identity path: the focused
+    // space wins over an earlier one, and the lowest index wins when neither
+    // is focused.
+    #[test]
+    fn workspace_open_reuse_prefers_focused_space_over_lowest_index() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let shared_cwd = std::env::temp_dir().join(format!(
+            "herdr-ws-open-reuse-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&shared_cwd).unwrap();
+
+        let mut first = Workspace::test_new("first");
+        first.identity_cwd = shared_cwd.clone();
+        let mut second = Workspace::test_new("second");
+        second.identity_cwd = shared_cwd.clone();
+        app.state.workspaces = vec![first, second];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+
+        // Neither existing space is focused: the lowest index wins.
+        let response = app.handle_workspace_open(
+            "req-lowest".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(shared_cwd.to_string_lossy().into_owned()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceOpened {
+            workspace,
+            already_open,
+        } = success.result
+        else {
+            panic!("expected workspace_opened response");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, app.state.workspaces[0].id);
+
+        // Focusing the second space makes it the preferred reuse target,
+        // ahead of the lower-index first space.
+        app.state.active = Some(1);
+        let response = app.handle_workspace_open(
+            "req-focused".into(),
+            WorkspaceOpenParams {
+                source_workspace_id: None,
+                cwd: Some(shared_cwd.to_string_lossy().into_owned()),
+                focus: false,
+                label: None,
+                env: Default::default(),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::WorkspaceOpened {
+            workspace,
+            already_open,
+        } = success.result
+        else {
+            panic!("expected workspace_opened response");
+        };
+        assert!(already_open);
+        assert_eq!(workspace.workspace_id, app.state.workspaces[1].id);
+
+        let _ = std::fs::remove_dir_all(&shared_cwd);
     }
 
     #[test]

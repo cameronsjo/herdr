@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::api::schema::{
-    Method, WorkspaceCreateParams, WorkspaceMoveParams, WorkspaceRenameParams,
+    Method, WorkspaceCreateParams, WorkspaceMoveParams, WorkspaceOpenParams, WorkspaceRenameParams,
     WorkspaceReportMetadataParams,
 };
 
@@ -14,6 +14,7 @@ pub(super) fn run_workspace_command(args: &[String]) -> std::io::Result<i32> {
     match subcommand {
         "list" => workspace_list(&args[1..]),
         "create" => workspace_create(&args[1..]),
+        "open" => workspace_open(&args[1..]),
         "get" => workspace_get(&args[1..]),
         "focus" => workspace_focus(&args[1..]),
         "rename" => workspace_rename(&args[1..]),
@@ -41,7 +42,16 @@ fn workspace_list(args: &[String]) -> std::io::Result<i32> {
     super::runtime::workspace_list()
 }
 
-fn workspace_create(args: &[String]) -> std::io::Result<i32> {
+/// Shared by `workspace create` and `workspace open`: they take the same
+/// options and differ only in what the server does with an already-open path.
+struct NewWorkspaceArgs {
+    cwd: Option<String>,
+    focus: bool,
+    label: Option<String>,
+    env: HashMap<String, String>,
+}
+
+fn parse_new_workspace_args(args: &[String]) -> Result<NewWorkspaceArgs, i32> {
     let mut cwd = None;
     let mut focus = false;
     let mut label = None;
@@ -53,7 +63,7 @@ fn workspace_create(args: &[String]) -> std::io::Result<i32> {
             "--cwd" => {
                 let Some(value) = args.get(index + 1) else {
                     eprintln!("missing value for --cwd");
-                    return Ok(2);
+                    return Err(2);
                 };
                 cwd = Some(value.clone());
                 index += 2;
@@ -61,7 +71,7 @@ fn workspace_create(args: &[String]) -> std::io::Result<i32> {
             "--label" => {
                 let Some(value) = args.get(index + 1) else {
                     eprintln!("missing value for --label");
-                    return Ok(2);
+                    return Err(2);
                 };
                 label = Some(value.clone());
                 index += 2;
@@ -77,13 +87,13 @@ fn workspace_create(args: &[String]) -> std::io::Result<i32> {
             "--env" => {
                 let Some(value) = args.get(index + 1) else {
                     eprintln!("missing value for --env");
-                    return Ok(2);
+                    return Err(2);
                 };
                 let (key, value) = match super::parse_env_assignment(value) {
                     Ok(pair) => pair,
                     Err(err) => {
                         eprintln!("{err}");
-                        return Ok(2);
+                        return Err(2);
                     }
                 };
                 env.insert(key, value);
@@ -91,17 +101,46 @@ fn workspace_create(args: &[String]) -> std::io::Result<i32> {
             }
             other => {
                 eprintln!("unknown option: {other}");
-                return Ok(2);
+                return Err(2);
             }
         }
     }
 
-    super::runtime::workspace_create(WorkspaceCreateParams {
-        source_workspace_id: None,
+    Ok(NewWorkspaceArgs {
         cwd,
         focus,
         label,
         env,
+    })
+}
+
+fn workspace_create(args: &[String]) -> std::io::Result<i32> {
+    let parsed = match parse_new_workspace_args(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
+
+    super::runtime::workspace_create(WorkspaceCreateParams {
+        source_workspace_id: None,
+        cwd: parsed.cwd,
+        focus: parsed.focus,
+        label: parsed.label,
+        env: parsed.env,
+    })
+}
+
+fn workspace_open(args: &[String]) -> std::io::Result<i32> {
+    let parsed = match parse_new_workspace_args(args) {
+        Ok(parsed) => parsed,
+        Err(code) => return Ok(code),
+    };
+
+    super::runtime::workspace_open(WorkspaceOpenParams {
+        source_workspace_id: None,
+        cwd: parsed.cwd,
+        focus: parsed.focus,
+        label: parsed.label,
+        env: parsed.env,
     })
 }
 
@@ -318,6 +357,7 @@ fn print_workspace_help() {
     eprintln!("herdr workspace commands:");
     eprintln!("  herdr workspace list");
     eprintln!("  herdr workspace create [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]");
+    eprintln!("  herdr workspace open [--cwd PATH] [--label TEXT] [--env KEY=VALUE] [--focus] [--no-focus]");
     eprintln!("  herdr workspace get <workspace_id>");
     eprintln!("  herdr workspace focus <workspace_id>");
     eprintln!("  herdr workspace rename <workspace_id> <label>");

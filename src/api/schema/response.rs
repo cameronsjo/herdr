@@ -59,6 +59,10 @@ pub enum ResponseResult {
         tab: TabInfo,
         root_pane: PaneInfo,
     },
+    WorkspaceOpened {
+        workspace: WorkspaceInfo,
+        already_open: bool,
+    },
     WorkspaceList {
         workspaces: Vec<WorkspaceInfo>,
     },

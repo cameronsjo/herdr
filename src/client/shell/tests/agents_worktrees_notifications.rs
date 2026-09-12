@@ -89,6 +89,60 @@ fn collapsed_workspace_jitter_remains_a_click() {
     ));
 }
 
+/// Two spaces on one checkout share a repo key but are not a worktree group.
+/// Folding the second one under the first hides it whenever the group is
+/// collapsed, and a space with no row has no hit rect to drop a tab or pane on.
+#[test]
+fn a_second_space_on_one_checkout_keeps_its_own_row() {
+    let mut snapshot = snapshot();
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut duplicate = snapshot.workspaces[0].clone();
+    duplicate.workspace_id = "ws_2".into();
+    duplicate.active_tab_id = "tab_ws2".into();
+    duplicate.number = 2;
+    duplicate.focused = false;
+    snapshot.workspaces.push(duplicate);
+    let mut linked = snapshot.workspaces[0].clone();
+    linked.workspace_id = "ws_3".into();
+    linked.active_tab_id = "tab_ws3".into();
+    linked.number = 3;
+    linked.focused = false;
+    linked.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    snapshot.workspaces.push(linked);
+
+    let expanded = crate::client::shell::sidebar::workspace_entries(
+        &snapshot,
+        &std::collections::HashSet::new(),
+    );
+    assert_eq!(
+        expanded
+            .iter()
+            .map(|entry| (entry.index, entry.indented))
+            .collect::<Vec<_>>(),
+        vec![(0, false), (2, true), (1, false)],
+        "the linked worktree indents under its parent; the duplicate does not"
+    );
+
+    let collapsed_groups = std::collections::HashSet::from(["repo".to_owned()]);
+    let collapsed = crate::client::shell::sidebar::workspace_entries(&snapshot, &collapsed_groups);
+    assert_eq!(
+        collapsed
+            .iter()
+            .map(|entry| (entry.index, entry.indented))
+            .collect::<Vec<_>>(),
+        vec![(0, false), (1, false)],
+        "collapsing the group hides the worktree, never the second space"
+    );
+}
+
 #[test]
 fn grouped_worktrees_render_parent_branch_and_indented_child() {
     let config = ClientShellConfig::from_config(&Config::default());
@@ -914,16 +968,44 @@ fn named_workspace_overlay_targets_projected_source_workspace() {
             ..
         })) if value == "repo" && source_workspace_id.as_deref() == Some("ws_1")
     ));
+    // Accepting the suggested name is not a request for a second space on the
+    // path, so it opens the path rather than creating unconditionally.
     let create = state.handle_input_bytes(b"\r");
     let [ClientShellAction::Endpoint { request, .. }] = &create.actions[..] else {
         panic!("named workspace should use endpoint API");
     };
     assert!(matches!(
         &request.method,
-        crate::api::schema::Method::WorkspaceCreate(params)
+        crate::api::schema::Method::WorkspaceOpen(params)
             if params.source_workspace_id.as_deref() == Some("ws_1")
                 && params.cwd.as_deref() == Some("/repo")
                 && params.label.is_none()
+    ));
+}
+
+/// Typing a name is a deliberate second space, so it still creates one.
+#[test]
+fn a_typed_workspace_name_still_creates_a_second_space() {
+    let mut config = Config::default();
+    config.ui.prompt_new_workspace_name = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut open = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorkspace),
+        &mut open,
+    );
+
+    // The overlay pre-fills the suggested name and replaces it on the first
+    // keystroke, so this leaves a name that differs from the suggestion.
+    let create = state.handle_input_bytes(b"review\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &create.actions[..] else {
+        panic!("named workspace should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorkspaceCreate(params)
+            if params.label.as_deref() == Some("review")
     ));
 }
 

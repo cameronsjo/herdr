@@ -243,6 +243,7 @@ impl HeadlessServer {
                     | Method::TabCreate(_)
                     | Method::WorkspaceClose(_)
                     | Method::WorkspaceCreate(_)
+                    | Method::WorkspaceOpen(_)
                     | Method::WorktreeCreate(_)
                     | Method::WorktreeOpen(_)
                     | Method::WorktreeRemove(_)
@@ -283,6 +284,7 @@ impl HeadlessServer {
                     | Method::TabRename(_)
                     | Method::WorkspaceClose(_)
                     | Method::WorkspaceCreate(_)
+                    | Method::WorkspaceOpen(_)
                     | Method::WorkspaceFocus(_)
                     | Method::WorkspaceMove(_)
                     | Method::WorkspaceMoveBlock(_)
@@ -319,6 +321,7 @@ impl HeadlessServer {
                     | Method::TabFocus(_)
                     | Method::WorkspaceClose(_)
                     | Method::WorkspaceCreate(_)
+                    | Method::WorkspaceOpen(_)
                     | Method::WorkspaceFocus(_)
                     | Method::WorktreeCreate(_)
                     | Method::WorktreeOpen(_)
@@ -855,10 +858,24 @@ impl HeadlessServer {
                         tab_index: workspace.find_tab_index_for_pane(pane_id)?,
                     })
                 }),
+            // A reuse is a focus of a space that may already be the default
+            // target, so it cannot rely on the target changing the way a
+            // creation does.
+            api::schema::Method::WorkspaceOpen(params) if params.focus => self
+                .app
+                .workspace_open_reuse_idx(params)
+                .and_then(|workspace_index| {
+                    let workspace = self.app.state.workspaces.get(workspace_index)?;
+                    Some(crate::ui::TabSurfaceTarget {
+                        workspace_index,
+                        tab_index: workspace.active_tab_index(),
+                    })
+                }),
             _ => None,
         };
         let create_focus_requested = match &msg.request.method {
             api::schema::Method::WorkspaceCreate(params) => params.focus,
+            api::schema::Method::WorkspaceOpen(params) => params.focus,
             api::schema::Method::TabCreate(params) => params.focus,
             _ => false,
         };
