@@ -27,7 +27,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ### fix(api): bound the positional workspace id fallback to the live list
 
-- **PR:** pending
+- **PR:** [cameronsjo/herdr#81](https://github.com/cameronsjo/herdr/pull/81)
 - **Files:** `src/app/ids.rs`, `src/app/api/workspaces.rs`, `src/app/api/tabs.rs`, `src/app/api/panes.rs`
 - **Replaces:** Upstream's `parse_workspace_id` accepts `w_N` and a bare `N` as a documented positional convenience (the Nth workspace in display order) but returns the parsed index without checking it against the live workspace list, so `"999999"` resolves to `Some(999998)`. Three call sites re-check `< len` by hand; the ones that do not index `self.state.workspaces` directly through `public_workspace_id`, so one socket request panics the whole server — reachable through `pane.move` with `destination.type = "new_tab"` (the hand-rolled guard further down that arm is dead code, the panic fires first) and through `Method::WorkspaceFocus` in the headless client-view path, which has no guard at all. The fork adds one `.filter(|index| *index < len)` to the parser, so every caller gets `None` for an out-of-range positional id and maps it to the `workspace_not_found` error it already returns for an unknown id. The positional convenience itself is unchanged and still documented. The three hand-rolled `< len` guards are kept deliberately as defense in depth at their indexing calls; only their now-false comments are corrected.
 - **Regression check:** `cargo nextest run --locked -E 'test(positional_workspace_id) + test(api_pane_move_to_new_tab_rejects)'`.
