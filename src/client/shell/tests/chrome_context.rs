@@ -156,7 +156,7 @@ fn client_owned_sidebar_dividers_resize_live() {
 }
 
 #[test]
-fn context_menus_capture_stable_targets_and_route_actions() {
+fn context_menus_route_actions_to_live_targets() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
@@ -236,6 +236,153 @@ fn context_menus_capture_stable_targets_and_route_actions() {
             if params.target_pane_id.as_deref() == Some("pane_1")
                 && params.direction == crate::api::schema::SplitDirection::Right
     ));
+}
+
+#[test]
+fn context_menu_target_follows_a_moved_tab() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.prompt_new_tab_name = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+
+    let tab = state.hits.tabs[0].0;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: tab.x + 1,
+        row: tab.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Tab { ref tab_id, .. },
+            ..
+        })) if tab_id == "tab_1"
+    ));
+
+    let mut moved = snapshot();
+    moved.revision = 2;
+    moved.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(),
+        ..moved.workspaces[0].clone()
+    });
+    moved.tabs[0].workspace_id = "ws_2".into();
+    state.set_snapshot(Box::new(moved));
+    let mut moved_surface = surface();
+    moved_surface.projection_revision = 2;
+    state.set_pane_surface(moved_surface);
+    state.compose(106, 20).expect("reconciled frame");
+
+    let target_workspace_id = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Tab { workspace_id, .. },
+            ..
+        })) => workspace_id.clone(),
+        _ => panic!("tab context menu should survive the moved tab"),
+    };
+    assert_eq!(target_workspace_id, "ws_2");
+
+    let new_tab_index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::NewTab)
+            .expect("new tab item"),
+        _ => panic!("tab context menu"),
+    };
+    let row = state.hits.context_menu_rows[new_tab_index].0;
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x + 1,
+            row: row.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(outcome.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::TabCreate(params)
+                    if params.workspace_id.as_deref() == Some("ws_2")
+            )
+    )));
+}
+
+#[test]
+fn context_menu_closes_when_its_target_disappears() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: pane.x + 1,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Pane { .. },
+            ..
+        }))
+    ));
+
+    let mut removed = snapshot();
+    removed.revision = 2;
+    removed.panes.clear();
+    removed.focused_pane_id = None;
+    state.set_snapshot(Box::new(removed));
+
+    assert!(state.overlay.is_none());
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: pane.x + 1,
+            row: pane.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(outcome.actions.iter().all(|action| !matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::PaneClose(_))
+    )));
+}
+
+#[test]
+fn context_menu_closes_when_its_item_list_changes() {
+    let mut initial = snapshot();
+    initial.panes[0].label = None;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(initial));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: pane.x + 1,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Pane { .. },
+            ..
+        }))
+    ));
+
+    let mut labeled = snapshot();
+    labeled.revision = 2;
+    labeled.panes[0].label = Some("x".into());
+    state.set_snapshot(Box::new(labeled));
+
+    assert!(state.overlay.is_none());
 }
 
 #[test]
