@@ -394,34 +394,95 @@ impl App {
             .map(|workspace| workspace.id.clone());
         let target_workspace_key = self.state.workspaces[target_index].id.clone();
 
-        let mut moved_tabs = Vec::new();
-        for source_index in merge_indices.iter().copied() {
-            let source_workspace_id = self.public_workspace_id(source_index);
-            let tab_count = self.state.workspaces[source_index].tabs.len();
-            let previous_tab_ids = (0..tab_count)
-                .map(|tab_idx| {
-                    self.public_tab_id(source_index, tab_idx)
-                        .unwrap_or_else(|| {
-                            crate::workspace::public_tab_id_for_number(
-                                &self.state.workspaces[source_index].id,
-                                tab_idx + 1,
-                            )
-                        })
-                })
-                .collect::<Vec<_>>();
-            // Snapshot before the take: it unregisters these panes from the
-            // source's per-workspace public id space.
-            let previous_pane_ids = (0..tab_count)
-                .flat_map(|tab_idx| self.public_pane_ids_in_tab(source_index, tab_idx))
-                .collect::<Vec<_>>();
+        // Phase 1: snapshot everything about each source before anything is
+        // removed or drained. `previous_pane_ids` must be captured before the
+        // drain, because once a source is gone from `AppState::workspaces` its
+        // per-workspace public id space can no longer be resolved by index —
+        // `public_pane_ids_in_tab`/`public_tab_id` both take a live index.
+        struct MergeSourceSnapshot {
+            source_workspace_id: String,
+            previous_tab_ids: Vec<String>,
+            previous_pane_ids: Vec<(String, crate::layout::PaneId)>,
+        }
+        let source_snapshots = merge_indices
+            .iter()
+            .copied()
+            .map(|source_index| {
+                let source_workspace_id = self.public_workspace_id(source_index);
+                let tab_count = self.state.workspaces[source_index].tabs.len();
+                let previous_tab_ids = (0..tab_count)
+                    .map(|tab_idx| {
+                        self.public_tab_id(source_index, tab_idx)
+                            .unwrap_or_else(|| {
+                                crate::workspace::public_tab_id_for_number(
+                                    &self.state.workspaces[source_index].id,
+                                    tab_idx + 1,
+                                )
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                let previous_pane_ids = (0..tab_count)
+                    .flat_map(|tab_idx| self.public_pane_ids_in_tab(source_index, tab_idx))
+                    .collect::<Vec<_>>();
+                MergeSourceSnapshot {
+                    source_workspace_id,
+                    previous_tab_ids,
+                    previous_pane_ids,
+                }
+            })
+            .collect::<Vec<_>>();
 
-            let taken = self.state.workspaces[source_index].take_all_tabs_for_move();
-            self.alias_moved_pane_ids(previous_pane_ids);
-            for (tab, previous_tab_id) in taken.into_iter().zip(previous_tab_ids) {
+        // Phase 2: remove every source from `AppState::workspaces` before
+        // draining it, so `into_all_tabs_for_move` never runs against a
+        // workspace still reachable through the index — draining leaves no
+        // active tab, and `Workspace` derefs through its active tab.
+        // `merge_indices` is ascending (`workspace_close_indices` builds it with
+        // `.iter().enumerate()`), so removing in reverse keeps the lower
+        // indices valid. Pairing each removed workspace with its snapshot
+        // during the same reverse walk (rather than reversing two separately
+        // built lists back into alignment) makes the pairing structural
+        // instead of an implicit ordering invariant between two Vecs.
+        let mut drained = Vec::with_capacity(merge_indices.len());
+        for (index, snapshot) in merge_indices
+            .iter()
+            .rev()
+            .zip(source_snapshots.into_iter().rev())
+        {
+            let workspace = self.state.workspaces.remove(*index);
+            crate::logging::workspace_closed(&workspace.id);
+            drained.push((workspace, snapshot));
+        }
+        drained.reverse(); // back to merge order, so tabs land in their original order
+
+        // The source workspace ids, captured now: once the drain loop below
+        // consumes each `Workspace` into `into_all_tabs_for_move`, its id is
+        // gone. `previous_pane_focus`/toast/notification repointing below
+        // needs the full set up front.
+        let merged_workspace_keys = drained
+            .iter()
+            .map(|(workspace, _)| workspace.id.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        let target_index = self
+            .state
+            .workspaces
+            .iter()
+            .position(|workspace| workspace.id == target_workspace_key)
+            .unwrap_or(0);
+
+        let mut moved_tabs = Vec::new();
+        for (workspace, snapshot) in drained {
+            let taken = workspace.into_all_tabs_for_move();
+            self.alias_moved_pane_ids(snapshot.previous_pane_ids);
+            for (tab, previous_tab_id) in taken.into_iter().zip(snapshot.previous_tab_ids) {
                 let insert_index = self.state.workspaces[target_index].tabs.len();
                 let target_tab_idx =
                     self.state.workspaces[target_index].insert_moved_tab(tab, insert_index);
-                moved_tabs.push((previous_tab_id, source_workspace_id.clone(), target_tab_idx));
+                moved_tabs.push((
+                    previous_tab_id,
+                    snapshot.source_workspace_id.clone(),
+                    target_tab_idx,
+                ));
             }
         }
 
@@ -430,11 +491,6 @@ impl App {
         // notification. Their panes are alive in the target now, so leaving the
         // source id in place would dangle each one at a workspace about to stop
         // existing — `assert_invariants_for_test` catches exactly that.
-        let merged_workspace_keys = merge_indices
-            .iter()
-            .filter_map(|index| self.state.workspaces.get(*index))
-            .map(|workspace| workspace.id.clone())
-            .collect::<std::collections::HashSet<_>>();
         if let Some(focus) = self.state.previous_pane_focus.as_mut() {
             if merged_workspace_keys.contains(&focus.workspace_id) {
                 focus.workspace_id = target_workspace_key.clone();
@@ -457,18 +513,6 @@ impl App {
         }
 
         self.state.mark_session_dirty();
-        for index in merge_indices.iter().rev() {
-            if let Some(workspace) = self.state.workspaces.get(*index) {
-                crate::logging::workspace_closed(&workspace.id);
-            }
-            self.state.workspaces.remove(*index);
-        }
-        let target_index = self
-            .state
-            .workspaces
-            .iter()
-            .position(|workspace| workspace.id == target_workspace_key)
-            .unwrap_or(0);
         self.state.selected = selected_workspace_id
             .and_then(|id| {
                 self.state

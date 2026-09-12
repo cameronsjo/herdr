@@ -31,6 +31,16 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/platform/unix_common.rs`
 - **Replaces:** The issue's premise — a pty write losing its reader — was wrong. `begin_cli_output()` flips SIGPIPE to `SIG_DFL` so a piped `herdr --help | head` dies quietly on purpose; correct for the shipped CLI. `cargo test --bin herdr` runs every test in one process, so once a test that prints and then drops a reading peer calls it, SIGPIPE stays fatal for every later write-to-closed-pipe in the same run, and the suite exits 141 partway through. Which test dies moves between runs because the process-wide disposition, not any one test, is what changed. `cargo nextest run` hides this because it isolates each test in its own process. Restoring the disposition inside just the one offending test was rejected: it silently re-breaks the next time any test exercises a CLI print path. The fix gates `begin_cli_output`/`end_cli_output`'s bodies on `#[cfg(not(test))]` so the test harness never touches the process-wide disposition.
 - **Regression check:** `cargo test --bin herdr > log 2>&1; echo $?` — prints a `test result:` line and no longer exits 141.
+||||||| bdbbdc9a
+
+## Cold restore keeps the agent name as a label ([#35](https://github.com/cameronsjo/herdr/issues/35))
+
+### fix: keep a cold-restored agent name as a label and log the dropped routing key
+
+- **PR:** [cameronsjo/herdr#76](https://github.com/cameronsjo/herdr/pull/76)
+- **Files:** `src/persist/restore.rs`
+- **Replaces:** Upstream drops a stored agent name silently when a pane restores through a fresh shell with no agent, which is the normal path under `resume_agents_on_restore = false`. Dropping the name is correct — `AppState::resolve_agent_target` matches on it with no liveness check, so a restored name would route `agent prompt` into an interactive shell — but a pane named only through `agent.start` comes back with no name and no label, because `agent.start` and `agent.rename` never set a manual label. The fork logs the dropped name at debug and carries it into the manual label when the pane came back with no label of its own.
+- **Regression check:** `cargo nextest run --locked -E 'test(cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label) + test(cold_restore_carries_the_agent_name_over_a_blank_stored_label)'`.
 ||||||| d28a9a60
 
 ## Split server_not_running into three states

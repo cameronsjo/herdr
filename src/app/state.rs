@@ -997,6 +997,38 @@ impl AppState {
         }
         ws.active_tab().map(|tab| tab.layout.focused()) == Some(pane_id)
     }
+
+    /// Repoints the three records that pair a pane id with a workspace id at the
+    /// workspace whose panes just arrived. A record naming a pane that now lives in
+    /// `target_ws_idx` must name that workspace, or `assert_invariants_for_test`
+    /// finds it dangling at the workspace the pane left.
+    pub(crate) fn repoint_pane_records_to_workspace(&mut self, target_ws_idx: usize) {
+        let Some(target) = self.workspaces.get(target_ws_idx) else {
+            return;
+        };
+        let target_key = target.id.clone();
+        let arrived: std::collections::HashSet<PaneId> = target
+            .tabs
+            .iter()
+            .flat_map(|tab| tab.panes.keys().copied())
+            .collect();
+
+        if let Some(focus) = self.previous_pane_focus.as_mut() {
+            if arrived.contains(&focus.pane_id) {
+                focus.workspace_id = target_key.clone();
+            }
+        }
+        if let Some(target_record) = self.toast.as_mut().and_then(|toast| toast.target.as_mut()) {
+            if arrived.contains(&target_record.pane_id) {
+                target_record.workspace_id = target_key.clone();
+            }
+        }
+        for notification in self.pending_agent_notifications.values_mut() {
+            if arrived.contains(&notification.pane_id) {
+                notification.workspace_id = target_key.clone();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
