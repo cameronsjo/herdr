@@ -27,7 +27,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ### fix(tests): publish plugin capture files by atomic rename
 
-- **PR:** [cameronsjo/herdr#TBD](https://github.com/cameronsjo/herdr/pull/TBD)
+- **PR:** [cameronsjo/herdr#68](https://github.com/cameronsjo/herdr/pull/68)
 - **Files:** `src/app/api/plugins/mod.rs`
 - **Replaces:** Every test capture in this file redirected a shell `printf` straight into its destination file (`> {capture}`), so a reader could observe the file between the shell's truncating `>` open and the command's writes landing — a partial-read race, not a config-dir race. `plugin_pane_open_injects_plugin_paths_and_protects_overrides` was the one that hit it (~1.5% flake rate; a probe of 300 runs of the old shape read a partial line 20 times). Every capture writer now redirects to a sibling `.tmp` path and renames it into place, matching the pattern the Windows sibling test already used, so `read_capture_when_ready`'s first non-empty read is always a complete one. Also serializes two of these tests against `non_cli_plugin_consumers_refresh_global_enabled_state`'s `XDG_CONFIG_HOME` mutation via the existing `test_config_env_lock`, a real (if unrelated) race under plain `cargo test`.
 - **Regression check:** `python3` probe comparing the old and new writer shape 300 times each (old: 20/300 partial reads; new: 0/300) — see the plan for the script. Also `just test-one 'app::api::plugins::tests::'`.
