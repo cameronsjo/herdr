@@ -3423,6 +3423,9 @@ mod tests {
         app.state.workspaces.push(Workspace::test_new("other"));
         let source = app.state.workspaces[0].tabs[0].root_pane;
         seed_terminal_states(&mut app);
+        // The fixture leaves `active` unset; the state invariant check at the
+        // end requires one on a non-empty app.
+        app.state.active = Some(0);
         let source_public = app.public_pane_id(0, source).unwrap();
 
         // `parse_workspace_id` bounds the positional fallback to the live
