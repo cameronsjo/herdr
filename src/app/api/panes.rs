@@ -1269,6 +1269,7 @@ impl App {
         };
 
         self.state.remove_alias_shadowed_by_new_pane(moved_pane_id);
+        self.state.repoint_pane_records_to_workspace(target_ws_idx);
         self.state.mark_session_dirty();
         self.schedule_session_save();
         let Some(pane) = self.pane_info(target_ws_idx, moved_pane_id) else {
@@ -3280,6 +3281,93 @@ mod tests {
             Err(crate::app::terminal_targets::TerminalTargetError::NotFound { .. })
         ));
         assert!(app.resolve_agent_target(&move_result.pane.pane_id).is_ok());
+    }
+
+    /// A record naming a pane by workspace id must follow that pane when it
+    /// moves to an existing tab in another workspace, or it dangles at the
+    /// workspace the pane left (or, here, the workspace that closed behind it).
+    #[test]
+    fn api_pane_move_repoints_pane_records_across_workspaces() {
+        let mut app = app_with_linked_worktree();
+        app.state.workspaces.push(Workspace::test_new("other"));
+        app.state.active = Some(0);
+        let source = app.state.workspaces[0].tabs[0].root_pane;
+        let target = app.state.workspaces[1].tabs[0].root_pane;
+        seed_terminal_states(&mut app);
+        let source_key = app.state.workspaces[0].id.clone();
+        app.state.previous_pane_focus = Some(crate::app::state::PaneFocusTarget {
+            workspace_id: source_key.clone(),
+            pane_id: source,
+        });
+        app.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "waiting".into(),
+            context: String::new(),
+            position: None,
+            target: Some(crate::app::state::ToastTarget {
+                workspace_id: source_key.clone(),
+                pane_id: source,
+            }),
+        });
+        app.state.pending_agent_notifications.insert(
+            source,
+            crate::app::state::PendingAgentNotification {
+                pane_id: source,
+                workspace_id: source_key.clone(),
+                agent_label: "agent".into(),
+                known_agent: None,
+                kind: crate::app::state::ToastKind::NeedsAttention,
+                state: crate::detect::AgentState::Blocked,
+                deadline: std::time::Instant::now(),
+            },
+        );
+
+        let previous_pane_id = app.public_pane_id(0, source).unwrap();
+        let target_tab_id = app.public_tab_id(1, 0).unwrap();
+        let target_pane_id = app.public_pane_id(1, target).unwrap();
+
+        let response = app.handle_pane_move(
+            "req".into(),
+            PaneMoveParams {
+                pane_id: previous_pane_id,
+                destination: PaneMoveDestination::Tab {
+                    tab_id: target_tab_id,
+                    target_pane_id: Some(target_pane_id),
+                    split: SplitDirection::Down,
+                    ratio: None,
+                },
+                focus: false,
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneMove { move_result } = success.result else {
+            panic!("expected pane move response");
+        };
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 1);
+        let target_key = app.state.workspaces[0].id.clone();
+
+        assert_eq!(
+            app.state
+                .previous_pane_focus
+                .as_ref()
+                .map(|focus| focus.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state
+                .toast
+                .as_ref()
+                .and_then(|toast| toast.target.as_ref())
+                .map(|target| target.workspace_id.clone()),
+            Some(target_key.clone())
+        );
+        assert_eq!(
+            app.state.pending_agent_notifications[&source].workspace_id,
+            target_key
+        );
+        app.state.assert_invariants_for_test();
     }
 
     #[test]
