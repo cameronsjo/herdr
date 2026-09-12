@@ -494,11 +494,12 @@ impl ClientShellState {
         }
     }
 
-    /// A workspace reorder from the context menu, one slot toward the front or
-    /// the back. It routes through the drag path's own method builder so a menu
-    /// reorder and a sidebar drag treat a worktree group the same way: the
-    /// whole block moves, and a linked worktree inside a group refuses.
-    fn workspace_reorder_method(
+    /// A workspace reorder one slot toward the front or the back, shared by the
+    /// context menu, the keyboard actions, and the palette chooser. It routes
+    /// through the drag path's own method builder so every reorder treats a
+    /// worktree group the same way: the whole block moves, and a linked worktree
+    /// inside a group refuses.
+    pub(super) fn workspace_reorder_method(
         &self,
         workspace_id: &str,
         forward: bool,

@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Keyboard and palette workspace reorder respects worktree grouping (issue [#48](https://github.com/cameronsjo/herdr/issues/48))
+
+### fix(client): move a worktree group as a block from the keyboard and palette
+
+- **PR:** pending
+- **Files:** `src/client/shell/actions.rs`, `src/client/shell/context_menu.rs`, `src/client/shell/tests/keybindings_settings.rs`
+- **Replaces:** Upstream's keyboard reorder actions (`MoveWorkspacePrevious`/`MoveWorkspaceNext`, which the command palette also dispatches) index the raw `snapshot.workspaces` list and emit a plain `WorkspaceMove`. The sidebar drag path and the workspace context menu both go through `workspace_move_method`, which positions over group roots only, moves a worktree group as one `WorkspaceMoveBlock`, and refuses a linked worktree outright. So the same one-slot reorder behaved three different ways: from the keyboard a group root left its own block behind, and a linked worktree child reordered even though neither of the other two paths would move it. The fork widens `workspace_reorder_method` to `pub(super)` and routes the keyboard arm through it, so the context menu, the keyboard, and the palette share one builder. User-visible removal: keyboard reorder of a linked worktree child is now a no-op, matching drag and the context menu.
+- **Regression check:** `cargo nextest run --locked -E 'test(workspace_reorder)'` — the three grouped cases plus the unchanged plain-list wrapping test.
+
 ## Keep SIGPIPE ignored inside the unit-test harness (issue [#39](https://github.com/cameronsjo/herdr/issues/39))
 
 ### fix(platform): keep sigpipe ignored inside the unit-test harness
@@ -31,7 +40,6 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/platform/unix_common.rs`
 - **Replaces:** The issue's premise — a pty write losing its reader — was wrong. `begin_cli_output()` flips SIGPIPE to `SIG_DFL` so a piped `herdr --help | head` dies quietly on purpose; correct for the shipped CLI. `cargo test --bin herdr` runs every test in one process, so once a test that prints and then drops a reading peer calls it, SIGPIPE stays fatal for every later write-to-closed-pipe in the same run, and the suite exits 141 partway through. Which test dies moves between runs because the process-wide disposition, not any one test, is what changed. `cargo nextest run` hides this because it isolates each test in its own process. Restoring the disposition inside just the one offending test was rejected: it silently re-breaks the next time any test exercises a CLI print path. The fix gates `begin_cli_output`/`end_cli_output`'s bodies on `#[cfg(not(test))]` so the test harness never touches the process-wide disposition.
 - **Regression check:** `cargo test --bin herdr > log 2>&1; echo $?` — prints a `test result:` line and no longer exits 141.
-||||||| bdbbdc9a
 
 ## Cold restore keeps the agent name as a label ([#35](https://github.com/cameronsjo/herdr/issues/35))
 
@@ -41,7 +49,6 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/persist/restore.rs`
 - **Replaces:** Upstream drops a stored agent name silently when a pane restores through a fresh shell with no agent, which is the normal path under `resume_agents_on_restore = false`. Dropping the name is correct — `AppState::resolve_agent_target` matches on it with no liveness check, so a restored name would route `agent prompt` into an interactive shell — but a pane named only through `agent.start` comes back with no name and no label, because `agent.start` and `agent.rename` never set a manual label. The fork logs the dropped name at debug and carries it into the manual label when the pane came back with no label of its own.
 - **Regression check:** `cargo nextest run --locked -E 'test(cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label) + test(cold_restore_carries_the_agent_name_over_a_blank_stored_label)'`.
-||||||| d28a9a60
 
 ## Split server_not_running into three states
 
@@ -51,7 +58,6 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/cli/server_not_running.rs`, `src/cli.rs`, `src/server/autodetect.rs`, `src/api/client.rs`, `src/cli/status.rs`, `tests/cli/sessions.rs`
 - **Replaces:** Upstream reports the single code `server_not_running` for three distinct states: (a) no socket at all, (b) a stale socket file left by a crashed server, and (c) a live api socket that refuses connections while the server itself is still up (its api accept loop died) — for which the existing remedy, running `herdr`, is actively harmful because it deletes the refused socket and starts a second server. The fork adds `server_api_not_accepting` (api socket refuses, but the paired client socket still answers — discriminated via the existing `is_server_listening_at` probe against the derived client socket) and `server_api_not_responding` (the socket accepts but the handshake ping never replies — discriminated with a new bounded `ApiClient::status_with_timeout`, 10s, so a merely-slow server is not misdiagnosed against the server's own 5s `INITIAL_REQUEST_TIMEOUT`). Case (b), stale socket + no live client socket, is unchanged and still reports `server_not_running` with the original `run \`herdr\`` remedy. `herdr status`/`herdr status server` gain a matching `NotAccepting` runtime-status variant (`status: running but not accepting api connections`, `running: false` in JSON so existing scripts stay correct). No wire-protocol impact: the codes are CLI-local strings, never cross the network. On Windows the wedged case still falls back to the pre-existing message, because `is_server_listening_at`'s Windows branch already probes through the api socket itself; the handshake-timeout code path works identically on every platform.
 - **Regression check:** `just test-one dead_server` (3 passed, up from 2), `just test-one classifier_ignores_unrelated_io_kinds`, `just test-one status_with_timeout`, `just test-one server_status`, `just lint`.
-||||||| d28a9a60
 
 ## Fix flaky plugin-path capture tests (issue #38)
 
