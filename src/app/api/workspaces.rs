@@ -427,8 +427,9 @@ impl App {
         id: String,
         params: WorkspaceMergeParams,
     ) -> String {
-        // `parse_workspace_id` falls back to positional parsing without bounds
-        // checking, so a bare numeric id yields an index past the end.
+        // `parse_workspace_id` bounds the positional fallback to the live
+        // workspace list; this check is redundant defense in depth at an
+        // indexing call.
         let Some(source_index) = self
             .parse_workspace_id(&params.source_workspace_id)
             .filter(|index| *index < self.state.workspaces.len())

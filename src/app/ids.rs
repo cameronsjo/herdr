@@ -59,6 +59,11 @@ impl App {
             .position(|workspace| workspace.id == id)
             .or_else(|| id.strip_prefix("w_")?.parse::<usize>().ok()?.checked_sub(1))
             .or_else(|| id.parse::<usize>().ok()?.checked_sub(1))
+            // `w_N` and bare `N` are a documented positional convenience: the Nth
+            // workspace in display order. Bound it here — callers index
+            // `self.state.workspaces` directly, and an out-of-range index panics
+            // the whole server from one socket request.
+            .filter(|index| *index < self.state.workspaces.len())
     }
 
     pub(crate) fn parse_tab_id(&self, id: &str) -> Option<(usize, usize)> {

@@ -200,10 +200,10 @@ impl App {
                 workspace_id,
                 insert_index,
             } => {
-                // `parse_workspace_id` falls back to positional parsing and does
-                // NOT bounds-check, so a bare numeric id yields an index past the
-                // end. Re-check before anything indexes it, matching
-                // `handle_workspace_rename` and `handle_workspace_move`.
+                // `parse_workspace_id` bounds the positional fallback to the live
+                // workspace list; this check is redundant defense in depth before
+                // anything indexes it, matching `handle_workspace_rename` and
+                // `handle_workspace_move`.
                 let target_ws_idx = match self.parse_workspace_id(&workspace_id) {
                     Some(idx) if idx < self.state.workspaces.len() => idx,
                     _ => {
@@ -975,9 +975,9 @@ mod tests {
         seed_two_workspaces(&mut app);
         let tab_id = app.public_tab_id(0, 1).unwrap();
 
-        // `parse_workspace_id` falls back to positional parsing with no bounds
-        // check, so a bare numeric id resolves to an index far past the end.
-        // Unchecked, this indexed a Vec and panicked the whole server from one
+        // `parse_workspace_id` bounds the positional fallback to the live
+        // workspace list, so a bare numeric id past the end resolves to `None`.
+        // Unbounded, this indexed a Vec and panicked the whole server from one
         // socket request.
         let response = app.handle_tab_move(
             "req".into(),
