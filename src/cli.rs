@@ -776,10 +776,16 @@ pub(super) fn send_request_unchecked(request: &Request) -> std::io::Result<serde
         .map_err(|err| map_server_not_running_or_io(err, &request.id, &client))
 }
 
+/// Timeout for the protocol-compatibility handshake probe. Ten seconds, not
+/// five: the server's own `INITIAL_REQUEST_TIMEOUT` (src/api/server.rs) is
+/// 5s, so a 5s client budget could fire on a merely slow server rather than a
+/// truly wedged one.
+const HANDSHAKE_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn ensure_server_protocol_compatible(client: &ApiClient, request_id: &str) -> std::io::Result<()> {
     let status = client
-        .status()
-        .map_err(|err| map_server_not_running_or_io(err, request_id, client))?;
+        .status_with_timeout(HANDSHAKE_PROBE_TIMEOUT)
+        .map_err(|err| map_handshake_probe_error(err, request_id, client))?;
     let server_protocol = status
         .protocol
         .ok_or_else(|| std::io::Error::other("server ping did not include a protocol version"))?;
@@ -835,6 +841,22 @@ fn map_server_not_running_or_io(
     client: &ApiClient,
 ) -> std::io::Error {
     match err {
+        ApiClientError::Io(io_err) if io_err.kind() == std::io::ErrorKind::ConnectionRefused => {
+            let socket_path = client.socket_path();
+            let client_socket =
+                crate::server::socket_paths::derive_client_socket_from_api_socket(&socket_path);
+            if crate::server::autodetect::is_server_listening_at(&client_socket) {
+                server_not_running::reported_error(server_not_running::not_accepting_response(
+                    request_id,
+                    &socket_path,
+                ))
+            } else {
+                server_not_running::reported_error(server_not_running::response(
+                    request_id,
+                    &socket_path,
+                ))
+            }
+        }
         ApiClientError::Io(io_err) if server_not_running_error(&io_err) => {
             server_not_running::reported_error(server_not_running::response(
                 request_id,
@@ -842,6 +864,34 @@ fn map_server_not_running_or_io(
             ))
         }
         err => api_client_error_to_io(err),
+    }
+}
+
+/// Maps an `ApiClientError` from the handshake-compatibility probe. A
+/// connect timeout/would-block here means the socket accepted the connection
+/// but the server never answered the ping — distinct from
+/// `map_server_not_running_or_io`, which cannot tell that apart from a
+/// merely-slow send because it has no timeout to observe. Everything else
+/// falls through to the shared classifier.
+fn map_handshake_probe_error(
+    err: ApiClientError,
+    request_id: &str,
+    client: &ApiClient,
+) -> std::io::Error {
+    match err {
+        ApiClientError::Io(io_err)
+            if matches!(
+                io_err.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            server_not_running::reported_error(server_not_running::not_responding_response(
+                request_id,
+                &client.socket_path(),
+                HANDSHAKE_PROBE_TIMEOUT,
+            ))
+        }
+        err => map_server_not_running_or_io(err, request_id, client),
     }
 }
 
@@ -1139,6 +1189,32 @@ mod tests {
             &client,
         );
         assert!(!super::server_not_running::was_reported(&mapped));
+    }
+
+    #[test]
+    fn connection_refused_with_no_client_socket_stays_server_not_running() {
+        use crate::api::client::{ApiClient, ApiClientError, ConnectionTarget};
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::path::PathBuf::from(format!("/tmp/hcl-{}-{nanos}", std::process::id()));
+        let api_socket = dir.join("herdr.sock");
+        // No listener anywhere — neither the api socket nor its derived
+        // client socket exist. ConnectionRefused here must still classify
+        // as `server_not_running`, not `server_api_not_accepting`.
+        let client = ApiClient::for_target(ConnectionTarget::SocketPath(api_socket.clone()));
+
+        let mapped = super::map_server_not_running_or_io(
+            ApiClientError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)),
+            "cli:workspace:create",
+            &client,
+        );
+
+        let response = super::server_not_running::reported_response(&mapped)
+            .expect("connection-refused with no client socket should carry a response");
+        assert_eq!(response.error.code, "server_not_running");
     }
 
     #[test]

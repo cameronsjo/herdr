@@ -248,6 +248,71 @@ fn dead_server_cli_reports_one_session_aware_json_line() {
 }
 
 #[test]
+fn dead_server_cli_reports_not_accepting_when_client_socket_still_answers() {
+    // A refused api socket alongside a live client socket means the server
+    // process is still up but its api accept loop has died — a distinct
+    // state from "no server at all" (see `dead_server_cli_reports_one_session_aware_json_line`),
+    // and the remedy (do not run `herdr`) is the opposite of that case's.
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    fs::create_dir_all(&runtime_dir).unwrap();
+    register_runtime_dir(&runtime_dir);
+
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+
+    // Server is "alive": something is listening on the paired client socket.
+    let _client_listener = UnixListener::bind(&client_socket).unwrap();
+    // Api socket exists but nothing accepts on it — the wedged accept loop.
+    drop(UnixListener::bind(&api_socket).unwrap());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_herdr"))
+        .args(["workspace", "create"])
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_RUNTIME_DIR", &runtime_dir)
+        .env("HERDR_SOCKET_PATH", &api_socket)
+        .env("HERDR_SESSION", "unrelated")
+        .env_remove("HERDR_CLIENT_SOCKET_PATH")
+        .env_remove("HERDR_ENV")
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty(), "server errors belong on stderr");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<_> = stderr.lines().collect();
+    assert_eq!(lines.len(), 1, "expected exactly one JSON line: {stderr:?}");
+
+    let response: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(response["id"], "cli:workspace:create");
+    assert_eq!(response["error"]["code"], "server_api_not_accepting");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&api_socket.display().to_string()),
+        "message should name the api socket: {response}"
+    );
+    assert!(
+        !response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("to start or attach it"),
+        "message must not repeat the dead-server remedy, which is harmful here: {response}"
+    );
+
+    cleanup_test_base(&base);
+}
+
+#[test]
 fn integration_commands_run_locally_when_server_is_missing() {
     let base = unique_test_dir();
     let home_dir = base.join("home");

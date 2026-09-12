@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Split server_not_running into three states (`docs/plans/2026-09-11-server-socket-not-accepting.md`)
+
+### fix(cli): split server_not_running into three states so a wedged api socket is not misdiagnosed
+
+- **PR:** [cameronsjo/herdr#PLACEHOLDER](https://github.com/cameronsjo/herdr/pull/PLACEHOLDER)
+- **Files:** `src/cli/server_not_running.rs`, `src/cli.rs`, `src/server/autodetect.rs`, `src/api/client.rs`, `src/cli/status.rs`, `tests/cli/sessions.rs`
+- **Replaces:** Upstream reports the single code `server_not_running` for three distinct states: (a) no socket at all, (b) a stale socket file left by a crashed server, and (c) a live api socket that refuses connections while the server itself is still up (its api accept loop died) — for which the existing remedy, running `herdr`, is actively harmful because it deletes the refused socket and starts a second server. The fork adds `server_api_not_accepting` (api socket refuses, but the paired client socket still answers — discriminated via the existing `is_server_listening_at` probe against the derived client socket) and `server_api_not_responding` (the socket accepts but the handshake ping never replies — discriminated with a new bounded `ApiClient::status_with_timeout`, 10s, so a merely-slow server is not misdiagnosed against the server's own 5s `INITIAL_REQUEST_TIMEOUT`). Case (b), stale socket + no live client socket, is unchanged and still reports `server_not_running` with the original `run \`herdr\`` remedy. `herdr status`/`herdr status server` gain a matching `NotAccepting` runtime-status variant (`status: running but not accepting api connections`, `running: false` in JSON so existing scripts stay correct). No wire-protocol impact: the codes are CLI-local strings, never cross the network. On Windows the wedged case still falls back to the pre-existing message, because `is_server_listening_at`'s Windows branch already probes through the api socket itself; the handshake-timeout code path works identically on every platform.
+- **Regression check:** `just test-one dead_server` (3 passed, up from 2), `just test-one classifier_ignores_unrelated_io_kinds`, `just test-one status_with_timeout`, `just test-one server_status`, `just lint`.
+
 ## Palette direction chooser, destructive confirm, and review findings (`docs/plans/2026-09-09-palette-direction-chooser-and-review-findings.md`)
 
 ### feat(client): collapse move and swap rows into a direction chooser

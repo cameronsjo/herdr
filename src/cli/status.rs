@@ -77,6 +77,10 @@ enum ServerRuntimeStatus {
         capabilities: Option<crate::api::schema::ServerCapabilities>,
     },
     NotRunning,
+    /// The api socket exists and refused (or accepted but never answered the
+    /// handshake), while the server is still answering on the paired client
+    /// socket — a wedged accept loop, not a dead process.
+    NotAccepting,
 }
 
 fn print_full_status(json: bool) -> std::io::Result<i32> {
@@ -170,16 +174,38 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
             println!("{indent}status: not running");
             println!("{indent}socket: {}", api::socket_path().display());
         }
+        ServerRuntimeStatus::NotAccepting => {
+            println!("{indent}status: running but not accepting api connections");
+            println!("{indent}socket: {}", api::socket_path().display());
+        }
     }
 }
 
 fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
-    match ApiClient::local().status() {
+    let client = ApiClient::local();
+    match client.status_with_timeout(super::HANDSHAKE_PROBE_TIMEOUT) {
         Ok(status) => Ok(ServerRuntimeStatus::Running {
             version: status.version,
             protocol: status.protocol,
             capabilities: status.capabilities,
         }),
+        Err(ApiClientError::Io(err))
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            let socket_path = client.socket_path();
+            let client_socket =
+                crate::server::socket_paths::derive_client_socket_from_api_socket(&socket_path);
+            if crate::server::autodetect::is_server_listening_at(&client_socket) {
+                Ok(ServerRuntimeStatus::NotAccepting)
+            } else {
+                Ok(ServerRuntimeStatus::NotRunning)
+            }
+        }
         Err(ApiClientError::Io(err)) if super::server_not_running_error(&err) => {
             Ok(ServerRuntimeStatus::NotRunning)
         }
@@ -350,6 +376,19 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             restart_needed: Some(false),
             server_binary_stale: Some(false),
         },
+        ServerRuntimeStatus::NotAccepting => ServerStatusJson {
+            status: "not accepting",
+            running: false,
+            version: None,
+            protocol: None,
+            capabilities: None,
+            compatible: None,
+            endpoint_compatible: None,
+            socket: api::socket_path().display().to_string(),
+            session: crate::session::active_name(),
+            restart_needed: Some(false),
+            server_binary_stale: Some(false),
+        },
     }
 }
 
@@ -368,7 +407,7 @@ fn restart_needed_bool(server: &ServerRuntimeStatus) -> Option<bool> {
                 .and_then(|value| value.endpoint_protocol_generation)
                 != Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION),
         ),
-        ServerRuntimeStatus::NotRunning => Some(false),
+        ServerRuntimeStatus::NotRunning | ServerRuntimeStatus::NotAccepting => Some(false),
     }
 }
 
@@ -377,7 +416,7 @@ fn server_binary_stale_bool(server: &ServerRuntimeStatus) -> Option<bool> {
         ServerRuntimeStatus::Running { version, .. } => version
             .as_deref()
             .map(|version| version != crate::build_info::version()),
-        ServerRuntimeStatus::NotRunning => Some(false),
+        ServerRuntimeStatus::NotRunning | ServerRuntimeStatus::NotAccepting => Some(false),
     }
 }
 
