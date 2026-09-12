@@ -27,7 +27,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ### fix(client): move a worktree group as a block from the keyboard and palette
 
-- **PR:** pending
+- **PR:** [cameronsjo/herdr#79](https://github.com/cameronsjo/herdr/pull/79)
 - **Files:** `src/client/shell/actions.rs`, `src/client/shell/context_menu.rs`, `src/client/shell/tests/keybindings_settings.rs`
 - **Replaces:** Upstream's keyboard reorder actions (`MoveWorkspacePrevious`/`MoveWorkspaceNext`, which the command palette also dispatches) index the raw `snapshot.workspaces` list and emit a plain `WorkspaceMove`. The sidebar drag path and the workspace context menu both go through `workspace_move_method`, which positions over group roots only, moves a worktree group as one `WorkspaceMoveBlock`, and refuses a linked worktree outright. So the same one-slot reorder behaved three different ways: from the keyboard a group root left its own block behind, and a linked worktree child reordered even though neither of the other two paths would move it. The fork widens `workspace_reorder_method` to `pub(super)` and routes the keyboard arm through it, so the context menu, the keyboard, and the palette share one builder. User-visible removal: keyboard reorder of a linked worktree child is now a no-op, matching drag and the context menu.
 - **Regression check:** `cargo nextest run --locked -E 'test(workspace_reorder)'` — the three grouped cases plus the unchanged plain-list wrapping test.
