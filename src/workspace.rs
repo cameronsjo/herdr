@@ -983,23 +983,18 @@ impl Workspace {
 
     /// Detaches every tab, in order, so another workspace can adopt them whole.
     ///
-    /// This is the one path that empties a workspace, which `take_tab_for_move`
-    /// refuses to do: `Workspace` derefs through its active tab, so an empty one
-    /// panics on next access. The caller MUST remove this workspace from
-    /// `AppState::workspaces` before anything else reads it — `workspace.merge`
-    /// is the only caller, and it removes the drained source in the same
-    /// request.
-    pub(crate) fn take_all_tabs_for_move(&mut self) -> Vec<TakenTab> {
-        let mut taken = Vec::with_capacity(self.tabs.len());
-        for tab in std::mem::take(&mut self.tabs) {
-            let pane_ids = tab.layout.pane_ids();
-            for pane_id in &pane_ids {
-                self.unregister_pane(*pane_id);
-            }
-            taken.push(TakenTab { tab, pane_ids });
-        }
-        self.active_tab = 0;
-        taken
+    /// Consumes the workspace: draining leaves no active tab, and `Workspace`
+    /// derefs through its active tab. Taking `self` by value means no drained
+    /// workspace ever exists to be read — the caller has already removed it from
+    /// `AppState::workspaces` or it could not call this at all.
+    pub(crate) fn into_all_tabs_for_move(self) -> Vec<TakenTab> {
+        self.tabs
+            .into_iter()
+            .map(|tab| {
+                let pane_ids = tab.layout.pane_ids();
+                TakenTab { tab, pane_ids }
+            })
+            .collect()
     }
 
     /// Adopts a tab detached by `take_tab_for_move`, reissuing its public tab
@@ -1625,6 +1620,19 @@ mod tests {
             ws.branch_label(),
             Some(std::borrow::Cow::Borrowed("main"))
         ));
+    }
+
+    #[test]
+    fn into_all_tabs_for_move_yields_every_tab_in_order() {
+        let mut ws = Workspace::test_new("space");
+        ws.test_add_tab(Some("second"));
+        ws.test_add_tab(Some("third"));
+        let expected_numbers: Vec<usize> = ws.tabs.iter().map(|tab| tab.number).collect();
+
+        let taken = ws.into_all_tabs_for_move();
+
+        let actual_numbers: Vec<usize> = taken.iter().map(|taken| taken.tab.number).collect();
+        assert_eq!(actual_numbers, expected_numbers);
     }
 
     #[test]
