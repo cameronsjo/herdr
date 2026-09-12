@@ -27,7 +27,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ### fix(platform): keep sigpipe ignored inside the unit-test harness
 
-- **PR:** _(orchestrator fills in)_
+- **PR:** [cameronsjo/herdr#75](https://github.com/cameronsjo/herdr/pull/75)
 - **Files:** `src/platform/unix_common.rs`
 - **Replaces:** The issue's premise — a pty write losing its reader — was wrong. `begin_cli_output()` flips SIGPIPE to `SIG_DFL` so a piped `herdr --help | head` dies quietly on purpose; correct for the shipped CLI. `cargo test --bin herdr` runs every test in one process, so once a test that prints and then drops a reading peer calls it, SIGPIPE stays fatal for every later write-to-closed-pipe in the same run, and the suite exits 141 partway through. Which test dies moves between runs because the process-wide disposition, not any one test, is what changed. `cargo nextest run` hides this because it isolates each test in its own process. Restoring the disposition inside just the one offending test was rejected: it silently re-breaks the next time any test exercises a CLI print path. The fix gates `begin_cli_output`/`end_cli_output`'s bodies on `#[cfg(not(test))]` so the test harness never touches the process-wide disposition.
 - **Regression check:** `cargo test --bin herdr > log 2>&1; echo $?` — prints a `test result:` line and no longer exits 141.
