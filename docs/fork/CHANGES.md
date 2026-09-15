@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## macOS CI row is gated to pushes on master (PR [#82](https://github.com/cameronsjo/herdr/pull/82))
+
+### ci: run the macOS matrix row only on a push to master
+
+- **PR:** [cameronsjo/herdr#82](https://github.com/cameronsjo/herdr/pull/82)
+- **Files:** `.github/workflows/ci.yml`
+- **Replaces:** Upstream's `check` job carries a static `strategy.matrix.include` holding an `ubuntu-latest` and a `macos-latest` row, so both run on every pull request and every push. macOS bills at 10x Linux, and the fork measured 116 CI runs over 2026-09-01..15 — 81 of them pull requests, each paying for a macOS leg. The fork selects the row list by expression instead, `fromJSON` over `github.event_name == 'push' && github.ref_name == 'master'`, because `matrix` is not an available context for a job-level `if:` — the same limitation that led the `windows-latest` row to be deleted rather than gated. Pull requests, and pushes to the `windows` branch, now run `ubuntu-latest` alone. Two consequences are recorded in the workflow at the point of change rather than only here. First, `check (macos-latest)` no longer reports on a pull request, which is safe only while this repo has no branch protection and no ruleset (verified against the API, not assumed); add either and the row must be restored or its context made optional. Second, macOS drops from two runs per commit to one, and the pre-existing `concurrency` block cancels an in-flight master run, so merging two PRs in quick succession can leave a commit with no macOS result recorded — which matters because `release.yml` builds `aarch64-apple-darwin` and macOS is the only platform this fork ships. No tag was ever gated on CI, before or after: `release.yml` triggers on the tag push alone with no `needs:` on the `check` job.
+- **Regression check:** `actionlint .github/workflows/ci.yml` exits 0; and on a pull request the run's check list is `check (ubuntu-latest)` plus `conventional-commits` with no macOS leg present — PR #82's own checks are the measurement.
+
 ## Positional workspace id fallback is bounded to the live list (issue [#77](https://github.com/cameronsjo/herdr/issues/77))
 
 ### fix(api): bound the positional workspace id fallback to the live list
