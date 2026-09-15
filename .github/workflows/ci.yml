@@ -50,13 +50,26 @@ jobs:
       # with no windows row they never fire, and removing them would only widen
       # the conflict surface.
       #
-      # The macos-latest row runs only on a push to master. The row list is
-      # chosen by expression for the same reason named above -- `matrix` is not
-      # available to a job-level `if:`, but the `github` context IS available
-      # here. macOS bills at 10x Linux and this row was most of the fork's CI
-      # spend: 47 CI runs over 2026-09-01..15, each paying for a macOS leg on a
-      # pull request. master still runs the full matrix, so no tag is ever cut
-      # on an unbuilt macOS target.
+      # The macos-latest row runs only on a push to master. A push to the
+      # `windows` branch deliberately gets no macOS row either -- no palette tag
+      # has ever been cut off that branch, so macOS coverage there buys nothing.
+      # The row list is chosen by expression for the same reason named above --
+      # `matrix` is not available to a job-level `if:`, but the `github` context
+      # IS available here. macOS bills at 10x Linux and this row was most of the
+      # fork's CI spend: 116 CI runs over 2026-09-01..15, 81 of them pull
+      # requests, each paying for a macOS leg.
+      #
+      # What this does NOT do is gate a release, and an earlier draft of this
+      # comment wrongly claimed it did. `release.yml` triggers on the tag push
+      # alone with no `needs:` on CI, so a tag can be cut on an unbuilt or red
+      # macOS target. That was true before this change and is unchanged by it.
+      #
+      # What IS narrowed: macOS now gets one run per commit instead of two, and
+      # the `concurrency` block above cancels an in-flight master run, so merging
+      # two PRs in quick succession can leave a commit with no macOS result
+      # recorded at all. macOS is the only platform this fork ships --
+      # `release.yml` builds aarch64-apple-darwin for the Homebrew tap -- so
+      # breakage now surfaces after merge and nothing announces it.
       #
       # A dropped row also drops its check context, so `check (macos-latest)`
       # does not report on a pull request. That is safe here only because this
