@@ -23,6 +23,15 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## The palette live check refuses a stale binary and an unknown plugin id (PR [#83](https://github.com/cameronsjo/herdr/pull/83))
+
+### fix(scripts): refuse a stale binary and an unknown plugin id in the palette live check
+
+- **PR:** [cameronsjo/herdr#83](https://github.com/cameronsjo/herdr/pull/83)
+- **Files:** `scripts/palette-live-check.sh`
+- **Replaces:** Nothing upstream — this hardens a fork-only script added by PR [#61](https://github.com/cameronsjo/herdr/pull/61). Both defects shared one failure mode: a step that shows the same result whether the feature works or not. First, the script tested the binary with `-x` alone, which asks whether a file exists and never whether it matches the source; a binary built before #61 draws the pre-change palette (directional leaf rows, `unset` in the key column, the untrimmed footer), so every step reports old behaviour and the operator concludes the feature is broken. Measured on 2026-09-15: a binary two days stale produced exactly that reading. It now compares the binary against `palette.rs`, `overlays.rs`, and `palette/input.rs` and refuses with the build command. Second, the generated override marked `collie:uninstall` destructive, but `action_is_marked_destructive` (`src/client/shell/palette.rs`) joins `"{plugin_id}:{action_id}"` and compares exact strings with no normalization, and Collie's id is `herdr.collie` — the palette row displays `Collie`, but the display name is not the id, so step 5 could never have shown the `[destructive]` tag. The override is corrected and the script now asserts the id it names is installed, failing by name rather than silently as an absent tag. This matters because three regression checks in this ledger invoke the script and the repo wires no shell linting in CI, so nothing else guards it.
+- **Regression check:** `shellcheck scripts/palette-live-check.sh` exits 0. Staged-break check: `touch src/client/shell/palette.rs` then `bash scripts/palette-live-check.sh` must refuse with `Stale binary:` rather than launching; and replacing the override id with `collie:uninstall` must refuse with `No installed plugin has the id`. Both must pass again on an unmodified tree.
+
 ## macOS CI row is gated to pushes on master (PR [#82](https://github.com/cameronsjo/herdr/pull/82))
 
 ### ci: run the macOS matrix row only on a push to master
