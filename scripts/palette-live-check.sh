@@ -36,6 +36,12 @@ for src in \
   "$WORKTREE/src/client/shell/overlays.rs" \
   "$WORKTREE/src/client/shell/palette/input.rs"
 do
+  if [ ! -f "$src" ]; then
+    echo "Expected source file is missing: $src" >&2
+    echo "This check cannot tell whether the binary is current, so it refuses" >&2
+    echo "rather than pass. Update the path list in this script." >&2
+    exit 1
+  fi
   if [ "$src" -nt "$BIN" ]; then
     echo "Stale binary: $src is newer than $BIN." >&2
     echo "Every step below would show pre-change behavior." >&2
@@ -70,6 +76,24 @@ destructive_actions = ["herdr.collie:uninstall"]
 allow_nested = true
 EOF
 
+# Seed the throwaway config with the operator's real plugin registry. The debug
+# binary reads its registry from $XDG_CONFIG_HOME/herdr-dev/plugins.json —
+# registry_path() is config_dir().join("plugins.json"), and app_dir_name() is
+# herdr-dev under debug_assertions. A throwaway config dir has none, so without
+# this the run sees zero plugins and step 5 has no row to tag at all, whether or
+# not the feature works. Measured 2026-09-15: unseeded prints "No plugins
+# installed"; seeded prints all five. The registry stores absolute plugin_root
+# paths, so a copy is enough and the real config is only ever read.
+REAL_REGISTRY="$HOME/.config/herdr/plugins.json"
+if [ ! -f "$REAL_REGISTRY" ]; then
+  echo "No plugin registry at $REAL_REGISTRY." >&2
+  echo "Step 5 needs an installed plugin to mark destructive, and this script" >&2
+  echo "cannot conjure one. Install a plugin, or delete step 5 from the list" >&2
+  echo "below and run steps 1-4 only." >&2
+  exit 1
+fi
+command cp "$REAL_REGISTRY" "$APP_CONFIG_DIR/plugins.json"
+
 # Ask the binary where it will actually look, rather than trusting the path
 # above. A silently unread override makes step 5 show no tag whether the
 # feature works or not, which is the one outcome this script must not produce.
@@ -81,20 +105,34 @@ if [ "$RESOLVED" != "$APP_CONFIG_DIR/config.toml" ]; then
   exit 1
 fi
 
-# A correctly-read override naming a plugin that is not installed is the same
-# dead end as an unread one: step 5 shows no tag either way. Check the id the
-# override names actually exists on disk, so a wrong id fails here with a name
-# rather than silently downstream with a missing tag.
+# A correctly-read override naming a plugin this run cannot see is the same dead
+# end as an unread one: step 5 shows no tag either way. Ask the binary under test
+# what it sees, rather than checking a directory — the operator's real plugin
+# directory is not what this run reads, so an on-disk check answers a different
+# question and passes while step 5 still shows nothing.
 OVERRIDE_PLUGIN_ID="$(command sed -n 's/^destructive_actions = \["\([^:]*\):.*/\1/p' "$APP_CONFIG_DIR/config.toml")"
-PLUGIN_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins/github"
-if [ -n "$OVERRIDE_PLUGIN_ID" ] && [ -d "$PLUGIN_ROOT" ]; then
-  if ! command ls -1 "$PLUGIN_ROOT" 2>/dev/null | command grep -q "^${OVERRIDE_PLUGIN_ID}-"; then
-    echo "No installed plugin has the id '$OVERRIDE_PLUGIN_ID'." >&2
-    echo "Step 5 would show no [destructive] tag whether the feature works or not." >&2
-    echo "Run 'herdr plugin list' and put a real id in this script's override." >&2
-    exit 1
-  fi
+if [ -z "$OVERRIDE_PLUGIN_ID" ]; then
+  echo "Could not read a plugin id from this script's override." >&2
+  echo "Expected a line of the form:" >&2
+  echo "  destructive_actions = [\"<plugin_id>:<action_id>\"]" >&2
+  exit 1
 fi
+
+# No pipe into grep -q: under pipefail a SIGPIPE'd producer can turn a found
+# match into a non-zero status, which would report "not installed" for an
+# installed plugin.
+INSTALLED_PLUGINS="$(env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH \
+  XDG_CONFIG_HOME="$CONFIG_DIR" "$BIN" plugin list 2>/dev/null)"
+case "$INSTALLED_PLUGINS" in
+  *"- $OVERRIDE_PLUGIN_ID "*) ;;
+  *)
+    echo "This run's herdr has no plugin with the id '$OVERRIDE_PLUGIN_ID'." >&2
+    echo "Step 5 would show no [destructive] tag whether the feature works or not." >&2
+    echo "Run 'herdr plugin list' for the real ids — note the id is not the" >&2
+    echo "display name shown in the palette row — and correct the override above." >&2
+    exit 1
+    ;;
+esac
 
 cat <<EOF
 
