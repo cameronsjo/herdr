@@ -11,6 +11,7 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
+- `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
 - `e563360d` PR [#57](https://github.com/cameronsjo/herdr/pull/57) (2026-09-08) — merge upstream through `9e01168b`
 - `e839cf59` PR [#56](https://github.com/cameronsjo/herdr/pull/56) (2026-09-07) — sync upstream master into the fork
 - `c8137c07` PR [#43](https://github.com/cameronsjo/herdr/pull/43) (2026-09-04) — rebuild the fork on upstream master
@@ -22,6 +23,23 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+## The endpoint agent list groups per machine, and the check parses a padded counter (PR [#84](https://github.com/cameronsjo/herdr/pull/84))
+
+### fix: reconcile the endpoint agent list and agent focus with the upstream merge
+
+- **PR:** [cameronsjo/herdr#84](https://github.com/cameronsjo/herdr/pull/84)
+- **Files:** `src/client/shell/endpoint_agents.rs`, `src/client/shell/agent_sidebar.rs`, `src/client/shell/mouse.rs`, `src/client/shell/endpoint_navigation.rs`, `src/client/shell/tests/endpoints.rs`, `src/client/shell/tests/text_editing.rs`, `src/client/shell/tests/workspace_navigation.rs`
+- **Replaces:** Nothing upstream — this carries the fork's sidebar grouping into the endpoint list, which upstream does not group at all. Two defects. **(1) Grouping was built per endpoint.** A header belongs to the first row of a workspace run, and only the aggregated cross-endpoint draw order knows where the runs start, so building rows endpoint-by-endpoint gave every row its own header. Rows are now built in that aggregated order. The run key carries the machine as well as the workspace, because two endpoints can advertise the same workspace id — without the machine, two machines' rows merge into one header and the gap between them disappears. The run-contiguity check moved to a shared helper rather than a second copy of the scan. **(2) A press released without a drag sent `pane.focus` directly.** The fork defers agent focus to the button up so the same press can grow into a drag-move, but the release then bypassed `focus_or_activate`. Local stays on screen while a remote activation is pending, so a bare `pane.focus` answered the endpoint being handed away from instead of cancelling the handoff. The release now routes through `focus_or_activate` the way an ordinary click does.
+- **Collision, 2026-09-17:** two upstream tests new in this range assert behaviour the fork deliberately changed, and both are re-expressed against the fork with the reason inline. `client::shell::tests::text_editing::all_naming_targets_preserve_submission_and_empty_semantics` and `client::shell::tests::workspace_navigation::foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context` both expect `workspace.create` for an unnamed new space; the fork's `new_workspace_method` (fork PR [#64](https://github.com/cameronsjo/herdr/pull/64)) submits `workspace.open` instead, focusing a space already on the path rather than stacking a second one on it. **That divergence has no section of its own in this ledger** — a gap from PR #64, not from this sync, and worth filling before the next one. `client::shell::tests::endpoints::local_agent_click_can_cancel_a_pending_remote_switch` expects the cancelling action on the button down; under the fork's drag-move it lands on the button up, so the test now sends the press and the release.
+- **Regression check:** `cargo nextest run -E "test(/client::shell::/) or test(/mouse/) or test(/endpoint/)"` — 606 tests, all passing. Staged-break checks: passing `grouped: false` in `endpoint_agents.rs` must redden `grouped_agents_keep_headers_and_gaps_separate_for_identical_workspace_ids`; dropping the machine from the run key must redden the same test's gap assertions while leaving its header assertions green; restoring the bare `pane.focus` in `mouse.rs` must redden `local_agent_click_can_cancel_a_pending_remote_switch`.
+
+### fix(ci): match the check's failure parser to nextest's padded counter
+
+- **PR:** [cameronsjo/herdr#84](https://github.com/cameronsjo/herdr/pull/84)
+- **Files:** `scripts/docker-check.sh`, `scripts/test_docker_check.py`
+- **Replaces:** Nothing upstream — `docker-check.sh` is fork-only. `classify_nextest_failures` read the binary id from awk field 5 and the test name from everything after it. nextest right-aligns its progress counter once the suite is large enough (`(  69/3862)` rather than `(1/1)`), and that padding splits the counter across two whitespace-delimited fields, shifting every field after it. The suite crossed that threshold in this sync, so the extracted names stopped matching `KNOWN_ENV_FAILURES` and eighteen known-environment failures were reported as unexpected regressions — each one also paying for a pointless isolated retry. The prefix is now matched by shape and stripped, so the binary id and test name do not depend on the counter's width. Eight entries were added to the allowlist (the hook, process-cleanup and letta tests), each reproduced on a detached worktree of pristine `origin/master` in the same image, which is the bar the script's own comment sets for extending it; this reverses the older note there that process-cleanup tests "run normally".
+- **Regression check:** `python3 -m unittest scripts.test_docker_check` — 10 tests. The two new ones (`test_padded_progress_counter_still_matches_the_allowlist`, `test_padded_progress_counter_extracts_binary_and_name`) were confirmed red against the old parser before the fix; the pre-existing eight all used an unpadded `(1/1)` line and stayed green through the defect, which is why it shipped. `shellcheck scripts/docker-check.sh` reports only a pre-existing SC1091 info on `source "$HOME/.cargo/env"`.
 
 ## The fork's Zig toolchain follows libghostty-vt to 0.16.0
 
