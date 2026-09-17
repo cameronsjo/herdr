@@ -181,12 +181,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       cargo check --locked
     '
 
-  echo "==> cargo fmt --check, clippy, nextest (in container)"
+  # Same memory ceiling, second offender: four concurrent rustc processes on
+  # this crate also overrun a 4 GiB VM, and the kill surfaces as
+  # "could not compile `herdr` ... (signal: 9, SIGKILL: kill)" with no
+  # diagnostic attached. Bound the compile jobs; nextest still runs its tests
+  # at full width, since those are small.
+  echo "==> cargo fmt --check, clippy, nextest (in container, ${CARGO_BUILD_JOBS:=2} compile jobs)"
   LOG_FILE=$(mktemp)
   trap 'rm -f "$LOG_FILE"' EXIT
 
   set +e
   docker run --rm --init \
+    -e CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" \
     -v "$ROOT_DIR:/work" \
     -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
     -w /work \
