@@ -397,7 +397,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         for (machine, count) in [("Local", 1), ("Remote", 2)] {
             let mut ctx = context(&entry);
             ctx.machine = Some(machine);
-            let rows = agent_rows(&config.agents, ctx, "working");
+            let rows = agent_rows(&config.agents, ctx, "working", false);
             assert_eq!(rows[0].len(), count);
             assert_eq!(
                 rows[0].last().unwrap().kind,
@@ -408,7 +408,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
         for (value, count) in [("20", 1), ("90", 2)] {
             entry.tokens.insert("load".into(), value.into());
             assert_eq!(
-                agent_rows(&config.agents, context(&entry), "working").len(),
+                agent_rows(&config.agents, context(&entry), "working", false).len(),
                 count
             );
             let rows = space_rows(
@@ -433,7 +433,7 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 "rows = [[{{ token = 'agent', rules = [{{ equals = 'pi', {first} }}, {{ contains = '', hide = true }}] }}]]"
             )).unwrap();
             let entry = entry();
-            let rows = agent_rows(&config, context(&entry), "working");
+            let rows = agent_rows(&config, context(&entry), "working", false);
             assert_eq!(rows[0][0].kind, ResolvedTokenKind::Agent("pi".into()));
         }
     }

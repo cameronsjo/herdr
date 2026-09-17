@@ -1917,6 +1917,9 @@ fn navigator_uses_machine_parents_only_for_federated_clients() {
     let frame = state.compose(106, 30).expect("federated navigator");
     for (rect, target) in &state.hits.navigator_rows {
         let expected = match target {
+            // Asserted absent from this fixture above; the arm exists so a
+            // future row cannot slip through unchecked.
+            ClientNavigatorTarget::NewWorkspace => " + ",
             ClientNavigatorTarget::Machine { .. } => " ▾ ",
             ClientNavigatorTarget::Workspace { .. } => "   ▾ ",
             ClientNavigatorTarget::Tab { .. } => "     └── ",

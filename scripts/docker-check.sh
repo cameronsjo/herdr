@@ -150,12 +150,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "==> building check image ($IMAGE_TAG)"
   docker build -q -t "$IMAGE_TAG" "$ROOT_DIR/scripts/docker-check" >/dev/null
 
-  echo "==> cargo fmt --check, clippy, nextest (in container)"
-  LOG_FILE=$(mktemp)
-  trap 'rm -f "$LOG_FILE"' EXIT
-
-  set +e
+  # Zig 0.16 compiles libghostty-vt's SIMD and wuffs C++ sources one job per
+  # visible CPU, and four of those at once exceed a 4 GiB Docker VM. The kernel
+  # kills the compile, and build.rs reports it as "zig build for vendored
+  # libghostty-vt failed", which reads as a toolchain problem rather than a
+  # memory one. Warm the vendored library in its own container with a bounded
+  # CPU set first: the expensive compiles land in .zig-cache, so the main run's
+  # build.rs finds them cached and the test run still gets every CPU.
+  # Override with ZIG_BUILD_CPUSET on a host with memory to spare.
+  echo "==> prebuilding vendored libghostty-vt (CPUs ${ZIG_BUILD_CPUSET:=0-1})"
   docker run --rm --init \
+    --cpuset-cpus="$ZIG_BUILD_CPUSET" \
     -v "$ROOT_DIR:/work" \
     -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
     -w /work \
@@ -171,6 +176,23 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       # build.rs forces the rerun every time, matching the always-wiped zig-out
       # above.
       touch build.rs
+      # check, not build: it runs build.rs (and so the zig build) without
+      # paying for a link the clippy pass below would not reuse anyway.
+      cargo check --locked
+    '
+
+  echo "==> cargo fmt --check, clippy, nextest (in container)"
+  LOG_FILE=$(mktemp)
+  trap 'rm -f "$LOG_FILE"' EXIT
+
+  set +e
+  docker run --rm --init \
+    -v "$ROOT_DIR:/work" \
+    -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
+    -w /work \
+    "$IMAGE_TAG" \
+    bash -c '
+      set -euo pipefail
       cargo fmt --check
       cargo clippy --all-targets --locked -- -D warnings
       cargo nextest run --locked --no-fail-fast --status-level fail --final-status-level fail --failure-output final --success-output never

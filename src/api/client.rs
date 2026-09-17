@@ -83,7 +83,18 @@ impl ApiClient {
         self.read_status(None)
     }
 
-    pub(crate) fn status_with_timeout(
+    /// Like `status()`, but bounds the wait for a handshake reply. Used to
+    /// probe a connection that accepted but never answers, so a wedged
+    /// server's accept-but-silent socket does not hang the caller forever.
+    ///
+    /// Built on `read_status`'s own deadline reader rather than on
+    /// `request_value_with_timeout`: `set_timeout_best_effort` is a no-op on
+    /// Windows named pipes, so a socket-timeout implementation would leave the
+    /// wedged case unbounded there. A blanket timeout on `status()` itself is
+    /// also wrong — it would reach `request_value()` callers that stream
+    /// long-lived responses (events.subscribe, agent-wait), which must not
+    /// time out mid-wait.
+    pub fn status_with_timeout(
         &self,
         timeout: Duration,
     ) -> Result<crate::api::RuntimeStatus, ApiClientError> {
@@ -111,39 +122,6 @@ impl ApiClient {
             }
             None => self.request(request)?,
         };
-        match response.result {
-            ResponseResult::Pong {
-                version,
-                protocol,
-                capabilities,
-            } => Ok(crate::api::RuntimeStatus {
-                version: Some(version),
-                protocol: Some(protocol),
-                capabilities,
-            }),
-            result => Err(ApiClientError::UnexpectedResult(format!("{result:?}"))),
-        }
-    }
-
-    /// Like `status()`, but bounds the wait for a handshake reply. Used to
-    /// probe a connection that accepted but never answers, so a wedged
-    /// server's accept-but-silent socket does not hang the caller forever.
-    /// Built on `request_value_with_timeout` rather than adding a timeout
-    /// to `status()` itself: a blanket timeout there would also apply to
-    /// `request_value()`/`status()` callers that stream long-lived responses
-    /// (events.subscribe, agent-wait), which must not time out mid-wait.
-    pub fn status_with_timeout(
-        &self,
-        timeout: Duration,
-    ) -> Result<crate::api::RuntimeStatus, ApiClientError> {
-        let value = self.request_value_with_timeout(
-            &Request {
-                id: "api-client:status".into(),
-                method: Method::Ping(PingParams::default()),
-            },
-            timeout,
-        )?;
-        let response = parse_response_value(value)?;
         match response.result {
             ResponseResult::Pong {
                 version,

@@ -23,6 +23,14 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## The fork's Zig toolchain follows libghostty-vt to 0.16.0
+
+### ci: install Zig 0.16.0 for the macOS builds and the container check
+
+- **Files:** `.github/workflows/release.yml`, `.github/workflows/build-artifacts-manual.yml`, `scripts/docker-check/Dockerfile`, `scripts/docker-check.sh`
+- **Replaces:** Nothing upstream — this keeps the fork's own three Zig installs in step with the vendored library. The 2026-09-17 sync raised `vendor/libghostty-vt/build.zig.zon`'s `minimum_zig_version` to `0.16.0`, and all three fork-owned installs still pinned 0.15.2, so every one of them fails in `build.rs` before a line of Rust compiles. Upstream moved to `vercel-labs/setup-zig` at 0.16.0; the fork's two macOS workflows stay on Homebrew (`brew install zig`, now 0.16.0) because the reason for that divergence is unchanged — a stock Zig tarball's bundled libSystem predates the macOS 26 SDK and fails to link, while Homebrew's zig is built against the runner's own SDK. Two related things follow. The cache key moves to `homebrew-zig-0.16-`, since a restored 0.15 download is worthless. And `docker-check.sh` gains a bounded-parallelism prebuild step: Zig 0.16 compiles libghostty-vt's SIMD and wuffs C++ sources one job per visible CPU, and four at once exceed a 4 GiB Docker VM, so the kernel kills the compile and `build.rs` reports it as a plain zig-build failure naming the Zig version — the symptom points at the toolchain, not at memory. The prebuild warms `.zig-cache` under `ZIG_BUILD_CPUSET` (default `0-1`) and the main run keeps every CPU for nextest.
+- **Regression check:** `bash scripts/docker-check.sh` reaches nextest rather than failing in `build.rs`; `shellcheck scripts/docker-check.sh` and `actionlint .github/workflows/release.yml .github/workflows/build-artifacts-manual.yml` exit 0 (the manual workflow carries one pre-existing SC2086 info on an unquoted `$GITHUB_ENV`, unrelated to this change); `python3 -m unittest scripts.test_docker_check` passes. Staged-break check: setting `ARG ZIG_VERSION=0.15.2` back in the Dockerfile must fail with `Building Herdr requires Zig 0.16.0`.
+
 ## The palette live check refuses a stale binary and an unknown plugin id (PR [#83](https://github.com/cameronsjo/herdr/pull/83))
 
 ### fix(scripts): refuse a stale binary and an unknown plugin id in the palette live check
@@ -94,6 +102,7 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - **Files:** `src/cli/server_not_running.rs`, `src/cli.rs`, `src/server/autodetect.rs`, `src/api/client.rs`, `src/cli/status.rs`, `tests/cli/sessions.rs`
 - **Replaces:** Upstream reports the single code `server_not_running` for three distinct states: (a) no socket at all, (b) a stale socket file left by a crashed server, and (c) a live api socket that refuses connections while the server itself is still up (its api accept loop died) — for which the existing remedy, running `herdr`, is actively harmful because it deletes the refused socket and starts a second server. The fork adds `server_api_not_accepting` (api socket refuses, but the paired client socket still answers — discriminated via the existing `is_server_listening_at` probe against the derived client socket) and `server_api_not_responding` (the socket accepts but the handshake ping never replies — discriminated with a new bounded `ApiClient::status_with_timeout`, 10s, so a merely-slow server is not misdiagnosed against the server's own 5s `INITIAL_REQUEST_TIMEOUT`). Case (b), stale socket + no live client socket, is unchanged and still reports `server_not_running` with the original `run \`herdr\`` remedy. `herdr status`/`herdr status server` gain a matching `NotAccepting` runtime-status variant (`status: running but not accepting api connections`, `running: false` in JSON so existing scripts stay correct). No wire-protocol impact: the codes are CLI-local strings, never cross the network. On Windows the wedged case still falls back to the pre-existing message, because `is_server_listening_at`'s Windows branch already probes through the api socket itself; the handshake-timeout code path works identically on every platform.
 - **Regression check:** `just test-one dead_server` (3 passed, up from 2), `just test-one classifier_ignores_unrelated_io_kinds`, `just test-one status_with_timeout`, `just test-one server_status`, `just lint`.
+- **Collision, 2026-09-17:** upstream has since added its own `ApiClient::status_with_timeout`, built on `request_value_with_timeout` (socket timeouts). The sync merged both definitions into the same `impl` and the crate stopped compiling. The fork's implementation wins and is now `pub`: `set_timeout_best_effort` is a no-op on Windows named pipes, so a socket-timeout version leaves the wedged case unbounded there, which is exactly the case this guard exists for. `request_value_with_timeout` keeps its other caller in `src/api/status.rs`. Upstream also added `cli::target::server_status`, which rediscovers a stale SSH bridge and retries; the fork's bounded probe now lives inside that function's local branch rather than beside it, so `herdr status` and the handshake gate get both behaviours.
 
 ## Fix flaky plugin-path capture tests (issue #38)
 
@@ -261,6 +270,7 @@ its validation pass:
 - **Files:** `src/workspace/git/discovery.rs`
 - **Replaces:** A test asserting an unreadable-ref failure mode false-failed when run as a user (e.g. root, or a sandboxed CI runner) that bypasses filesystem permission checks.
 - **Regression check:** `cargo test workspace::git::discovery`.
+- **Retired 2026-09-17:** upstream rewrote the test to reach the same unavailable-ref branch through a symlink loop, which fails to open even as root, so the fork's skip guard has nothing left to guard. The 2026-09-17 sync resolved this file toward upstream and the divergence is gone.
 
 ## Pre-plan fork setup
 
