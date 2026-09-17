@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use crate::api;
-use crate::api::client::{ApiClient, ApiClientError};
+use crate::api::client::ApiClientError;
 
 pub(super) fn run_status_command(args: &[String]) -> std::io::Result<i32> {
     let Some((scope, json)) = parse_status_args(args) else {
@@ -168,11 +168,11 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
                 "{indent}private_protocol_compatible: {}",
                 compatibility_label(*protocol)
             );
-            println!("{indent}socket: {}", api::socket_path().display());
+            println!("{indent}socket: {}", super::target::socket_label());
         }
         ServerRuntimeStatus::NotRunning => {
             println!("{indent}status: not running");
-            println!("{indent}socket: {}", api::socket_path().display());
+            println!("{indent}socket: {}", super::target::socket_label());
         }
         ServerRuntimeStatus::NotAccepting => {
             println!("{indent}status: running but not accepting api connections");
@@ -182,13 +182,16 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
 }
 
 fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
-    let client = ApiClient::local();
-    match client.status_with_timeout(super::HANDSHAKE_PROBE_TIMEOUT) {
+    let client = super::target::api_client()?;
+    match super::target::server_status(&client) {
         Ok(status) => Ok(ServerRuntimeStatus::Running {
             version: status.version,
             protocol: status.protocol,
             capabilities: status.capabilities,
         }),
+        Err(err) if super::target::is_remote() => Err(super::target::remote_error(
+            super::api_client_error_to_io(err),
+        )),
         Err(ApiClientError::Io(err))
             if matches!(
                 err.kind(),
@@ -209,14 +212,7 @@ fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
         Err(ApiClientError::Io(err)) if super::server_not_running_error(&err) => {
             Ok(ServerRuntimeStatus::NotRunning)
         }
-        Err(err) => Err(api_client_error_to_io(err)),
-    }
-}
-
-fn api_client_error_to_io(err: ApiClientError) -> std::io::Error {
-    match err {
-        ApiClientError::Io(err) => err,
-        err => std::io::Error::other(err),
+        Err(err) => Err(super::api_client_error_to_io(err)),
     }
 }
 
@@ -282,6 +278,8 @@ struct ClientStatusJson {
     protocol: u32,
     endpoint_protocol_generation: u32,
     endpoint_capabilities: Vec<&'static str>,
+    remote_host_bridge: bool,
+    remote_bridge_idle_timeout: bool,
     binary: String,
     session: Option<String>,
 }
@@ -327,13 +325,15 @@ fn client_status_json() -> ClientStatusJson {
             crate::protocol::endpoint::PRESENTATION_EFFECTS_FENCE_CAPABILITY,
             crate::protocol::endpoint::HEALTH_CHECK_CAPABILITY,
         ],
+        remote_host_bridge: true,
+        remote_bridge_idle_timeout: crate::platform::REMOTE_BRIDGE_IDLE_TIMEOUT_SUPPORTED,
         binary: current_exe_label(),
         session: crate::session::active_name(),
     }
 }
 
 fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
-    match server {
+    let mut status = match server {
         ServerRuntimeStatus::Running {
             version,
             protocol,
@@ -389,7 +389,13 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             restart_needed: Some(false),
             server_binary_stale: Some(false),
         },
+    };
+    if let Some((_, session)) = super::target::remote_identity() {
+        status.socket = super::target::socket_label();
+        status.session = Some(session);
+        status.server_binary_stale = None;
     }
+    status
 }
 
 fn update_status_json(server: &ServerRuntimeStatus) -> UpdateStatusJson {
