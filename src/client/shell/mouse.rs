@@ -1489,10 +1489,14 @@ impl ClientShellState {
                 return;
             }
             if let Some(press) = self.agent_press.take() {
-                self.push_endpoint_method(
-                    crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
-                        pane_id: press.pane_id,
-                    }),
+                // Not a bare `pane.focus`: local stays on screen while a remote
+                // activation is pending, so a press that never became a drag has
+                // to route through the runtime and cancel that handoff. Focusing
+                // the pane directly would answer the wrong endpoint.
+                let endpoint_id = self.active_endpoint_id.clone();
+                self.focus_or_activate(
+                    endpoint_id,
+                    ClientEndpointFocusTarget::Pane(press.pane_id),
                     outcome,
                 );
                 return;

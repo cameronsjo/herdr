@@ -106,48 +106,59 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
-    let mut rendered_rows = endpoints
-        .iter()
-        .filter_map(|endpoint| {
-            endpoint.snapshot.as_deref().map(|snapshot| {
-                snapshot
-                    .agents
-                    .iter()
-                    .filter_map(|agent| {
-                        super::agent_sidebar::agent_row(
-                            snapshot,
-                            &agent.pane_id,
-                            config,
-                            Some(&endpoint.label),
-                            // The endpoint list groups by machine, so the
-                            // workspace-run headers never apply here.
-                            false,
-                            None,
-                        )
-                    })
-                    .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
-                    .collect::<Vec<_>>()
-            })
-        })
-        .flatten()
-        .collect::<HashMap<_, _>>();
-
-    super::aggregate_navigation::aggregate_agent_rows(
+    // Rows are built in the order they will be drawn, not per endpoint: a
+    // header belongs to the first row of a run, and only the aggregated order
+    // says where the runs actually start.
+    let ordered = super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
-    )
-    .into_iter()
-    .filter_map(|row| {
-        let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
-        let mut agent = rendered_rows.remove(&key)?;
-        agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
-        Some(EndpointAgentRow {
-            endpoint_id: row.endpoint.endpoint_id.clone(),
-            machine_label: row.endpoint.label.to_owned(),
-            stale: row.endpoint.stale(),
-            agent,
+    );
+    // Keyed by machine as well as workspace, because two endpoints can
+    // advertise the same workspace id and must still read as separate runs.
+    let run_keys = ordered
+        .iter()
+        .map(|row| (&row.endpoint.endpoint_id, row.agent.workspace_id.as_str()))
+        .collect::<Vec<_>>();
+    let grouped = config.agents.group_by == crate::config::AgentGroupBy::Workspace
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
+        && super::agent_sidebar::keys_are_contiguous(&run_keys);
+
+    ordered
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let snapshot = row.endpoint.snapshot;
+            let header = (grouped
+                && index
+                    .checked_sub(1)
+                    .is_none_or(|previous| run_keys[previous] != run_keys[index]))
+            .then(|| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == row.agent.workspace_id)
+                    .map(|workspace| workspace.label.as_str())
+            })
+            .flatten();
+            let mut agent = super::agent_sidebar::agent_row(
+                snapshot,
+                &row.agent.pane_id,
+                config,
+                Some(row.endpoint.label),
+                super::agent_sidebar::AgentRowGrouping {
+                    grouped,
+                    header,
+                    scope: Some(row.endpoint.label),
+                },
+            )?;
+            agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
+            Some(EndpointAgentRow {
+                endpoint_id: row.endpoint.endpoint_id.clone(),
+                machine_label: row.endpoint.label.to_owned(),
+                stale: row.endpoint.stale(),
+                agent,
+            })
         })
-    })
-    .collect()
+        .collect()
 }

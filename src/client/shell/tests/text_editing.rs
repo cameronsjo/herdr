@@ -335,6 +335,14 @@ fn all_naming_targets_preserve_submission_and_empty_semantics() {
                 Method::WorkspaceCreate(v) => {
                     assert_eq!(v.label.as_deref(), (!empty).then_some(expected))
                 }
+                // The fork's `workspace.open` focuses a space already on the
+                // path instead of stacking a second one on it, so submitting
+                // this overlay with no typed name opens rather than creates.
+                // A typed name is a deliberate second space and still creates.
+                Method::WorkspaceOpen(v) => {
+                    assert!(empty);
+                    assert_eq!(v.label, None);
+                }
                 Method::WorkspaceRename(v) => assert_eq!(v.label, expected),
                 Method::TabCreate(v) => {
                     assert_eq!(v.label.as_deref(), (!empty).then_some(expected))

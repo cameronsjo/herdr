@@ -165,8 +165,18 @@ fn local_agent_click_can_cancel_a_pending_remote_switch() {
             .find(|(_, endpoint, _)| endpoint.is_local())
             .unwrap()
             .clone();
-        let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+        // The fork defers agent focus to the release so the same press can grow
+        // into a drag-move, so the cancelling action lands on the button up, not
+        // the button down. A press alone must stay silent.
+        let pressed = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + 2,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        })]);
+        assert!(pressed.actions.is_empty());
+        let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
             column: rect.x + 2,
             row: rect.y,
             modifiers: KeyModifiers::NONE,

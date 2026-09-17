@@ -181,9 +181,12 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
         crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorkspace),
         &mut create,
     );
+    // `workspace.open` rather than `workspace.create`: the fork focuses a space
+    // that already sits on the path, and an unprompted new-space action carries
+    // no typed name, so it never stacks a second space on the same checkout.
     assert!(
         matches!(create.actions.as_slice(), [ClientShellAction::Endpoint { endpoint_id: ClientEndpointId::Local, request, .. }]
-        if matches!(&request.method, crate::api::schema::Method::WorkspaceCreate(params) if params.source_workspace_id.as_deref() == Some("ws_1")))
+        if matches!(&request.method, crate::api::schema::Method::WorkspaceOpen(params) if params.source_workspace_id.as_deref() == Some("ws_1")))
     );
     preview_key(&mut state, b"\x1b");
     assert!(state.navigate_workspace_id.is_none());

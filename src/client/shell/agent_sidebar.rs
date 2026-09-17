@@ -16,7 +16,11 @@ pub(super) struct AgentRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
-    workspace_id: String,
+    /// Machine scope plus workspace id. Two endpoints can advertise the same
+    /// workspace id, so the scope is what keeps their runs from merging into
+    /// one header and losing the gap between them. The agent sidebar shows one
+    /// machine at a time and leaves the scope `None`.
+    group_key: (Option<String>, String),
     header: Option<String>,
     grouped: bool,
 }
@@ -30,7 +34,7 @@ impl AgentRow {
     }
 
     pub(super) fn gap_after(&self, next: &Self, gap: u16) -> u16 {
-        if self.grouped && next.grouped && self.workspace_id == next.workspace_id {
+        if self.grouped && next.grouped && self.group_key == next.group_key {
             0
         } else {
             gap
@@ -70,14 +74,24 @@ fn agent_grouping_is_effective(
 /// number of runs — at most the workspace count — rather than the entry count
 /// squared, and it allocates nothing inside this per-frame path.
 fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
-    entries.iter().enumerate().all(|(index, (agent, _))| {
+    let keys = entries
+        .iter()
+        .map(|(agent, _)| agent.workspace_id.as_str())
+        .collect::<Vec<_>>();
+    keys_are_contiguous(&keys)
+}
+
+/// Whether every key occupies exactly one run of `keys`.
+///
+/// The endpoint list groups the same way but keys each run by machine as well
+/// as workspace, so the run check lives here rather than in the workspace-only
+/// caller above.
+pub(super) fn keys_are_contiguous<K: PartialEq>(keys: &[K]) -> bool {
+    keys.iter().enumerate().all(|(index, key)| {
         let Some(previous) = index.checked_sub(1) else {
             return true;
         };
-        entries[previous].0.workspace_id == agent.workspace_id
-            || !entries[..previous]
-                .iter()
-                .any(|(earlier, _)| earlier.workspace_id == agent.workspace_id)
+        &keys[previous] == key || !keys[..previous].iter().any(|earlier| earlier == key)
     })
 }
 
@@ -328,9 +342,28 @@ pub(super) fn agent_rows(
                     .checked_sub(1)
                     .is_none_or(|previous| entries[previous].0.workspace_id != agent.workspace_id))
             .then_some(workspace.label.as_str());
-            agent_row(snapshot, &agent.pane_id, config, machine, grouped, header)
+            agent_row(
+                snapshot,
+                &agent.pane_id,
+                config,
+                machine,
+                AgentRowGrouping {
+                    grouped,
+                    header,
+                    scope: None,
+                },
+            )
         })
         .collect()
+}
+
+/// How one agent row joins the run above it.
+///
+/// `scope` names the machine the run belongs to; see `AgentRow::group_key`.
+pub(super) struct AgentRowGrouping<'a> {
+    pub(super) grouped: bool,
+    pub(super) header: Option<&'a str>,
+    pub(super) scope: Option<&'a str>,
 }
 
 pub(super) fn agent_row(
@@ -338,9 +371,13 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
-    grouped: bool,
-    header: Option<&str>,
+    grouping: AgentRowGrouping<'_>,
 ) -> Option<AgentRow> {
+    let AgentRowGrouping {
+        grouped,
+        header,
+        scope,
+    } = grouping;
     let agent = snapshot
         .agents
         .iter()
@@ -403,7 +440,7 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
-        workspace_id: agent.workspace_id.clone(),
+        group_key: (scope.map(str::to_owned), agent.workspace_id.clone()),
         header: header.map(str::to_owned),
         grouped,
         status: agent.agent_status,

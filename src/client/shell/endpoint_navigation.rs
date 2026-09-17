@@ -236,6 +236,19 @@ impl ClientShellState {
         true
     }
 
+    /// Whether a click on `endpoint_id`'s own rows is a plain focus.
+    ///
+    /// Local can still be displayed while a remote activation is pending, so a
+    /// click there is not the same-endpoint case even though the ids match: it
+    /// has to reach the runtime to cancel that handoff. The agent press in
+    /// `mouse` shares this so a deferred drag-move press cannot swallow the
+    /// cancelling click before `focus_or_activate` ever sees it.
+    pub(super) fn endpoint_click_is_plain_focus(&self, endpoint_id: &ClientEndpointId) -> bool {
+        endpoint_id == &self.active_endpoint_id
+            && !(endpoint_id.is_local()
+                && (self.multi_endpoint_active() || !self.endpoint_is_online(endpoint_id)))
+    }
+
     pub(super) fn focus_or_activate(
         &mut self,
         endpoint_id: ClientEndpointId,
@@ -251,9 +264,7 @@ impl ClientShellState {
         }
         // Local can still be displayed while a remote activation is pending.
         // Route explicit selections through the runtime so they can cancel that handoff.
-        if endpoint_id == self.active_endpoint_id
-            && !(endpoint_id.is_local() && (self.multi_endpoint_active() || !online))
-        {
+        if self.endpoint_click_is_plain_focus(&endpoint_id) {
             let method = match target {
                 ClientEndpointFocusTarget::Workspace(workspace_id) => {
                     crate::api::schema::Method::WorkspaceFocus(
