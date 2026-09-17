@@ -21,15 +21,28 @@ REGISTRY_VOLUME=herdr-docker-check-cargo-registry
 
 # Legacy environment exclusions for the standalone fallback check. Unexpected
 # failures are retried and reported below; never extend this list without a
-# pristine-upstream reproduction. Process-cleanup tests run normally: --init
-# ensures orphaned children are reaped in both the main run and isolated retries.
+# pristine-upstream reproduction.
+#
+# The 2026-09-17 additions below were each reproduced on a detached worktree of
+# pristine `origin/master` (101ccc20) in this same image, so they are the
+# container's doing rather than the fork's. The process-cleanup entries are a
+# reversal of the older note here that they "run normally": --init still reaps
+# orphaned children, but these three now fail upstream too.
 KNOWN_ENV_FAILURES=(
   "cases::hooks::claude_hook_reports_session_id_from_stdin"
+  "cases::hooks::codex_hook_reports_lifecycle_states_from_matching_events"
   "cases::hooks::codex_hook_reports_persisted_root_session_and_ignores_ephemeral_or_nested_sessions"
+  "cases::hooks::codex_metadata_hook_falls_back_to_normalized_prompt"
+  "cases::hooks::codex_metadata_hook_prefers_app_server_thread_name"
   "cases::hooks::copilot_hook_reports_session_id_from_stdin"
   "cases::hooks::devin_hook_prefers_hook_session_id_over_list"
   "cases::hooks::devin_hook_reports_session_id_from_stdin_without_state"
   "cases::hooks::devin_hook_reports_tool_session_from_list_without_state"
+  "cases::hooks::grok_hook_reports_new_session_source"
+  "cases::panes::closing_pane_terminates_processes_inside_it"
+  "cases::panes::closing_workspace_terminates_processes_inside_it"
+  "cases::workspace::forced_worktree_remove_terminates_processes_inside_checkout"
+  "integration::tests::letta_session_hook_is_silent_and_encodes_default_conversation"
   "live_handoff_preserves_http_servers_across_multiple_sessions"
   "live_handoff_preserves_keyboard_protocol_for_client_input"
   "live_handoff_preserves_modify_other_keys_for_client_input"
@@ -83,10 +96,15 @@ classify_nextest_failures() {
 
   # Each FAIL line looks like:
   #   FAIL [   0.019s] (1/1) herdr::cli app::state::tests::some_test
-  # Field 5 is the binary id (never contains whitespace); everything after
-  # it is the test name, which proc-macro-generated tests can pad with
-  # spaces — so it must not be truncated to the last field ($NF), only to
-  # what actually follows the binary id.
+  # and, once the suite is large enough for nextest to right-align the
+  # progress counter:
+  #   FAIL [   0.716s] (  69/3862) herdr::cli cases::hooks::some_test
+  # The padding splits the counter across two whitespace-delimited fields,
+  # so the binary id is not at a fixed field position. The prefix is matched
+  # by shape and stripped instead; what remains starts at the binary id
+  # (never contains whitespace), and everything after it is the test name,
+  # which proc-macro-generated tests can pad with spaces — so it must not be
+  # truncated to the last field ($NF), only to what follows the binary id.
   #
   # A `while read` loop rather than `mapfile` — this function also runs
   # under whatever bash sources scripts/test_docker_check.py's fixture, and
@@ -99,9 +117,11 @@ classify_nextest_failures() {
   done < <(
     command grep -E '^ *FAIL ' "$log_file" | awk '
       {
-        binary = $5
-        $1 = $2 = $3 = $4 = $5 = ""
-        sub(/^[ \t]+/, "")
+        if (!sub(/^[ \t]*FAIL[ \t]+\[[^]]*\][ \t]+\([ \t]*[0-9]+\/[0-9]+\)[ \t]+/, "")) {
+          next
+        }
+        binary = $1
+        sub(/^[^ \t]+[ \t]+/, "")
         print binary "\t" $0
       }
     ' | sort -u

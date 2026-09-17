@@ -30,17 +30,26 @@ SCRIPT_PATH = Path(__file__).resolve().parent / "docker-check.sh"
 # it (the test name, which may itself contain spaces).
 FAIL_LINE_TEMPLATE = "        FAIL [   0.019s] (1/1) {binary} {name}"
 
+# The same line once the suite is large enough that nextest right-aligns the
+# progress counter, padding it with spaces: `(  69/3862)`. Those spaces split
+# the counter across two whitespace-delimited fields, which shifts everything
+# after it — so a parser keyed on fixed field positions silently reads the
+# wrong binary id and test name, and every allowlist entry stops matching.
+PADDED_FAIL_LINE_TEMPLATE = "        FAIL [   0.716s] (  69/3862) {binary} {name}"
+
 LOG_PREAMBLE = "Nextest run ID deadbeef-0000-0000-0000-000000000000 with nextest profile: default\n"
 
 DEFAULT_BINARY = "herdr::cli"
 
 
-def _write_log(tmp_path: Path, failures: list[tuple[str, str]]) -> Path:
+def _write_log(
+    tmp_path: Path, failures: list[tuple[str, str]], template: str = FAIL_LINE_TEMPLATE
+) -> Path:
     """`failures` is a list of (binary_id, test_name) pairs."""
     log_file = tmp_path / "nextest.log"
     lines = [LOG_PREAMBLE]
     for binary, name in failures:
-        lines.append(FAIL_LINE_TEMPLATE.format(binary=binary, name=name) + "\n")
+        lines.append(template.format(binary=binary, name=name) + "\n")
     log_file.write_text("".join(lines), encoding="utf-8")
     return log_file
 
@@ -133,6 +142,46 @@ class DockerCheckRetryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("STILL_FAILING_COUNT=0", result.stdout)
         self.assertNotIn("retry-invoked", result.stderr)
+
+    def test_padded_progress_counter_still_matches_the_allowlist(self) -> None:
+        """A large suite right-aligns the counter (`(  69/3862)`). The extra
+        spaces must not shift the parse: an allowlisted failure stays
+        allowlisted, rather than being reported as an unexpected regression."""
+        with _tmp_dir() as tmp_path:
+            log_file = _write_log(
+                tmp_path,
+                [
+                    (
+                        DEFAULT_BINARY,
+                        "cases::hooks::claude_hook_reports_session_id_from_stdin",
+                    )
+                ],
+                template=PADDED_FAIL_LINE_TEMPLATE,
+            )
+            result = _run_classification(log_file, "  return 1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("STILL_FAILING_COUNT=0", result.stdout)
+        self.assertNotIn("retry-invoked", result.stderr)
+
+    def test_padded_progress_counter_extracts_binary_and_name(self) -> None:
+        """The retry of an unexpected failure on a padded line must be scoped
+        to the real binary id and test name, not to shifted fields."""
+        with _tmp_dir() as tmp_path:
+            log_file = _write_log(
+                tmp_path,
+                [(DEFAULT_BINARY, "cases::panes::some_real_regression")],
+                template=PADDED_FAIL_LINE_TEMPLATE,
+            )
+            result = _run_classification(
+                log_file, '  echo "retry-invoked $1 $2" >&2\n  return 1'
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"retry-invoked {DEFAULT_BINARY} cases::panes::some_real_regression",
+            result.stderr,
+        )
 
     def test_mixed_flake_and_real_failure_reports_only_the_real_one(self) -> None:
         with _tmp_dir() as tmp_path:
