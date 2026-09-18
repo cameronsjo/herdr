@@ -106,6 +106,11 @@ classify_nextest_failures() {
   # which proc-macro-generated tests can pad with spaces — so it must not be
   # truncated to the last field ($NF), only to what follows the binary id.
   #
+  # Matching `^ *FAIL ` also excludes nextest's own retry-attempt lines, which
+  # are prefixed `TRY N FAIL`. That is deliberate — only the final verdict
+  # counts — and moot today, since nothing here configures `--retries`. Revisit
+  # the filter alongside any change that does.
+  #
   # A `while read` loop rather than `mapfile` — this function also runs
   # under whatever bash sources scripts/test_docker_check.py's fixture, and
   # macOS ships bash 3.2 (no `mapfile`) on both a bare host and GitHub

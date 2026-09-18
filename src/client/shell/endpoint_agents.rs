@@ -101,6 +101,16 @@ struct EndpointAgentRow {
     agent: super::agent_sidebar::AgentRow,
 }
 
+/// The run a row belongs to: its machine and its workspace.
+///
+/// Keyed by machine as well as workspace, because two endpoints can advertise
+/// the same workspace id and must still read as separate runs. The endpoint
+/// index rather than its label: labels are display names and two connections
+/// can share one.
+fn run_key<'a>(row: &super::aggregate_navigation::AggregateAgentRow<'a>) -> (usize, &'a str) {
+    (row.endpoint.endpoint_index, row.agent.workspace_id.as_str())
+}
+
 fn agent_rows(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
@@ -114,15 +124,9 @@ fn agent_rows(
         active_endpoint_id,
         config.agent_panel_sort,
     );
-    // Keyed by machine as well as workspace, because two endpoints can
-    // advertise the same workspace id and must still read as separate runs.
-    let run_keys = ordered
-        .iter()
-        .map(|row| (&row.endpoint.endpoint_id, row.agent.workspace_id.as_str()))
-        .collect::<Vec<_>>();
     let grouped = config.agents.group_by == crate::config::AgentGroupBy::Workspace
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
-        && super::agent_sidebar::keys_are_contiguous(&run_keys);
+        && super::agent_sidebar::runs_are_contiguous(&ordered, run_key);
 
     ordered
         .iter()
@@ -132,7 +136,7 @@ fn agent_rows(
             let header = (grouped
                 && index
                     .checked_sub(1)
-                    .is_none_or(|previous| run_keys[previous] != run_keys[index]))
+                    .is_none_or(|previous| run_key(&ordered[previous]) != run_key(row)))
             .then(|| {
                 snapshot
                     .workspaces
@@ -149,7 +153,7 @@ fn agent_rows(
                 super::agent_sidebar::AgentRowGrouping {
                     grouped,
                     header,
-                    scope: Some(row.endpoint.label),
+                    scope: Some(row.endpoint.endpoint_index),
                 },
             )?;
             agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;

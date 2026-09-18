@@ -20,7 +20,12 @@ pub(super) struct AgentRow {
     /// workspace id, so the scope is what keeps their runs from merging into
     /// one header and losing the gap between them. The agent sidebar shows one
     /// machine at a time and leaves the scope `None`.
-    group_key: (Option<String>, String),
+    ///
+    /// The scope is the endpoint's index, not its label: labels are display
+    /// names and two connections can share one, which would put two machines
+    /// back in the same run. An index is also `Copy`, so a per-frame row costs
+    /// no allocation for it.
+    group_key: (Option<usize>, String),
     header: Option<String>,
     grouped: bool,
 }
@@ -69,29 +74,27 @@ fn agent_grouping_is_effective(
 }
 
 /// Whether every workspace occupies exactly one run of the ordered entries.
-///
-/// The inner scan runs only at a run boundary, so the cost is bounded by the
-/// number of runs — at most the workspace count — rather than the entry count
-/// squared, and it allocates nothing inside this per-frame path.
 fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
-    let keys = entries
-        .iter()
-        .map(|(agent, _)| agent.workspace_id.as_str())
-        .collect::<Vec<_>>();
-    keys_are_contiguous(&keys)
+    runs_are_contiguous(entries, |(agent, _)| agent.workspace_id.as_str())
 }
 
-/// Whether every key occupies exactly one run of `keys`.
+/// Whether every key occupies exactly one run of `items`, under `key`.
 ///
-/// The endpoint list groups the same way but keys each run by machine as well
-/// as workspace, so the run check lives here rather than in the workspace-only
-/// caller above.
-pub(super) fn keys_are_contiguous<K: PartialEq>(keys: &[K]) -> bool {
-    keys.iter().enumerate().all(|(index, key)| {
+/// The inner scan runs only at a run boundary, so the cost is bounded by the
+/// number of runs — at most the distinct key count — rather than the item count
+/// squared, and it allocates nothing inside this per-frame path.
+///
+/// Takes an accessor rather than a slice of keys: the endpoint list groups the
+/// same way but keys each run by machine as well as workspace, and materializing
+/// either caller's keys into a `Vec` would put an allocation on every frame.
+pub(super) fn runs_are_contiguous<T, K: PartialEq>(items: &[T], key: impl Fn(&T) -> K) -> bool {
+    items.iter().enumerate().all(|(index, item)| {
         let Some(previous) = index.checked_sub(1) else {
             return true;
         };
-        &keys[previous] == key || !keys[..previous].iter().any(|earlier| earlier == key)
+        let current = key(item);
+        key(&items[previous]) == current
+            || !items[..previous].iter().any(|earlier| key(earlier) == current)
     })
 }
 
@@ -363,7 +366,7 @@ pub(super) fn agent_rows(
 pub(super) struct AgentRowGrouping<'a> {
     pub(super) grouped: bool,
     pub(super) header: Option<&'a str>,
-    pub(super) scope: Option<&'a str>,
+    pub(super) scope: Option<usize>,
 }
 
 pub(super) fn agent_row(
@@ -440,7 +443,7 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
-        group_key: (scope.map(str::to_owned), agent.workspace_id.clone()),
+        group_key: (scope, agent.workspace_id.clone()),
         header: header.map(str::to_owned),
         grouped,
         status: agent.agent_status,
