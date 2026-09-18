@@ -16,7 +16,16 @@ pub(super) struct AgentRow {
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
-    workspace_id: String,
+    /// Machine scope plus workspace id. Two endpoints can advertise the same
+    /// workspace id, so the scope is what keeps their runs from merging into
+    /// one header and losing the gap between them. The agent sidebar shows one
+    /// machine at a time and leaves the scope `None`.
+    ///
+    /// The scope is the endpoint's index, not its label: labels are display
+    /// names and two connections can share one, which would put two machines
+    /// back in the same run. An index is also `Copy`, so a per-frame row costs
+    /// no allocation for it.
+    group_key: (Option<usize>, String),
     header: Option<String>,
     grouped: bool,
 }
@@ -30,7 +39,7 @@ impl AgentRow {
     }
 
     pub(super) fn gap_after(&self, next: &Self, gap: u16) -> u16 {
-        if self.grouped && next.grouped && self.workspace_id == next.workspace_id {
+        if self.grouped && next.grouped && self.group_key == next.group_key {
             0
         } else {
             gap
@@ -65,19 +74,29 @@ fn agent_grouping_is_effective(
 }
 
 /// Whether every workspace occupies exactly one run of the ordered entries.
+fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
+    runs_are_contiguous(entries, |(agent, _)| agent.workspace_id.as_str())
+}
+
+/// Whether every key occupies exactly one run of `items`, under `key`.
 ///
 /// The inner scan runs only at a run boundary, so the cost is bounded by the
-/// number of runs — at most the workspace count — rather than the entry count
+/// number of runs — at most the distinct key count — rather than the item count
 /// squared, and it allocates nothing inside this per-frame path.
-fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
-    entries.iter().enumerate().all(|(index, (agent, _))| {
+///
+/// Takes an accessor rather than a slice of keys: the endpoint list groups the
+/// same way but keys each run by machine as well as workspace, and materializing
+/// either caller's keys into a `Vec` would put an allocation on every frame.
+pub(super) fn runs_are_contiguous<T, K: PartialEq>(items: &[T], key: impl Fn(&T) -> K) -> bool {
+    items.iter().enumerate().all(|(index, item)| {
         let Some(previous) = index.checked_sub(1) else {
             return true;
         };
-        entries[previous].0.workspace_id == agent.workspace_id
-            || !entries[..previous]
+        let current = key(item);
+        key(&items[previous]) == current
+            || !items[..previous]
                 .iter()
-                .any(|(earlier, _)| earlier.workspace_id == agent.workspace_id)
+                .any(|earlier| key(earlier) == current)
     })
 }
 
@@ -318,59 +337,7 @@ pub(super) fn agent_rows(
     entries
         .iter()
         .enumerate()
-        .map(|(index, (agent, workspace))| {
-            let tab = snapshot.tabs.iter().find(|tab| tab.tab_id == agent.tab_id);
-            let pane = snapshot
-                .panes
-                .iter()
-                .find(|pane| pane.pane_id == agent.pane_id);
-            let tab_count = snapshot
-                .tabs
-                .iter()
-                .filter(|candidate| candidate.workspace_id == agent.workspace_id)
-                .count();
-            let tab_label = tab
-                .filter(|tab| tab_count > 1 || tab.custom_label)
-                .map(|tab| tab.label.as_str());
-            let agent_label = agent
-                .display_agent
-                .as_deref()
-                .or(agent.name.as_deref())
-                .or(agent.agent.as_deref())
-                .or(agent.title.as_deref());
-            let labels = agent
-                .state_labels
-                .iter()
-                .cloned()
-                .collect::<HashMap<_, _>>();
-            let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
-            let state_text = labels
-                .get(status_text(agent.agent_status))
-                .map(String::as_str)
-                .unwrap_or_else(|| sidebar_status_text(agent.agent_status));
-            let canonical_agent = agent
-                .agent
-                .as_deref()
-                .and_then(crate::detect::parse_agent_label);
-            let rows = crate::ui::sidebar_agent_rows(
-                &config.agents,
-                crate::ui::AgentTokenContext {
-                    machine,
-                    workspace: &workspace.label,
-                    tab: tab_label,
-                    pane: agent
-                        .title
-                        .as_deref()
-                        .or_else(|| pane.and_then(|pane| pane.label.as_deref())),
-                    agent_label,
-                    terminal_title: agent.terminal_title.as_deref(),
-                    terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
-                    canonical_agent,
-                    tokens: &tokens,
-                },
-                state_text,
-                grouped,
-            );
+        .filter_map(|(index, (agent, workspace))| {
             // The run's first entry draws the header for everyone behind it, so
             // no entry of its own is inserted and every position-indexed
             // consumer — the hit-test, the scroll offset, the scrollbar
@@ -380,17 +347,111 @@ pub(super) fn agent_rows(
                     .checked_sub(1)
                     .is_none_or(|previous| entries[previous].0.workspace_id != agent.workspace_id))
             .then_some(workspace.label.as_str());
-            AgentRow {
-                pane_id: agent.pane_id.clone(),
-                workspace_id: agent.workspace_id.clone(),
-                header: header.map(str::to_owned),
-                grouped,
-                status: agent.agent_status,
-                focused: agent.focused,
-                rows,
-            }
+            agent_row(
+                snapshot,
+                &agent.pane_id,
+                config,
+                machine,
+                AgentRowGrouping {
+                    grouped,
+                    header,
+                    scope: None,
+                },
+            )
         })
         .collect()
+}
+
+/// How one agent row joins the run above it.
+///
+/// `scope` names the machine the run belongs to; see `AgentRow::group_key`.
+pub(super) struct AgentRowGrouping<'a> {
+    pub(super) grouped: bool,
+    pub(super) header: Option<&'a str>,
+    pub(super) scope: Option<usize>,
+}
+
+pub(super) fn agent_row(
+    snapshot: &ClientShellSnapshot,
+    pane_id: &str,
+    config: &ClientShellConfig,
+    machine: Option<&str>,
+    grouping: AgentRowGrouping<'_>,
+) -> Option<AgentRow> {
+    let AgentRowGrouping {
+        grouped,
+        header,
+        scope,
+    } = grouping;
+    let agent = snapshot
+        .agents
+        .iter()
+        .find(|agent| agent.pane_id == pane_id)?;
+    let workspace = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
+    let tab = snapshot.tabs.iter().find(|tab| tab.tab_id == agent.tab_id);
+    let pane = snapshot
+        .panes
+        .iter()
+        .find(|pane| pane.pane_id == agent.pane_id);
+    let tab_count = snapshot
+        .tabs
+        .iter()
+        .filter(|candidate| candidate.workspace_id == agent.workspace_id)
+        .count();
+    let tab_label = tab
+        .filter(|tab| tab_count > 1 || tab.custom_label)
+        .map(|tab| tab.label.as_str());
+    let agent_label = agent
+        .display_agent
+        .as_deref()
+        .or(agent.name.as_deref())
+        .or(agent.agent.as_deref())
+        .or(agent.title.as_deref());
+    let labels = agent
+        .state_labels
+        .iter()
+        .cloned()
+        .collect::<HashMap<_, _>>();
+    let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
+    let state_text = labels
+        .get(status_text(agent.agent_status))
+        .map(String::as_str)
+        .unwrap_or_else(|| sidebar_status_text(agent.agent_status));
+    let canonical_agent = agent
+        .agent
+        .as_deref()
+        .and_then(crate::detect::parse_agent_label);
+    let rows = crate::ui::sidebar_agent_rows(
+        &config.agents,
+        crate::ui::AgentTokenContext {
+            machine,
+            workspace: &workspace.label,
+            tab: tab_label,
+            pane: agent
+                .title
+                .as_deref()
+                .or_else(|| pane.and_then(|pane| pane.label.as_deref())),
+            agent_label,
+            terminal_title: agent.terminal_title.as_deref(),
+            terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
+            canonical_agent,
+            tokens: &tokens,
+        },
+        state_text,
+        grouped,
+    );
+    Some(AgentRow {
+        pane_id: agent.pane_id.clone(),
+        group_key: (scope, agent.workspace_id.clone()),
+        header: header.map(str::to_owned),
+        grouped,
+        status: agent.agent_status,
+        focused: agent.focused,
+        rows,
+    })
 }
 
 pub(super) fn render_agent_row(
@@ -421,16 +482,8 @@ pub(super) fn render_agent_row(
             .fg(palette.subtext0)
             .add_modifier(Modifier::BOLD)
     };
-    let status_style = Style::default()
-        .fg(status_color(row.status, palette))
-        .add_modifier(if row.focused {
-            Modifier::empty()
-        } else {
-            Modifier::DIM
-        });
-    let secondary = Style::default()
-        .fg(palette.overlay0)
-        .add_modifier(Modifier::DIM);
+    let status_style = Style::default().fg(status_color(row.status, palette));
+    let secondary = Style::default().fg(palette.overlay0);
     let icon = (
         status_icon(row.status, config.status_indicators),
         Style::default().fg(status_color(row.status, palette)),

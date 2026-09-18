@@ -861,7 +861,8 @@ mod tests {
             clear_title: false,
             clear_display_agent: false,
             clear_state_labels: false,
-            // Expiry is driven explicitly below; leave time for both reports under load.
+            // Expiry is forced with the captured deadline below; keep the
+            // no-extension assertion independent of wall-clock scheduling.
             ttl: Some(Duration::from_secs(60)),
             seq: None,
         });

@@ -21,15 +21,28 @@ REGISTRY_VOLUME=herdr-docker-check-cargo-registry
 
 # Legacy environment exclusions for the standalone fallback check. Unexpected
 # failures are retried and reported below; never extend this list without a
-# pristine-upstream reproduction. Process-cleanup tests run normally: --init
-# ensures orphaned children are reaped in both the main run and isolated retries.
+# pristine-upstream reproduction.
+#
+# The 2026-09-17 additions below were each reproduced on a detached worktree of
+# pristine `origin/master` (101ccc20) in this same image, so they are the
+# container's doing rather than the fork's. The process-cleanup entries are a
+# reversal of the older note here that they "run normally": --init still reaps
+# orphaned children, but these three now fail upstream too.
 KNOWN_ENV_FAILURES=(
   "cases::hooks::claude_hook_reports_session_id_from_stdin"
+  "cases::hooks::codex_hook_reports_lifecycle_states_from_matching_events"
   "cases::hooks::codex_hook_reports_persisted_root_session_and_ignores_ephemeral_or_nested_sessions"
+  "cases::hooks::codex_metadata_hook_falls_back_to_normalized_prompt"
+  "cases::hooks::codex_metadata_hook_prefers_app_server_thread_name"
   "cases::hooks::copilot_hook_reports_session_id_from_stdin"
   "cases::hooks::devin_hook_prefers_hook_session_id_over_list"
   "cases::hooks::devin_hook_reports_session_id_from_stdin_without_state"
   "cases::hooks::devin_hook_reports_tool_session_from_list_without_state"
+  "cases::hooks::grok_hook_reports_new_session_source"
+  "cases::panes::closing_pane_terminates_processes_inside_it"
+  "cases::panes::closing_workspace_terminates_processes_inside_it"
+  "cases::workspace::forced_worktree_remove_terminates_processes_inside_checkout"
+  "integration::tests::letta_session_hook_is_silent_and_encodes_default_conversation"
   "live_handoff_preserves_http_servers_across_multiple_sessions"
   "live_handoff_preserves_keyboard_protocol_for_client_input"
   "live_handoff_preserves_modify_other_keys_for_client_input"
@@ -83,10 +96,20 @@ classify_nextest_failures() {
 
   # Each FAIL line looks like:
   #   FAIL [   0.019s] (1/1) herdr::cli app::state::tests::some_test
-  # Field 5 is the binary id (never contains whitespace); everything after
-  # it is the test name, which proc-macro-generated tests can pad with
-  # spaces — so it must not be truncated to the last field ($NF), only to
-  # what actually follows the binary id.
+  # and, once the suite is large enough for nextest to right-align the
+  # progress counter:
+  #   FAIL [   0.716s] (  69/3862) herdr::cli cases::hooks::some_test
+  # The padding splits the counter across two whitespace-delimited fields,
+  # so the binary id is not at a fixed field position. The prefix is matched
+  # by shape and stripped instead; what remains starts at the binary id
+  # (never contains whitespace), and everything after it is the test name,
+  # which proc-macro-generated tests can pad with spaces — so it must not be
+  # truncated to the last field ($NF), only to what follows the binary id.
+  #
+  # Matching `^ *FAIL ` also excludes nextest's own retry-attempt lines, which
+  # are prefixed `TRY N FAIL`. That is deliberate — only the final verdict
+  # counts — and moot today, since nothing here configures `--retries`. Revisit
+  # the filter alongside any change that does.
   #
   # A `while read` loop rather than `mapfile` — this function also runs
   # under whatever bash sources scripts/test_docker_check.py's fixture, and
@@ -99,9 +122,11 @@ classify_nextest_failures() {
   done < <(
     command grep -E '^ *FAIL ' "$log_file" | awk '
       {
-        binary = $5
-        $1 = $2 = $3 = $4 = $5 = ""
-        sub(/^[ \t]+/, "")
+        if (!sub(/^[ \t]*FAIL[ \t]+\[[^]]*\][ \t]+\([ \t]*[0-9]+\/[0-9]+\)[ \t]+/, "")) {
+          next
+        }
+        binary = $1
+        sub(/^[^ \t]+[ \t]+/, "")
         print binary "\t" $0
       }
     ' | sort -u
@@ -150,12 +175,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "==> building check image ($IMAGE_TAG)"
   docker build -q -t "$IMAGE_TAG" "$ROOT_DIR/scripts/docker-check" >/dev/null
 
-  echo "==> cargo fmt --check, clippy, nextest (in container)"
-  LOG_FILE=$(mktemp)
-  trap 'rm -f "$LOG_FILE"' EXIT
-
-  set +e
+  # Zig 0.16 compiles libghostty-vt's SIMD and wuffs C++ sources one job per
+  # visible CPU, and four of those at once exceed a 4 GiB Docker VM. The kernel
+  # kills the compile, and build.rs reports it as "zig build for vendored
+  # libghostty-vt failed", which reads as a toolchain problem rather than a
+  # memory one. Warm the vendored library in its own container with a bounded
+  # CPU set first: the expensive compiles land in .zig-cache, so the main run's
+  # build.rs finds them cached and the test run still gets every CPU.
+  # Override with ZIG_BUILD_CPUSET on a host with memory to spare.
+  echo "==> prebuilding vendored libghostty-vt (CPUs ${ZIG_BUILD_CPUSET:=0-1})"
   docker run --rm --init \
+    --cpuset-cpus="$ZIG_BUILD_CPUSET" \
     -v "$ROOT_DIR:/work" \
     -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
     -w /work \
@@ -171,6 +201,29 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       # build.rs forces the rerun every time, matching the always-wiped zig-out
       # above.
       touch build.rs
+      # check, not build: it runs build.rs (and so the zig build) without
+      # paying for a link the clippy pass below would not reuse anyway.
+      cargo check --locked
+    '
+
+  # Same memory ceiling, second offender: four concurrent rustc processes on
+  # this crate also overrun a 4 GiB VM, and the kill surfaces as
+  # "could not compile `herdr` ... (signal: 9, SIGKILL: kill)" with no
+  # diagnostic attached. Bound the compile jobs; nextest still runs its tests
+  # at full width, since those are small.
+  echo "==> cargo fmt --check, clippy, nextest (in container, ${CARGO_BUILD_JOBS:=2} compile jobs)"
+  LOG_FILE=$(mktemp)
+  trap 'rm -f "$LOG_FILE"' EXIT
+
+  set +e
+  docker run --rm --init \
+    -e CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" \
+    -v "$ROOT_DIR:/work" \
+    -v "$REGISTRY_VOLUME:/opt/cargo/registry" \
+    -w /work \
+    "$IMAGE_TAG" \
+    bash -c '
+      set -euo pipefail
       cargo fmt --check
       cargo clippy --all-targets --locked -- -D warnings
       cargo nextest run --locked --no-fail-fast --status-level fail --final-status-level fail --failure-output final --success-output never

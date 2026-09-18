@@ -101,29 +101,61 @@ struct EndpointAgentRow {
     agent: super::agent_sidebar::AgentRow,
 }
 
+/// The run a row belongs to: its machine and its workspace.
+///
+/// Keyed by machine as well as workspace, because two endpoints can advertise
+/// the same workspace id and must still read as separate runs. The endpoint
+/// index rather than its label: labels are display names and two connections
+/// can share one.
+fn run_key<'a>(row: &super::aggregate_navigation::AggregateAgentRow<'a>) -> (usize, &'a str) {
+    (row.endpoint.endpoint_index, row.agent.workspace_id.as_str())
+}
+
 fn agent_rows(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
-    let mut rendered_rows = endpoints
-        .iter()
-        .filter_map(|endpoint| {
-            endpoint.snapshot.as_deref().map(|snapshot| {
-                super::agent_sidebar::agent_rows(snapshot, config, Some(&endpoint.label))
-                    .into_iter()
-                    .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
-                    .collect::<Vec<_>>()
-            })
-        })
-        .flatten()
-        .collect::<HashMap<_, _>>();
+    // Rows are built in the order they will be drawn, not per endpoint: a
+    // header belongs to the first row of a run, and only the aggregated order
+    // says where the runs actually start.
+    let ordered = super::aggregate_navigation::aggregate_agent_rows(
+        endpoints,
+        active_endpoint_id,
+        config.agent_panel_sort,
+    );
+    let grouped = config.agents.group_by == crate::config::AgentGroupBy::Workspace
+        && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
+        && super::agent_sidebar::runs_are_contiguous(&ordered, run_key);
 
-    super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort)
-        .into_iter()
-        .filter_map(|row| {
-            let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
-            let mut agent = rendered_rows.remove(&key)?;
+    ordered
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| {
+            let snapshot = row.endpoint.snapshot;
+            let header = (grouped
+                && index
+                    .checked_sub(1)
+                    .is_none_or(|previous| run_key(&ordered[previous]) != run_key(row)))
+            .then(|| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == row.agent.workspace_id)
+                    .map(|workspace| workspace.label.as_str())
+            })
+            .flatten();
+            let mut agent = super::agent_sidebar::agent_row(
+                snapshot,
+                &row.agent.pane_id,
+                config,
+                Some(row.endpoint.label),
+                super::agent_sidebar::AgentRowGrouping {
+                    grouped,
+                    header,
+                    scope: Some(row.endpoint.endpoint_index),
+                },
+            )?;
             agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
             Some(EndpointAgentRow {
                 endpoint_id: row.endpoint.endpoint_id.clone(),

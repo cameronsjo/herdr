@@ -26,6 +26,7 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "pane.focus_direction",
     "pane.input.set",
     "pane.link.activate",
+    "pane.link.resolve",
     "pane.move",
     "pane.rename",
     "pane.resize",
@@ -303,7 +304,12 @@ mod tests {
             &std::fs::read_to_string(&fixture).expect("endpoint method shape fixture"),
         )
         .expect("endpoint method shape fixture");
-        let actual = endpoint_method_shape_digests();
+        let mut actual = endpoint_method_shape_digests();
+        // Freeze the additive method separately without rewriting the published fixture.
+        assert_eq!(
+            actual.remove("pane.link.resolve").as_deref(),
+            Some("f5e4a3e01453ae7b188f127ce951c12c20e0bebcc17cc364eeb6d1a01fd5bf81")
+        );
 
         if std::env::var_os("HERDR_RECORD_ENDPOINT_METHOD_SHAPES").is_some() {
             let added = actual
@@ -321,8 +327,7 @@ mod tests {
         }
 
         assert_eq!(
-            actual,
-            expected,
+            actual, expected,
             "an existing endpoint method changed shape; add load-bearing behavior as a new advertised method or explicitly gate new fields"
         );
     }
@@ -379,6 +384,15 @@ mod tests {
             crate::api::schema::EmptyParams::default(),
         )));
         assert!(supports_client_shell_method(&Method::PaneLinkActivate(
+            crate::api::schema::PaneLinkActivateParams {
+                pane_id: "w1:p1".into(),
+                viewport_row: 0,
+                col: 0,
+                content_revision: None,
+                offset_from_bottom: None,
+            },
+        )));
+        assert!(supports_client_shell_method(&Method::PaneLinkResolve(
             crate::api::schema::PaneLinkActivateParams {
                 pane_id: "w1:p1".into(),
                 viewport_row: 0,

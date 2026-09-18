@@ -261,9 +261,7 @@ pub(crate) fn resolved_token_spans(
             rendered_width += display_width(separator);
             spans.push(Span::styled(
                 separator,
-                Style::default()
-                    .fg(palette.overlay0)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(palette.overlay0),
             ));
         }
         rendered_width += fixed_widths[index] + budgets[index];
