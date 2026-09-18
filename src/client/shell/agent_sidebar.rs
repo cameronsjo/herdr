@@ -94,7 +94,9 @@ pub(super) fn runs_are_contiguous<T, K: PartialEq>(items: &[T], key: impl Fn(&T)
         };
         let current = key(item);
         key(&items[previous]) == current
-            || !items[..previous].iter().any(|earlier| key(earlier) == current)
+            || !items[..previous]
+                .iter()
+                .any(|earlier| key(earlier) == current)
     })
 }
 
