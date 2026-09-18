@@ -44,6 +44,13 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ## The fork's Zig toolchain follows libghostty-vt to 0.16.0
 
+### test(ci): point the publishing-boundary test at the fork's own release pipeline
+
+- **PR:** [cameronsjo/herdr#84](https://github.com/cameronsjo/herdr/pull/84)
+- **Files:** `scripts/release-workflows.test.ts`
+- **Replaces:** Upstream's `scripts/release-workflows.test.ts`, new in this range. It loads `release.yml` and reads `jobs["validate-release-source"].steps[0]` at module scope, which throws before any test runs: the fork replaced `release.yml` with its own build/release/tap-bump pipeline (ledger PR #3/#4) and has no such job. The gate step itself is still reachable — upstream anchors it in `preview.yml`, which the fork does not modify — so the admin-gate assertions and the fail-closed behaviour test are kept, sourced from there. The release half is retargeted at what the fork actually ships: the tag trigger is the fork's `v*-palette.[0-9]*` namespace rather than upstream's `v*`, and in place of a multi-admin gate the fork's boundary is least privilege, so the test now pins the workflow default of `contents: read`, each job's own widening, and the tap App token's scoping to `homebrew-tap` with `permission-contents: write`. The fork has one owner; it does not have, and this does not remove, a two-actor gate.
+- **Regression check:** `bun test scripts/release-workflows.test.ts` — 6 tests, 40 assertions. Staged-break check: changing `repositories: homebrew-tap` to any other repository in `release.yml` must redden `the fork's release pipeline grants the narrowest permissions it can`, and the file restored must return it to green. Confirmed both directions 2026-09-18. This test runs under `just maintenance-test`, which `scripts/docker-check.sh` does **not** invoke — the container gate covers `cargo fmt`, `clippy` and `nextest` only, so CI caught this after a green local gate.
+
 ### ci: install Zig 0.16.0 for the macOS builds and the container check
 
 - **Files:** `.github/workflows/release.yml`, `.github/workflows/build-artifacts-manual.yml`, `scripts/docker-check/Dockerfile`, `scripts/docker-check.sh`
