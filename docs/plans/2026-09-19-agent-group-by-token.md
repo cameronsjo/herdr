@@ -133,7 +133,7 @@ Driver: opus — one session implements in sequence; no fan-out (fewer than 3 in
 - [ ] 4. Optional fork: `first_of` fallback token
 - [ ] 5. Upstream herdr-projects issue for workspace tokens (only with Cameron's go-ahead)
 - [ ] 6. Cameron: rename one of the two "Projects" workspaces
-- [ ] 7. Fork: workspace-token fallback in `agent_group_key` (brief 2, item 5)
+- [x] 7. Fork: workspace-token fallback in `agent_group_key` (brief 2, item 5)
 - [ ] 8. Fork: `blocked_first` option (brief 2, item 6)
 - [ ] 9. Fork: widen step 2 — `✕` on the view label, global-menu entry, palette row (brief 2, item 4)
 - [ ] 10. Config: `$thread · workspace` row plus `agent`, `blocked_first` (brief 2, items 5 and name)

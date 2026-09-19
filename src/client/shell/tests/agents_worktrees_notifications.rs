@@ -1968,6 +1968,35 @@ fn token_grouping_ignores_an_empty_token_value() {
 }
 
 #[test]
+fn token_grouping_falls_back_to_the_workspace_token() {
+    // pane_3's own token expired; its workspace still reports the project, so
+    // it stays in the x group. pane_4 shares that workspace and joins too.
+    let mut projected = token_agents_snapshot();
+    projected.agents[2].tokens.clear();
+    projected.workspaces[1].tokens = vec![("project".into(), "x".into())];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&token_config()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("token-grouped sidebar");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, pane_id)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_1", 2), ("pane_3", 1), ("pane_4", 1), ("pane_2", 2)],
+    );
+    assert_eq!(
+        agent_headers(&state, &frame)
+            .into_iter()
+            .map(|(_, header)| header)
+            .collect::<Vec<_>>(),
+        vec![" x", " alpha"],
+    );
+}
+
+#[test]
 fn token_grouping_keeps_a_rank_sorted_view_grouped() {
     // A view that filters to the project and sorts by rank interleaves the
     // workspaces; with token grouping every row shares one key and one header.

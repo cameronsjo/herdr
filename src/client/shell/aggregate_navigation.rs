@@ -66,7 +66,11 @@ pub(super) fn aggregate_agent_rows<'a>(
         return super::agent_sidebar::gather_runs(rows, |row| {
             (
                 row.endpoint.endpoint_index,
-                super::agent_sidebar::agent_group_key(row.agent, group_by),
+                super::agent_sidebar::agent_group_key(
+                    row.agent,
+                    &row.endpoint.snapshot.workspaces,
+                    group_by,
+                ),
             )
         });
     }

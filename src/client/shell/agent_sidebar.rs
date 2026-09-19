@@ -49,23 +49,39 @@ impl AgentGroupKey<&str> {
     }
 }
 
-/// The group key for one agent. Token mode keys by the pane's token value and
-/// falls back to the workspace, so an agent without the token keeps the
-/// grouping it had under `group_by = "workspace"`.
+/// The group key for one agent. Token mode keys by the pane's token value,
+/// then by the same token on the agent's workspace, and falls back to the
+/// workspace itself, so an agent with neither keeps the grouping it had under
+/// `group_by = "workspace"`.
+///
+/// The workspace token is the durable one: a plugin that stops refreshing a
+/// pane token lets it expire, while a workspace token set once stays. The
+/// workspace is looked up only when the pane has no value, so a tokened pane
+/// costs no scan.
 pub(super) fn agent_group_key<'a>(
     agent: &'a ClientShellAgent,
+    workspaces: &'a [ClientShellWorkspace],
     group_by: &crate::config::AgentGroupBy,
 ) -> AgentGroupKey<&'a str> {
     let crate::config::AgentGroupBy::Token(name) = group_by else {
         return AgentGroupKey::Workspace(agent.workspace_id.as_str());
     };
-    agent
-        .tokens
-        .iter()
-        .find(|(key, value)| key == name && !value.is_empty())
+    let token_value = |tokens: &'a [(String, String)]| {
+        tokens
+            .iter()
+            .find(|(key, value)| key == name && !value.is_empty())
+            .map(|(_, value)| value.as_str())
+    };
+    token_value(&agent.tokens)
+        .or_else(|| {
+            workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == agent.workspace_id)
+                .and_then(|workspace| token_value(&workspace.tokens))
+        })
         .map_or(
             AgentGroupKey::Workspace(agent.workspace_id.as_str()),
-            |(_, value)| AgentGroupKey::Token(value.as_str()),
+            AgentGroupKey::Token,
         )
 }
 
@@ -137,12 +153,13 @@ impl AgentRow {
 /// `ordered_agent_pane_ids`, so it passes this check under any view.
 fn agent_grouping_is_effective(
     entries: &[(&ClientShellAgent, &ClientShellWorkspace)],
+    workspaces: &[ClientShellWorkspace],
     config: &ClientShellConfig,
 ) -> bool {
     config.agents.group_by.is_grouped()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
         && runs_are_contiguous(entries, |(agent, _)| {
-            agent_group_key(agent, &config.agents.group_by)
+            agent_group_key(agent, workspaces, &config.agents.group_by)
         })
 }
 
@@ -209,7 +226,9 @@ pub(super) fn ordered_agent_pane_ids(
         });
     }
     if gathers_group_runs(group_by, sort) {
-        agents = gather_runs(agents, |agent| agent_group_key(agent, group_by));
+        agents = gather_runs(agents, |agent| {
+            agent_group_key(agent, &snapshot.workspaces, group_by)
+        });
     }
     agents
         .into_iter()
@@ -419,7 +438,7 @@ pub(super) fn agent_rows(
                 Some((agent, workspace))
             })
             .collect::<Vec<_>>();
-    let grouped = agent_grouping_is_effective(&entries, config);
+    let grouped = agent_grouping_is_effective(&entries, &snapshot.workspaces, config);
     entries
         .iter()
         .enumerate()
@@ -428,10 +447,14 @@ pub(super) fn agent_rows(
             // no entry of its own is inserted and every position-indexed
             // consumer — the hit-test, the scroll offset, the scrollbar
             // metrics — keeps counting agents.
-            let key = agent_group_key(agent, &config.agents.group_by);
+            let key = agent_group_key(agent, &snapshot.workspaces, &config.agents.group_by);
             let header = (grouped
                 && index.checked_sub(1).is_none_or(|previous| {
-                    agent_group_key(entries[previous].0, &config.agents.group_by) != key
+                    agent_group_key(
+                        entries[previous].0,
+                        &snapshot.workspaces,
+                        &config.agents.group_by,
+                    ) != key
                 }))
             .then(|| group_header(key, workspace));
             agent_row(
@@ -534,7 +557,7 @@ pub(super) fn agent_row(
         pane_id: agent.pane_id.clone(),
         group_key: (
             scope,
-            agent_group_key(agent, &config.agents.group_by).to_owned_key(),
+            agent_group_key(agent, &snapshot.workspaces, &config.agents.group_by).to_owned_key(),
         ),
         header: header.map(str::to_owned),
         grouped,
