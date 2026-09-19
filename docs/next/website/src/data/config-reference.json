@@ -602,6 +602,12 @@
           "description": "Focus the currently visible notification target."
         },
         {
+          "key": "keys.clear_agent_view",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Clear the active agent view, such as a plugin's focus filter. Also in the global menu and the command palette while a view is active. Unset by default."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",
@@ -1103,17 +1109,23 @@
           ]
         },
         {
+          "key": "ui.sidebar.agents.blocked_first",
+          "type": "boolean",
+          "default": "false",
+          "description": "Move blocked agents to the top of their group, or of the whole list when not grouping, keeping every other order. Applies in grouped (space) panel order; priority order already leads with blocked agents."
+        },
+        {
           "key": "ui.sidebar.agents.group_by",
-          "type": "enum",
+          "type": "enum or table",
           "default": "\"none\"",
-          "description": "Group expanded Agent sidebar entries under one header per contiguous workspace run. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
-          "values": ["none", "workspace"]
+          "description": "Group expanded Agent sidebar entries under one header per run. \"workspace\" groups contiguous agents from one workspace. { token = \"name\" } groups agents whose panes report the same value for that metadata token, across workspaces; a pane without the value uses the same token on its workspace, and an agent with neither stays in its workspace group. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
+          "values": ["none", "workspace", "token"]
         },
         {
           "key": "ui.sidebar.agents.grouped_rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"tab\", \"agent\"]]",
-          "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; a rows_by_agent override still wins."
+          "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; it takes precedence over a rows_by_agent override while grouping is active."
         },
         {
           "key": "ui.sidebar.agents.row_gap",

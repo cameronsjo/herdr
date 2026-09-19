@@ -137,6 +137,11 @@ pub(crate) fn keybind_help_groups(
                     "open notification target",
                     KeybindAction::OpenNotificationTarget,
                 ),
+                action_entry(
+                    binding_label(&keybinds.clear_agent_view),
+                    "clear agent view",
+                    KeybindAction::ClearAgentView,
+                ),
             ],
         ),
         (

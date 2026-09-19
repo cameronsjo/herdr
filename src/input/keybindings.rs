@@ -76,6 +76,7 @@ pub(crate) enum KeybindAction {
     Settings,
     ReloadConfig,
     OpenNotificationTarget,
+    ClearAgentView,
     Detach,
     OpenNavigator,
 }
@@ -139,6 +140,7 @@ impl KeybindAction {
             Self::Settings => Some("core:settings"),
             Self::ReloadConfig => Some("core:reload-config"),
             Self::OpenNotificationTarget => Some("core:open-notification-target"),
+            Self::ClearAgentView => Some("core:clear-agent-view"),
             Self::Detach => Some("core:detach"),
             Self::OpenNavigator => Some("core:session-navigator"),
             Self::OpenCommandPalette
@@ -255,6 +257,7 @@ pub(crate) fn resolve_non_indexed_action(
             &keybinds.open_notification_target,
             KeybindAction::OpenNotificationTarget,
         ),
+        (&keybinds.clear_agent_view, KeybindAction::ClearAgentView),
         (&keybinds.detach, KeybindAction::Detach),
         (&keybinds.goto, KeybindAction::OpenNavigator),
     ] {

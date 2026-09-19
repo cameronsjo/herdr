@@ -191,10 +191,17 @@ fn normalize_source(source: &str) -> Result<String, String> {
 }
 
 fn normalize_label(label: &str) -> Result<String, String> {
+    // Drop format characters (bidi overrides, zero-width) as well as control
+    // characters, as every other label does: the TUI draws this label beside a
+    // click target that clears the view, so it must read as what it says.
     let label = label
         .trim()
         .chars()
-        .filter(|ch| !ch.is_control())
+        .filter(|ch| {
+            !ch.is_control()
+                && !crate::label::is_format_char(*ch)
+                && !matches!(ch, '\u{2028}' | '\u{2029}')
+        })
         .collect::<String>();
     if label.is_empty() || label.chars().count() > MAX_LABEL_CHARS {
         return Err(format!(
@@ -393,6 +400,15 @@ mod tests {
             }),
             sort: Vec::new(),
         }
+    }
+
+    #[test]
+    fn view_labels_drop_format_characters() {
+        assert_eq!(
+            normalize_label("focus\u{202E}evil\u{200B}\u{2028}\u{2029}").as_deref(),
+            Ok("focusevil")
+        );
+        assert!(normalize_label("\u{202E}\u{200B}\u{2028}\u{2029}").is_err());
     }
 
     #[test]
