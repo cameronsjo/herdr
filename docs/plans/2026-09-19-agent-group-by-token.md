@@ -87,10 +87,12 @@ Source: `/tmp/herdr-sidebar-brief-2.md`. Live state re-read with `herdr agent li
 
 **Added fix steps**
 
+<!-- markdownlint-disable MD029 -- continues the plan's step numbers, which the Tasks list cites -->
 7. **Fork: workspace-token fallback for token grouping.** `agent_group_key` checks the pane's token first, then the workspace's token (`ClientShellWorkspace.tokens`), then the workspace. Once herdr-projects sets `project` on thread workspaces (step 5), grouping survives the pane-token TTL. Test: a pane without the token in a workspace with it joins the token group.
 8. **Fork: `blocked_first` agent option.** `[ui.sidebar.agents] blocked_first = true` moves blocked agents to the top of each group with a stable sort after the gather. Runs stay contiguous, so grouping stays on. Without grouping it moves them to the top of the list. Default `false`. This covers "Needs you" without a synthetic group that would break the one-key-per-run rule. Test: blocked member leads its run; the order of other members is unchanged.
 9. **Step 2 widened.** Render the active view as `<label> ✕` in the accent color. Clicking it sends `agent.view.clear`. Add "clear agent view" to the global menu while a view is active. Add a palette row, which needs a new `KeybindAction::ClearAgentView` with an unbound `keys.clear_agent_view` (the palette's core rows come from `KeybindAction::palette_id`, `src/input/keybindings.rs:83`; `src/ui/keybind_help.rs` no longer exists).
 10. **Config, extends step 3:** `grouped_rows = [["state_icon", "$thread", "workspace"], [{ token = "agent", dim = true }, { token = "terminal_title_stripped", dim = true }]]`, and `blocked_first = true` after step 8 ships.
+<!-- markdownlint-enable MD029 -->
 
 **Release note:** steps 1 and 2 change the binary, so they need a fork release and a server restart, which kills live panes (`herdr-restart-semantics`). Batch them into the next palette release; don't ship each separately.
 
