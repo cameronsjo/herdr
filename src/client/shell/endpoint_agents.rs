@@ -152,13 +152,12 @@ fn agent_rows(
                 && index
                     .checked_sub(1)
                     .is_none_or(|previous| run_key(&ordered[previous], group_by) != key))
-            .then(|| match key.1 {
-                super::agent_sidebar::AgentGroupKey::Token(value) => Some(value),
-                super::agent_sidebar::AgentGroupKey::Workspace(workspace_id) => snapshot
+            .then(|| {
+                snapshot
                     .workspaces
                     .iter()
-                    .find(|workspace| workspace.workspace_id == workspace_id)
-                    .map(|workspace| workspace.label.as_str()),
+                    .find(|workspace| workspace.workspace_id == row.agent.workspace_id)
+                    .map(|workspace| super::agent_sidebar::group_header(key.1, workspace))
             })
             .flatten();
             let mut agent = super::agent_sidebar::agent_row(

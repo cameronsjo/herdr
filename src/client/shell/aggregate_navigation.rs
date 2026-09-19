@@ -77,18 +77,21 @@ pub(super) fn aggregate_agent_rows<'a>(
         });
     }
     if agents_config.blocked_first && sort == crate::config::AgentPanelSortConfig::Spaces {
-        rows = super::agent_sidebar::blocked_first_within_runs(
+        rows = super::agent_sidebar::blocked_first_order(
             rows,
+            group_by,
+            sort,
             |row| {
                 (
                     row.endpoint.endpoint_index,
-                    super::agent_sidebar::blocked_run_key(
+                    Some(super::agent_sidebar::agent_group_key(
                         row.agent,
                         &row.endpoint.snapshot.workspaces,
-                        agents_config,
-                    ),
+                        group_by,
+                    )),
                 )
             },
+            |row| (row.endpoint.endpoint_index, None),
             |row| row.agent.agent_status == crate::api::schema::AgentStatus::Blocked,
         );
     }

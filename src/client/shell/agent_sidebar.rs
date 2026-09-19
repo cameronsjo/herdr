@@ -86,7 +86,10 @@ pub(super) fn agent_group_key<'a>(
 }
 
 /// The header text for a run: the token value, or the workspace label.
-fn group_header<'a>(key: AgentGroupKey<&'a str>, workspace: &'a ClientShellWorkspace) -> &'a str {
+pub(super) fn group_header<'a>(
+    key: AgentGroupKey<&'a str>,
+    workspace: &'a ClientShellWorkspace,
+) -> &'a str {
     match key {
         AgentGroupKey::Token(value) => value,
         AgentGroupKey::Workspace(_) => workspace.label.as_str(),
@@ -228,17 +231,29 @@ pub(super) fn blocked_first_within_runs<T, K: PartialEq>(
     indexed.into_iter().map(|(_, _, item)| item).collect()
 }
 
-/// The run key `blocked_first` sorts within: the group while grouping, and the
-/// whole list otherwise.
-pub(super) fn blocked_run_key<'a>(
-    agent: &'a ClientShellAgent,
-    workspaces: &'a [ClientShellWorkspace],
-    agents: &crate::config::AgentsSidebarConfig,
-) -> Option<AgentGroupKey<&'a str>> {
-    agents
-        .group_by
-        .is_grouped()
-        .then(|| agent_group_key(agent, workspaces, &agents.group_by))
+/// Applies `blocked_first` to an order already gathered for display: blocked
+/// agents lead each group while the panel draws groups, and the whole list
+/// when it does not. Workspace grouping turns off when the order interleaves
+/// workspaces, so its runs are grouped only when they are contiguous; sorting
+/// within interleaved fragments would leave a blocked agent where it was.
+///
+/// `group_key` names an item's group; `whole_key` names the list it belongs to
+/// when groups are off (one list locally, one per machine in the endpoint list).
+pub(super) fn blocked_first_order<T, K: PartialEq>(
+    items: Vec<T>,
+    group_by: &crate::config::AgentGroupBy,
+    sort: crate::config::AgentPanelSortConfig,
+    group_key: impl Fn(&T) -> K,
+    whole_key: impl Fn(&T) -> K,
+    blocked: impl Fn(&T) -> bool,
+) -> Vec<T> {
+    let grouped = group_by.is_grouped()
+        && (gathers_group_runs(group_by, sort) || runs_are_contiguous(&items, &group_key));
+    if grouped {
+        blocked_first_within_runs(items, group_key, blocked)
+    } else {
+        blocked_first_within_runs(items, whole_key, blocked)
+    }
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -248,6 +263,8 @@ pub(super) fn ordered_agent_pane_ids(
 ) -> Vec<String> {
     let group_by = &agents_config.group_by;
     let mut agents = if snapshot.agent_view_label.is_some() {
+        // An active view's order is the view's; only grouping and
+        // blocked_first below adjust it.
         snapshot
             .agent_order
             .iter()
@@ -259,26 +276,29 @@ pub(super) fn ordered_agent_pane_ids(
             })
             .collect::<Vec<_>>()
     } else {
-        snapshot.agents.iter().collect::<Vec<_>>()
+        let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
+        if sort == crate::config::AgentPanelSortConfig::Priority {
+            agents.sort_by_key(|agent| {
+                (
+                    std::cmp::Reverse(status_priority(agent.agent_status)),
+                    std::cmp::Reverse(agent.state_change_seq),
+                )
+            });
+        }
+        agents
     };
-    if snapshot.agent_view_label.is_none() && sort == crate::config::AgentPanelSortConfig::Priority
-    {
-        agents.sort_by_key(|agent| {
-            (
-                std::cmp::Reverse(status_priority(agent.agent_status)),
-                std::cmp::Reverse(agent.state_change_seq),
-            )
-        });
-    }
     if gathers_group_runs(group_by, sort) {
         agents = gather_runs(agents, |agent| {
             agent_group_key(agent, &snapshot.workspaces, group_by)
         });
     }
     if agents_config.blocked_first && sort == crate::config::AgentPanelSortConfig::Spaces {
-        agents = blocked_first_within_runs(
+        agents = blocked_first_order(
             agents,
-            |agent| blocked_run_key(agent, &snapshot.workspaces, agents_config),
+            group_by,
+            sort,
+            |agent| Some(agent_group_key(agent, &snapshot.workspaces, group_by)),
+            |_| None,
             |agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked,
         );
     }

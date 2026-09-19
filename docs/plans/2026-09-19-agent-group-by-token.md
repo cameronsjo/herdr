@@ -123,6 +123,7 @@ Source: `/tmp/herdr-sidebar-brief-2.md`. Live state re-read with `herdr agent li
 - Step 8: the ordering functions take `&AgentsSidebarConfig` instead of `&AgentGroupBy`, since they read `blocked_first` too.
 - Review: token mode skips the contiguity scan, since the gather guarantees it and the scan is quadratic with many one-agent groups. Under a view with several token groups, each group takes its best-ranked member's place; a test now pins that.
 - Bench (`just bench-render-scale`, 15 panes, median µs, client composition): background 348 off / 313 workspace / 322 token+`blocked_first`; active 307 / 309 / 303. The fork bench gained a token arm that reports no tokens, so every key takes the workspace fallback scan.
+- Polish: fixed `blocked_first` doing nothing under an interleaving view with workspace grouping (it now leads the whole list, as documented), reused `group_header` in the endpoint list, and made view labels drop format characters (security arm Nit, pre-existing).
 - Build env: CommandLineTools is gone from sjomba, and the vendored libghostty-vt needs Zig 0.16. Local builds now use the Xcode SDK plus `mise install zig@0.16.0`.
 
 ## Orchestrator

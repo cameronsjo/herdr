@@ -2214,6 +2214,36 @@ fn blocked_first_leads_its_group_and_keeps_the_rest_in_order() {
 }
 
 #[test]
+fn blocked_first_leads_the_whole_list_when_a_view_suspends_workspace_grouping() {
+    // The view interleaves workspaces, so workspace grouping turns off; the
+    // blocked agent must then lead the whole list, not a one-agent run.
+    let mut projected = grouped_agents_snapshot();
+    projected.agents[3].agent_status = AgentStatus::Blocked;
+    projected.agent_view_label = Some("review".into());
+    projected.agent_order = vec![
+        "pane_1".into(),
+        "pane_3".into(),
+        "pane_2".into(),
+        "pane_4".into(),
+    ];
+    let mut config = grouped_config();
+    config.ui.sidebar.agents.blocked_first = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("interleaved view sidebar");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(_, pane_id)| pane_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pane_4", "pane_1", "pane_3", "pane_2"],
+    );
+}
+
+#[test]
 fn blocked_first_without_grouping_leads_the_whole_list() {
     let mut projected = grouped_agents_snapshot();
     projected.agents[2].agent_status = AgentStatus::Blocked;
