@@ -380,14 +380,18 @@ impl ClientShellState {
 
     /// Clears whichever agent view is active, whatever set it, through the
     /// same `agent.view.clear` method a plugin or script would call.
+    /// The scroll resets only when the request is sent: a refused request
+    /// (offline, or a server that predates the method) leaves the view up.
     pub(super) fn clear_agent_view(&mut self, outcome: &mut ClientShellInput) {
-        self.agent_scroll = 0;
-        self.push_endpoint_method(
+        if self.push_endpoint_method_with_kind(
             crate::api::schema::Method::AgentViewClear(
                 crate::api::schema::AgentViewClearParams::default(),
             ),
+            PendingEndpointKind::Generic,
             outcome,
-        );
+        ) {
+            self.agent_scroll = 0;
+        }
         outcome.repaint = true;
     }
 

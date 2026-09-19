@@ -1118,7 +1118,7 @@
           "key": "ui.sidebar.agents.group_by",
           "type": "enum or table",
           "default": "\"none\"",
-          "description": "Group expanded Agent sidebar entries under one header per run. \"workspace\" groups contiguous agents from one workspace. { token = \"name\" } groups agents whose panes report the same value for that metadata token, across workspaces, and leaves agents without it in their workspace group. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
+          "description": "Group expanded Agent sidebar entries under one header per run. \"workspace\" groups contiguous agents from one workspace. { token = \"name\" } groups agents whose panes report the same value for that metadata token, across workspaces; a pane without the value uses the same token on its workspace, and an agent with neither stays in its workspace group. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
           "values": ["none", "workspace", "token"]
         },
         {

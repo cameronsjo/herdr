@@ -479,8 +479,9 @@ after present values. When `sort` is omitted, the existing
 that policy without rewriting config. A custom sort that interleaves workspaces
 suspends `group_by = "workspace"` while the view is active, since one header
 would label agents from another workspace. Token grouping
-(`group_by = { token = "name" }`) stays on: it gathers each group's agents
-together and keeps the view's order inside each group.
+(`group_by = { token = "name" }`) stays on while `ui.agent_panel_sort = "spaces"`:
+it gathers each group's agents together and keeps the view's order inside each
+group. Under `"priority"`, grouping is off either way.
 
 `source` identifies the owner. Plugins use `plugin:<HERDR_PLUGIN_ID>`; Herdr
 rejects plugin-owned sets when that plugin is missing or disabled. Other callers
