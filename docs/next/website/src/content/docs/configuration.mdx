@@ -466,6 +466,31 @@ When it is off, the panel renders exactly as `group_by = "none"`
 does. Scrolling into the middle of a run scrolls past that run's header; Herdr
 does not pin headers.
 
+#### Grouping Agent rows by a metadata token
+
+Set `group_by = { token = "project" }` to group agents by a metadata token that
+their panes report, such as `herdr pane report-metadata --token project=homelab`.
+Agents that share a value share one header showing that value, even when they sit
+in different workspaces. An agent without the token, or with an empty value,
+keeps its workspace group. The name may be written with or without the leading
+`$`.
+
+```toml
+[ui.sidebar.agents]
+group_by = { token = "project" }
+grouped_rows = [
+  ["state_icon", "$thread", "workspace"],
+]
+```
+
+Members of one group need not be adjacent in space order. Herdr moves each
+group's agents up behind the group's first agent, keeping their order, so the
+drawn order, mouse targets, and next/previous agent navigation all agree. Under
+an agent view that filters and sorts, every agent sharing a value stays in one
+group in the view's order. Token grouping still turns off under **priority**
+order. Metadata tokens can expire (`--ttl-ms`); an agent whose token expired
+returns to its workspace group.
+
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 
 ```toml

@@ -57,6 +57,27 @@ pub(super) fn aggregate_agent_rows<'a>(
     endpoints: &'a [ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    group_by: &crate::config::AgentGroupBy,
+) -> Vec<AggregateAgentRow<'a>> {
+    let rows = ungathered_agent_rows(endpoints, active_endpoint_id, sort, group_by);
+    // Each endpoint's own order is already gathered, but an active view
+    // re-sorts rows across endpoints, so gather once more on the full key.
+    if super::agent_sidebar::gathers_group_runs(group_by, sort) {
+        return super::agent_sidebar::gather_runs(rows, |row| {
+            (
+                row.endpoint.endpoint_index,
+                super::agent_sidebar::agent_group_key(row.agent, group_by),
+            )
+        });
+    }
+    rows
+}
+
+fn ungathered_agent_rows<'a>(
+    endpoints: &'a [ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    sort: crate::config::AgentPanelSortConfig,
+    group_by: &crate::config::AgentGroupBy,
 ) -> Vec<AggregateAgentRow<'a>> {
     let active_index = endpoints
         .iter()
@@ -132,7 +153,7 @@ pub(super) fn aggregate_agent_rows<'a>(
 
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
+            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort, group_by)
                 .into_iter()
                 .filter_map(move |pane_id| {
                     let agent = endpoint
@@ -264,8 +285,9 @@ pub(super) fn online_agent_targets(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    group_by: &crate::config::AgentGroupBy,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort)
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, group_by)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

@@ -1104,16 +1104,16 @@
         },
         {
           "key": "ui.sidebar.agents.group_by",
-          "type": "enum",
+          "type": "enum or table",
           "default": "\"none\"",
-          "description": "Group expanded Agent sidebar entries under one header per contiguous workspace run. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
-          "values": ["none", "workspace"]
+          "description": "Group expanded Agent sidebar entries under one header per run. \"workspace\" groups contiguous agents from one workspace. { token = \"name\" } groups agents whose panes report the same value for that metadata token, across workspaces, and leaves agents without it in their workspace group. Grouping selects ui.sidebar.agents.grouped_rows and applies only in grouped (space) panel order.",
+          "values": ["none", "workspace", "token"]
         },
         {
           "key": "ui.sidebar.agents.grouped_rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"tab\", \"agent\"]]",
-          "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; a rows_by_agent override still wins."
+          "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; it takes precedence over a rows_by_agent override while grouping is active."
         },
         {
           "key": "ui.sidebar.agents.row_gap",

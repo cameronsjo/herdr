@@ -101,14 +101,20 @@ struct EndpointAgentRow {
     agent: super::agent_sidebar::AgentRow,
 }
 
-/// The run a row belongs to: its machine and its workspace.
+/// The run a row belongs to: its machine and its group (workspace or token).
 ///
 /// Keyed by machine as well as workspace, because two endpoints can advertise
 /// the same workspace id and must still read as separate runs. The endpoint
 /// index rather than its label: labels are display names and two connections
 /// can share one.
-fn run_key<'a>(row: &super::aggregate_navigation::AggregateAgentRow<'a>) -> (usize, &'a str) {
-    (row.endpoint.endpoint_index, row.agent.workspace_id.as_str())
+fn run_key<'a>(
+    row: &super::aggregate_navigation::AggregateAgentRow<'a>,
+    group_by: &crate::config::AgentGroupBy,
+) -> (usize, super::agent_sidebar::AgentGroupKey<&'a str>) {
+    (
+        row.endpoint.endpoint_index,
+        super::agent_sidebar::agent_group_key(row.agent, group_by),
+    )
 }
 
 fn agent_rows(
@@ -123,26 +129,30 @@ fn agent_rows(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
+        &config.agents.group_by,
     );
-    let grouped = config.agents.group_by == crate::config::AgentGroupBy::Workspace
+    let group_by = &config.agents.group_by;
+    let grouped = group_by.is_grouped()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
-        && super::agent_sidebar::runs_are_contiguous(&ordered, run_key);
+        && super::agent_sidebar::runs_are_contiguous(&ordered, |row| run_key(row, group_by));
 
     ordered
         .iter()
         .enumerate()
         .filter_map(|(index, row)| {
             let snapshot = row.endpoint.snapshot;
+            let key = run_key(row, group_by);
             let header = (grouped
                 && index
                     .checked_sub(1)
-                    .is_none_or(|previous| run_key(&ordered[previous]) != run_key(row)))
-            .then(|| {
-                snapshot
+                    .is_none_or(|previous| run_key(&ordered[previous], group_by) != key))
+            .then(|| match key.1 {
+                super::agent_sidebar::AgentGroupKey::Token(value) => Some(value),
+                super::agent_sidebar::AgentGroupKey::Workspace(workspace_id) => snapshot
                     .workspaces
                     .iter()
-                    .find(|workspace| workspace.workspace_id == row.agent.workspace_id)
-                    .map(|workspace| workspace.label.as_str())
+                    .find(|workspace| workspace.workspace_id == workspace_id)
+                    .map(|workspace| workspace.label.as_str()),
             })
             .flatten();
             let mut agent = super::agent_sidebar::agent_row(

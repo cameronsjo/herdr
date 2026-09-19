@@ -435,7 +435,7 @@ where
 }
 
 /// How the expanded Agent sidebar panel groups its entries.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentGroupBy {
     /// One self-describing entry per agent; no group headers.
@@ -443,6 +443,49 @@ pub enum AgentGroupBy {
     None,
     /// Contiguous agents from the same workspace share one workspace header.
     Workspace,
+    /// Agents whose pane reports the named metadata token share one header
+    /// showing its value, across workspaces. An agent without the token, or
+    /// with an empty value, falls back to its workspace group. Written
+    /// `group_by = { token = "project" }`; the name is stored without `$`.
+    Token(String),
+}
+
+impl AgentGroupBy {
+    pub(crate) fn is_grouped(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentGroupBy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Raw {
+            None,
+            Workspace,
+            Token(String),
+        }
+        Ok(match Raw::deserialize(deserializer)? {
+            Raw::None => Self::None,
+            Raw::Workspace => Self::Workspace,
+            Raw::Token(name) => {
+                // Accept `$project` as well as `project`, since rows spell the
+                // same token with the `$` prefix.
+                let bare = name.strip_prefix('$').unwrap_or(&name);
+                match parse_sidebar_token::<AgentSidebarToken>(format!("${bare}"), &[]) {
+                    Ok(_) => Self::Token(bare.to_owned()),
+                    Err(_) => {
+                        return Err(serde::de::Error::custom(format!(
+                            "invalid group_by token `{name}`; use letters, digits, `_` or `-`, at most 32"
+                        )));
+                    }
+                }
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -824,6 +867,26 @@ claude = [["workspace", "agent"]]
             "grouped rows must not repeat the workspace token a group header already shows: {resolved:?}"
         );
         assert_eq!(resolved, &vec![vec![AgentSidebarToken::Agent]]);
+    }
+
+    #[test]
+    fn group_by_token_accepts_bare_and_dollar_names() {
+        for value in ["\"project\"", "\"$project\""] {
+            let input = format!("[ui.sidebar.agents]\ngroup_by = {{ token = {value} }}\n");
+            let config: crate::config::Config =
+                toml::from_str(&input).unwrap_or_else(|err| panic!("{value}: {err}"));
+            assert_eq!(
+                config.ui.sidebar.agents.group_by,
+                AgentGroupBy::Token("project".into())
+            );
+        }
+        for value in ["\"\"", "\"$\"", "\"a b\"", "\"with.dot\""] {
+            let input = format!("[ui.sidebar.agents]\ngroup_by = {{ token = {value} }}\n");
+            assert!(
+                toml::from_str::<crate::config::Config>(&input).is_err(),
+                "accepted group_by token {value}"
+            );
+        }
     }
 
     #[test]

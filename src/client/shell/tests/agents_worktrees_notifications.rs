@@ -1848,6 +1848,174 @@ fn scrolling_into_a_run_keeps_headers_and_hit_rects_aligned() {
     ));
 }
 
+/// `grouped_agents_snapshot` with `project=x` on the first agent of each
+/// workspace, so the token group spans both workspaces and is not adjacent
+/// in space order.
+fn token_agents_snapshot() -> ClientShellSnapshot {
+    let mut projected = grouped_agents_snapshot();
+    for agent in &mut projected.agents {
+        if matches!(agent.pane_id.as_str(), "pane_1" | "pane_3") {
+            agent.tokens = vec![("project".into(), "x".into())];
+        }
+    }
+    projected
+}
+
+fn token_config() -> Config {
+    let mut config = Config::default();
+    config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Token("project".into());
+    config
+}
+
+fn agent_headers(state: &ClientShellState, frame: &FrameData) -> Vec<(String, String)> {
+    state
+        .hits
+        .agents
+        .iter()
+        .filter(|(rect, _)| rect.height == 2)
+        .map(|(rect, pane_id)| {
+            (
+                pane_id.clone(),
+                frame_row(frame, *rect, 0).trim_end().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn token_grouping_gathers_one_header_across_workspaces() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&token_config()));
+    state.set_snapshot(Box::new(token_agents_snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("token-grouped sidebar");
+
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, pane_id)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_1", 2), ("pane_3", 1), ("pane_2", 2), ("pane_4", 2)],
+        "the x run gathers behind its first member; untokened agents keep workspace runs"
+    );
+    assert_eq!(
+        agent_headers(&state, &frame),
+        vec![
+            ("pane_1".to_owned(), " x".to_owned()),
+            ("pane_2".to_owned(), " alpha".to_owned()),
+            ("pane_4".to_owned(), " beta".to_owned()),
+        ]
+    );
+
+    // Agent navigation walks the drawn order, not space order.
+    let mut focus = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(1)),
+        &mut focus,
+    );
+    assert!(matches!(
+        &focus.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+            )
+    ));
+    let mut next = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextAgent),
+        &mut next,
+    );
+    assert!(matches!(
+        &next.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_3"
+            )
+    ));
+}
+
+#[test]
+fn token_grouping_without_tokens_matches_workspace_grouping() {
+    let render = |config: &Config| {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(config));
+        state.set_snapshot(Box::new(grouped_agents_snapshot()));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 40).expect("grouped sidebar");
+        (state.hits.agents.clone(), agent_headers(&state, &frame))
+    };
+    assert_eq!(render(&token_config()), render(&grouped_config()));
+}
+
+#[test]
+fn token_grouping_ignores_an_empty_token_value() {
+    let mut projected = token_agents_snapshot();
+    projected.agents[2].tokens = vec![("project".into(), String::new())];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&token_config()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("token-grouped sidebar");
+    assert_eq!(
+        agent_headers(&state, &frame)
+            .into_iter()
+            .map(|(_, header)| header)
+            .collect::<Vec<_>>(),
+        vec![" x", " alpha", " beta"],
+        "an empty value falls back to the workspace run"
+    );
+}
+
+#[test]
+fn token_grouping_keeps_a_rank_sorted_view_grouped() {
+    // A view that filters to the project and sorts by rank interleaves the
+    // workspaces; with token grouping every row shares one key and one header.
+    let mut projected = token_agents_snapshot();
+    for agent in &mut projected.agents {
+        agent.tokens = vec![("project".into(), "x".into())];
+    }
+    projected.agent_view_label = Some("focus".into());
+    projected.agent_order = vec![
+        "pane_3".into(),
+        "pane_1".into(),
+        "pane_4".into(),
+        "pane_2".into(),
+    ];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&token_config()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("token-grouped view");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, pane_id)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_3", 2), ("pane_1", 1), ("pane_4", 1), ("pane_2", 1)],
+        "the view's rank order survives and one header labels it"
+    );
+    assert_eq!(
+        agent_headers(&state, &frame),
+        vec![("pane_3".to_owned(), " x".to_owned())]
+    );
+}
+
+#[test]
+fn token_grouping_turns_off_under_priority_order() {
+    let mut config = token_config();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(token_agents_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("priority sidebar");
+    assert!(
+        state.hits.agents.iter().all(|(rect, _)| rect.height == 2),
+        "priority order renders exactly as group_by = \"none\" does"
+    );
+}
+
 #[test]
 fn priority_order_and_interleaving_views_suspend_grouping() {
     let mut priority = grouped_config();

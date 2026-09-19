@@ -948,6 +948,7 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    &self.config.agents.group_by,
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -957,6 +958,7 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids(
                     snapshot,
                     self.config.agent_panel_sort,
+                    &self.config.agents.group_by,
                 );
                 if agents.is_empty() {
                     return None;

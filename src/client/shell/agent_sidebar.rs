@@ -25,9 +25,80 @@ pub(super) struct AgentRow {
     /// names and two connections can share one, which would put two machines
     /// back in the same run. An index is also `Copy`, so a per-frame row costs
     /// no allocation for it.
-    group_key: (Option<usize>, String),
+    group_key: (Option<usize>, AgentGroupKey<String>),
     header: Option<String>,
     grouped: bool,
+}
+
+/// The run an agent belongs to under `group_by`.
+///
+/// A token value and a workspace id live in separate variants, so a project
+/// named like a workspace id never merges with that workspace's run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum AgentGroupKey<S> {
+    Workspace(S),
+    Token(S),
+}
+
+impl AgentGroupKey<&str> {
+    fn to_owned_key(self) -> AgentGroupKey<String> {
+        match self {
+            Self::Workspace(id) => AgentGroupKey::Workspace(id.to_owned()),
+            Self::Token(value) => AgentGroupKey::Token(value.to_owned()),
+        }
+    }
+}
+
+/// The group key for one agent. Token mode keys by the pane's token value and
+/// falls back to the workspace, so an agent without the token keeps the
+/// grouping it had under `group_by = "workspace"`.
+pub(super) fn agent_group_key<'a>(
+    agent: &'a ClientShellAgent,
+    group_by: &crate::config::AgentGroupBy,
+) -> AgentGroupKey<&'a str> {
+    let crate::config::AgentGroupBy::Token(name) = group_by else {
+        return AgentGroupKey::Workspace(agent.workspace_id.as_str());
+    };
+    agent
+        .tokens
+        .iter()
+        .find(|(key, value)| key == name && !value.is_empty())
+        .map_or(
+            AgentGroupKey::Workspace(agent.workspace_id.as_str()),
+            |(_, value)| AgentGroupKey::Token(value.as_str()),
+        )
+}
+
+/// The header text for a run: the token value, or the workspace label.
+fn group_header<'a>(key: AgentGroupKey<&'a str>, workspace: &'a ClientShellWorkspace) -> &'a str {
+    match key {
+        AgentGroupKey::Token(value) => value,
+        AgentGroupKey::Workspace(_) => workspace.label.as_str(),
+    }
+}
+
+/// Moves every item up behind the first item with the same key, keeping the
+/// relative order inside each key and the order of first appearances.
+///
+/// Token groups span workspaces, so their members are not adjacent in space
+/// order; this makes each key one run. It runs in the ordering functions, not
+/// the renderer, so the hit-test, scrolling, and agent navigation all see the
+/// order that gets drawn.
+pub(super) fn gather_runs<T, K: Eq + std::hash::Hash>(
+    items: Vec<T>,
+    key: impl Fn(&T) -> K,
+) -> Vec<T> {
+    let mut first_seen = HashMap::<K, usize>::new();
+    let mut indexed = items
+        .into_iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let run = *first_seen.entry(key(&item)).or_insert(index);
+            (run, index, item)
+        })
+        .collect::<Vec<_>>();
+    indexed.sort_by_key(|(run, index, _)| (*run, *index));
+    indexed.into_iter().map(|(_, _, item)| item).collect()
 }
 
 impl AgentRow {
@@ -51,31 +122,40 @@ impl AgentRow {
     }
 }
 
-/// Whether the agent panel draws one workspace header per contiguous run.
+/// Whether the agent panel draws one header per contiguous run.
 ///
 /// One gate drives both the headers and the row layout. `agent_panel_sort` is a
 /// one-click toggle, so gating the header on the live sort while gating the
-/// layout on config would leave a `priority` user with no workspace shown at
-/// all.
+/// layout on config would leave a `priority` user with no group shown at all.
 ///
-/// A header must never label agents from another workspace, so the order about
-/// to be rendered has to keep each workspace in one run. The endpoint's
-/// snapshot carries an active agent view's resulting order but not the sort
-/// clause that produced it, so the order itself is what gets checked: a
-/// filter-only view keeps space order and stays grouped, while a view that
-/// interleaves workspaces turns grouping off.
+/// A header must never label agents from another group, so the order about to
+/// be rendered has to keep each group in one run. The endpoint's snapshot
+/// carries an active agent view's resulting order but not the sort clause that
+/// produced it, so the order itself is what gets checked: a filter-only view
+/// keeps space order and stays grouped, while a view that interleaves
+/// workspaces turns workspace grouping off. Token grouping gathers its runs in
+/// `ordered_agent_pane_ids`, so it passes this check under any view.
 fn agent_grouping_is_effective(
     entries: &[(&ClientShellAgent, &ClientShellWorkspace)],
     config: &ClientShellConfig,
 ) -> bool {
-    config.agents.group_by == crate::config::AgentGroupBy::Workspace
+    config.agents.group_by.is_grouped()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
-        && workspaces_are_contiguous(entries)
+        && runs_are_contiguous(entries, |(agent, _)| {
+            agent_group_key(agent, &config.agents.group_by)
+        })
 }
 
-/// Whether every workspace occupies exactly one run of the ordered entries.
-fn workspaces_are_contiguous(entries: &[(&ClientShellAgent, &ClientShellWorkspace)]) -> bool {
-    runs_are_contiguous(entries, |(agent, _)| agent.workspace_id.as_str())
+/// Whether `ordered_agent_pane_ids` gathers each group into one run.
+///
+/// Only token grouping gathers. Workspace grouping keeps the order it had
+/// before token grouping existed, and turns off when that order interleaves.
+pub(super) fn gathers_group_runs(
+    group_by: &crate::config::AgentGroupBy,
+    sort: crate::config::AgentPanelSortConfig,
+) -> bool {
+    matches!(group_by, crate::config::AgentGroupBy::Token(_))
+        && sort == crate::config::AgentPanelSortConfig::Spaces
 }
 
 /// Whether every key occupies exactly one run of `items`, under `key`.
@@ -103,28 +183,33 @@ pub(super) fn runs_are_contiguous<T, K: PartialEq>(items: &[T], key: impl Fn(&T)
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    group_by: &crate::config::AgentGroupBy,
 ) -> Vec<String> {
-    if snapshot.agent_view_label.is_some() {
-        return snapshot
+    let mut agents = if snapshot.agent_view_label.is_some() {
+        snapshot
             .agent_order
             .iter()
-            .filter(|pane_id| {
+            .filter_map(|pane_id| {
                 snapshot
                     .agents
                     .iter()
-                    .any(|agent| agent.pane_id == pane_id.as_str())
+                    .find(|agent| agent.pane_id == pane_id.as_str())
             })
-            .cloned()
-            .collect();
-    }
-    let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
-    if sort == crate::config::AgentPanelSortConfig::Priority {
+            .collect::<Vec<_>>()
+    } else {
+        snapshot.agents.iter().collect::<Vec<_>>()
+    };
+    if snapshot.agent_view_label.is_none() && sort == crate::config::AgentPanelSortConfig::Priority
+    {
         agents.sort_by_key(|agent| {
             (
                 std::cmp::Reverse(status_priority(agent.agent_status)),
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
+    }
+    if gathers_group_runs(group_by, sort) {
+        agents = gather_runs(agents, |agent| agent_group_key(agent, group_by));
     }
     agents
         .into_iter()
@@ -319,20 +404,21 @@ pub(super) fn agent_rows(
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
-    let entries = ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
-        .into_iter()
-        .filter_map(|pane_id| {
-            let agent = snapshot
-                .agents
-                .iter()
-                .find(|agent| agent.pane_id == pane_id)?;
-            let workspace = snapshot
-                .workspaces
-                .iter()
-                .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
-            Some((agent, workspace))
-        })
-        .collect::<Vec<_>>();
+    let entries =
+        ordered_agent_pane_ids(snapshot, config.agent_panel_sort, &config.agents.group_by)
+            .into_iter()
+            .filter_map(|pane_id| {
+                let agent = snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)?;
+                let workspace = snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
+                Some((agent, workspace))
+            })
+            .collect::<Vec<_>>();
     let grouped = agent_grouping_is_effective(&entries, config);
     entries
         .iter()
@@ -342,11 +428,12 @@ pub(super) fn agent_rows(
             // no entry of its own is inserted and every position-indexed
             // consumer — the hit-test, the scroll offset, the scrollbar
             // metrics — keeps counting agents.
+            let key = agent_group_key(agent, &config.agents.group_by);
             let header = (grouped
-                && index
-                    .checked_sub(1)
-                    .is_none_or(|previous| entries[previous].0.workspace_id != agent.workspace_id))
-            .then_some(workspace.label.as_str());
+                && index.checked_sub(1).is_none_or(|previous| {
+                    agent_group_key(entries[previous].0, &config.agents.group_by) != key
+                }))
+            .then(|| group_header(key, workspace));
             agent_row(
                 snapshot,
                 &agent.pane_id,
@@ -445,7 +532,10 @@ pub(super) fn agent_row(
     );
     Some(AgentRow {
         pane_id: agent.pane_id.clone(),
-        group_key: (scope, agent.workspace_id.clone()),
+        group_key: (
+            scope,
+            agent_group_key(agent, &config.agents.group_by).to_owned_key(),
+        ),
         header: header.map(str::to_owned),
         grouped,
         status: agent.agent_status,

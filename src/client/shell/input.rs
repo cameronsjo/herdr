@@ -879,6 +879,7 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     self.config.agent_panel_sort,
+                    &self.config.agents.group_by,
                 )
                 .get(*index)
                 .is_some()

@@ -1298,6 +1298,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         &state.endpoints,
         &state.active_endpoint_id,
         crate::config::AgentPanelSortConfig::Priority,
+        &crate::config::AgentGroupBy::None,
     )
     .into_iter()
     .map(|row| row.agent.name.as_deref().expect("agent name"))
@@ -2508,6 +2509,40 @@ fn grouped_agents_keep_headers_and_gaps_separate_for_identical_workspace_ids() {
             .map(|x| buffer[(x, hit.0.y)].symbol())
             .collect::<String>();
         assert!(label.contains(expected), "{label}");
+    }
+}
+
+#[test]
+fn token_groups_with_one_value_stay_separate_per_machine() {
+    use crate::api::schema::AgentStatus;
+    let (mut state, remote_id) = state_with_remote();
+    state.config.agents.group_by = crate::config::AgentGroupBy::Token("project".into());
+    let tokened = |name: &str, pane_id: &str| {
+        let mut agent = agent(name, AgentStatus::Idle, 1);
+        agent.pane_id = pane_id.into();
+        agent.tokens = vec![("project".into(), "shared".into())];
+        agent
+    };
+    let mut local = snapshot();
+    local.agents = vec![tokened("first", "pane_1"), tokened("second", "pane_2")];
+    state.set_snapshot(Box::new(local));
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.agents = vec![tokened("third", "pane_1")];
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    let frame = state.compose(100, 40).unwrap();
+    let hits = &state.hits.endpoint_agents;
+    assert_eq!(
+        hits.iter().map(|hit| hit.0.height).collect::<Vec<_>>(),
+        vec![2, 1, 2],
+        "one header per machine, even when both report the same project"
+    );
+    let buffer = frame.to_ratatui_buffer().unwrap();
+    for hit in [&hits[0], &hits[2]] {
+        let label = (hit.0.x..hit.0.right())
+            .map(|x| buffer[(x, hit.0.y)].symbol())
+            .collect::<String>();
+        assert!(label.contains("shared"), "{label}");
     }
 }
 
