@@ -2196,6 +2196,10 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if super::contains(self.hits.agent_view_clear, point) {
+                    self.clear_agent_view(outcome);
+                    return;
+                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {
                         crate::config::AgentPanelSortConfig::Spaces => {

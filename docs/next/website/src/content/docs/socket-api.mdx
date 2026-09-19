@@ -476,9 +476,12 @@ Sort fields are `workspace_order`, `tab_order`, `pane_order`, `attention`,
 stable, evaluated in order, and accept `asc` or `desc`. Missing values stay
 after present values. When `sort` is omitted, the existing
 `ui.agent_panel_sort` policy remains active. A custom sort temporarily replaces
-that policy without rewriting config. It also suspends
-`ui.sidebar.agents.group_by` workspace grouping while the view is active, since
-a custom sort can interleave workspaces under one header.
+that policy without rewriting config. A custom sort that interleaves workspaces
+suspends `group_by = "workspace"` while the view is active, since one header
+would label agents from another workspace. Token grouping
+(`group_by = { token = "name" }`) stays on while `ui.agent_panel_sort = "spaces"`:
+it gathers each group's agents together and keeps the view's order inside each
+group. Under `"priority"`, grouping is off either way.
 
 `source` identifies the owner. Plugins use `plugin:<HERDR_PLUGIN_ID>`; Herdr
 rejects plugin-owned sets when that plugin is missing or disabled. Other callers
@@ -497,6 +500,11 @@ Clear unconditionally, or only when the named source still owns the view:
 
 A source mismatch leaves the active view unchanged. Set and clear responses use
 `type: "agent_view"` and report `active`, `source`, and optional `label`.
+
+In the TUI, an active view shows its label with a `✕` at the right of the Agents
+header. Clicking it, choosing `clear agent view` in the global menu or the
+command palette, or pressing `keys.clear_agent_view` (unset by default) sends an
+unconditional `agent.view.clear`.
 
 ## Plugin APIs
 

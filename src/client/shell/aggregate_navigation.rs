@@ -57,6 +57,52 @@ pub(super) fn aggregate_agent_rows<'a>(
     endpoints: &'a [ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    agents_config: &crate::config::AgentsSidebarConfig,
+) -> Vec<AggregateAgentRow<'a>> {
+    let group_by = &agents_config.group_by;
+    let mut rows = ungathered_agent_rows(endpoints, active_endpoint_id, sort, agents_config);
+    // Each endpoint's own order is already gathered and blocked-first, but an
+    // active view re-sorts rows across endpoints, so both run once more on the
+    // full key.
+    if super::agent_sidebar::gathers_group_runs(group_by, sort) {
+        rows = super::agent_sidebar::gather_runs(rows, |row| {
+            (
+                row.endpoint.endpoint_index,
+                super::agent_sidebar::agent_group_key(
+                    row.agent,
+                    &row.endpoint.snapshot.workspaces,
+                    group_by,
+                ),
+            )
+        });
+    }
+    if agents_config.blocked_first && sort == crate::config::AgentPanelSortConfig::Spaces {
+        rows = super::agent_sidebar::blocked_first_order(
+            rows,
+            group_by,
+            sort,
+            |row| {
+                (
+                    row.endpoint.endpoint_index,
+                    Some(super::agent_sidebar::agent_group_key(
+                        row.agent,
+                        &row.endpoint.snapshot.workspaces,
+                        group_by,
+                    )),
+                )
+            },
+            |row| (row.endpoint.endpoint_index, None),
+            |row| row.agent.agent_status == crate::api::schema::AgentStatus::Blocked,
+        );
+    }
+    rows
+}
+
+fn ungathered_agent_rows<'a>(
+    endpoints: &'a [ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    sort: crate::config::AgentPanelSortConfig,
+    agents_config: &crate::config::AgentsSidebarConfig,
 ) -> Vec<AggregateAgentRow<'a>> {
     let active_index = endpoints
         .iter()
@@ -132,7 +178,7 @@ pub(super) fn aggregate_agent_rows<'a>(
 
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
+            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort, agents_config)
                 .into_iter()
                 .filter_map(move |pane_id| {
                     let agent = endpoint
@@ -264,8 +310,9 @@ pub(super) fn online_agent_targets(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    agents_config: &crate::config::AgentsSidebarConfig,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort)
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, agents_config)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

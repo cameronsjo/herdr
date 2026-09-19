@@ -63,7 +63,7 @@ pub(crate) fn sanitize_label_borrowed(label: &str) -> std::borrow::Cow<'_, str> 
 ///
 /// Spelled out rather than pulled from a table crate: the set is small, stable,
 /// and adding a dependency for one predicate is not worth it.
-fn is_format_char(ch: char) -> bool {
+pub(crate) fn is_format_char(ch: char) -> bool {
     matches!(ch,
         '\u{00AD}'                      // soft hyphen
         | '\u{0600}'..='\u{0605}'

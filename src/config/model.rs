@@ -375,6 +375,8 @@ pub struct KeysConfig {
     pub reload_config: BindingConfig,
     /// Focus the currently visible notification target. Default: "prefix+o".
     pub open_notification_target: BindingConfig,
+    /// Clear the active agent view. Unset by default.
+    pub clear_agent_view: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -525,6 +527,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     open_notification_target: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    clear_agent_view: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_workspace: Option<BindingConfig>,
@@ -668,6 +672,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(detach);
         apply_field!(reload_config);
         apply_field!(open_notification_target);
+        apply_field!(clear_agent_view);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(move_workspace_previous);
@@ -781,6 +786,7 @@ impl KeysConfig {
         copy_effective_action_field!(detach, keybinds.detach);
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
+        copy_effective_action_field!(clear_agent_view, keybinds.clear_agent_view);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(move_workspace_previous, keybinds.move_workspace_previous);
@@ -1169,6 +1175,7 @@ impl Default for KeysConfig {
             detach: BindingConfig::one("prefix+q"),
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
+            clear_agent_view: BindingConfig::empty(),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             move_workspace_previous: BindingConfig::empty(),
