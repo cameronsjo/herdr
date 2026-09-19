@@ -2046,6 +2046,70 @@ fn token_grouping_turns_off_under_priority_order() {
 }
 
 #[test]
+fn blocked_first_leads_its_group_and_keeps_the_rest_in_order() {
+    let mut projected = grouped_agents_snapshot();
+    projected.agents[3].agent_status = AgentStatus::Blocked;
+    let mut config = grouped_config();
+    config.ui.sidebar.agents.blocked_first = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("blocked-first sidebar");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, pane_id)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_1", 2), ("pane_2", 1), ("pane_4", 2), ("pane_3", 1)],
+        "the blocked agent leads beta; alpha is untouched"
+    );
+    assert_eq!(
+        agent_headers(&state, &frame)
+            .into_iter()
+            .map(|(_, header)| header)
+            .collect::<Vec<_>>(),
+        vec![" alpha", " beta"],
+    );
+
+    let mut next = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::FocusAgent(2)),
+        &mut next,
+    );
+    assert!(matches!(
+        &next.actions[..],
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_4"
+            )
+    ));
+}
+
+#[test]
+fn blocked_first_without_grouping_leads_the_whole_list() {
+    let mut projected = grouped_agents_snapshot();
+    projected.agents[2].agent_status = AgentStatus::Blocked;
+    let mut config = Config::default();
+    config.ui.sidebar.agents.blocked_first = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("blocked-first sidebar");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(_, pane_id)| pane_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pane_3", "pane_1", "pane_2", "pane_4"],
+    );
+}
+
+#[test]
 fn priority_order_and_interleaving_views_suspend_grouping() {
     let mut priority = grouped_config();
     priority.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;

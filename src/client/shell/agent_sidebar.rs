@@ -197,11 +197,54 @@ pub(super) fn runs_are_contiguous<T, K: PartialEq>(items: &[T], key: impl Fn(&T)
     })
 }
 
+/// Moves blocked items to the front of each run of equal `key`, keeping every
+/// other order. A run is a stretch of adjacent items with one key, so this
+/// never splits or merges runs, and a grouped panel stays grouped.
+pub(super) fn blocked_first_within_runs<T, K: PartialEq>(
+    items: Vec<T>,
+    key: impl Fn(&T) -> K,
+    blocked: impl Fn(&T) -> bool,
+) -> Vec<T> {
+    let mut run = 0usize;
+    let mut previous: Option<K> = None;
+    let mut indexed = items
+        .into_iter()
+        .map(|item| {
+            let current = key(&item);
+            if previous
+                .as_ref()
+                .is_some_and(|previous| *previous != current)
+            {
+                run += 1;
+            }
+            previous = Some(current);
+            (run, !blocked(&item), item)
+        })
+        .collect::<Vec<_>>();
+    // `sort_by_key` is stable, so the order inside each part is unchanged.
+    indexed.sort_by_key(|(run, not_blocked, _)| (*run, *not_blocked));
+    indexed.into_iter().map(|(_, _, item)| item).collect()
+}
+
+/// The run key `blocked_first` sorts within: the group while grouping, and the
+/// whole list otherwise.
+pub(super) fn blocked_run_key<'a>(
+    agent: &'a ClientShellAgent,
+    workspaces: &'a [ClientShellWorkspace],
+    agents: &crate::config::AgentsSidebarConfig,
+) -> Option<AgentGroupKey<&'a str>> {
+    agents
+        .group_by
+        .is_grouped()
+        .then(|| agent_group_key(agent, workspaces, &agents.group_by))
+}
+
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
-    group_by: &crate::config::AgentGroupBy,
+    agents_config: &crate::config::AgentsSidebarConfig,
 ) -> Vec<String> {
+    let group_by = &agents_config.group_by;
     let mut agents = if snapshot.agent_view_label.is_some() {
         snapshot
             .agent_order
@@ -229,6 +272,13 @@ pub(super) fn ordered_agent_pane_ids(
         agents = gather_runs(agents, |agent| {
             agent_group_key(agent, &snapshot.workspaces, group_by)
         });
+    }
+    if agents_config.blocked_first && sort == crate::config::AgentPanelSortConfig::Spaces {
+        agents = blocked_first_within_runs(
+            agents,
+            |agent| blocked_run_key(agent, &snapshot.workspaces, agents_config),
+            |agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked,
+        );
     }
     agents
         .into_iter()
@@ -423,21 +473,20 @@ pub(super) fn agent_rows(
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
-    let entries =
-        ordered_agent_pane_ids(snapshot, config.agent_panel_sort, &config.agents.group_by)
-            .into_iter()
-            .filter_map(|pane_id| {
-                let agent = snapshot
-                    .agents
-                    .iter()
-                    .find(|agent| agent.pane_id == pane_id)?;
-                let workspace = snapshot
-                    .workspaces
-                    .iter()
-                    .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
-                Some((agent, workspace))
-            })
-            .collect::<Vec<_>>();
+    let entries = ordered_agent_pane_ids(snapshot, config.agent_panel_sort, &config.agents)
+        .into_iter()
+        .filter_map(|pane_id| {
+            let agent = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)?;
+            let workspace = snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == agent.workspace_id)?;
+            Some((agent, workspace))
+        })
+        .collect::<Vec<_>>();
     let grouped = agent_grouping_is_effective(&entries, &snapshot.workspaces, config);
     entries
         .iter()

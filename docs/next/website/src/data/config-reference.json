@@ -1103,6 +1103,12 @@
           ]
         },
         {
+          "key": "ui.sidebar.agents.blocked_first",
+          "type": "boolean",
+          "default": "false",
+          "description": "Move blocked agents to the top of their group, or of the whole list when not grouping, keeping every other order. Applies in grouped (space) panel order; priority order already leads with blocked agents."
+        },
+        {
           "key": "ui.sidebar.agents.group_by",
           "type": "enum or table",
           "default": "\"none\"",

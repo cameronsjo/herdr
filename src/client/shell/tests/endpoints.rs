@@ -1298,7 +1298,7 @@ fn selected_position_sort_uses_public_tab_and_pane_numbers() {
         &state.endpoints,
         &state.active_endpoint_id,
         crate::config::AgentPanelSortConfig::Priority,
-        &crate::config::AgentGroupBy::None,
+        &crate::config::AgentsSidebarConfig::default(),
     )
     .into_iter()
     .map(|row| row.agent.name.as_deref().expect("agent name"))

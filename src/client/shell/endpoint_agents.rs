@@ -133,7 +133,7 @@ fn agent_rows(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
-        &config.agents.group_by,
+        &config.agents,
     );
     let group_by = &config.agents.group_by;
     let grouped = group_by.is_grouped()

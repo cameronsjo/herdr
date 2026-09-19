@@ -492,6 +492,11 @@ group in the view's order. Token grouping still turns off under **priority**
 order. Pane tokens can expire (`--ttl-ms`); an agent whose token expired
 uses its workspace's token, or returns to its workspace group.
 
+Set `blocked_first = true` to move blocked agents to the top of their group, or
+of the whole list when the panel is not grouped. Every other agent keeps its
+place, so groups stay whole. It applies in **grouped** (space) order, including
+under an agent view; **priority** order already puts blocked agents first.
+
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 
 ```toml

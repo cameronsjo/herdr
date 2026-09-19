@@ -499,6 +499,10 @@ pub struct AgentsSidebarConfig {
     pub rows_by_agent: BTreeMap<String, AgentSidebarRows>,
     pub row_gap: u16,
     pub group_by: AgentGroupBy,
+    /// Move blocked agents to the top of their group (or of the whole list
+    /// when not grouping), keeping every other order. Applies in grouped
+    /// (space) panel order; priority order already leads with them.
+    pub blocked_first: bool,
 }
 
 impl AgentsSidebarConfig {
@@ -539,6 +543,7 @@ impl Default for AgentsSidebarConfig {
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             group_by: AgentGroupBy::None,
+            blocked_first: false,
         }
     }
 }
