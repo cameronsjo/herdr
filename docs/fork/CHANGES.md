@@ -24,6 +24,23 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Agents group by a project token, blocked agents lead, and agent views clear from the TUI (PR [#86](https://github.com/cameronsjo/herdr/pull/86))
+
+### feat(sidebar): group agents by a pane metadata token
+
+- **PR:** [cameronsjo/herdr#86](https://github.com/cameronsjo/herdr/pull/86)
+- **Files:** `src/config/sidebar.rs`, `src/client/shell/agent_sidebar.rs`, `src/client/shell/aggregate_navigation.rs`, `src/client/shell/endpoint_agents.rs`, the `ordered_agent_pane_ids` / `online_agent_targets` callers (`actions.rs`, `endpoint_navigation.rs`, `input.rs`, `mobile.rs`, `sidebar.rs`), `src/server/render_scale_benchmark/fork.rs`, `docs/next/website/src/content/docs/{configuration,socket-api}.mdx`, `docs/next/website/src/data/config-reference.json`
+- **Replaces:** Nothing upstream. It extends the fork's own agent grouping (PR #11). `AgentGroupBy` gains `Token(String)`, written `group_by = { token = "project" }`, and the enum is no longer `Copy`. The group key comes from the pane's token, then the same token on the workspace, then the workspace. Token values and workspace ids are separate key variants. Token mode stably gathers each group behind its first member in `ordered_agent_pane_ids`, and again in `aggregate_agent_rows` on machine plus group, so it skips the contiguity scan. Workspace mode keeps its order and scan. `blocked_first` stably moves blocked agents to the front of each run. The ordering functions take `&AgentsSidebarConfig` instead of the sort alone. Upstream edits to `ordered_agent_pane_ids`, `aggregate_agent_rows`, or their callers will conflict here.
+- **Regression check:** `cargo nextest run -E 'test(/token_group|blocked_first|grouped|grouping/)'`. Staged breaks, each confirmed red then green on 2026-09-19: forcing `gathers_group_runs` to `false` reddens `token_grouping_gathers_one_header_across_workspaces`; dropping the workspace-token lookup in `agent_group_key` reddens `token_grouping_falls_back_to_the_workspace_token`; disabling the `blocked_first` pass in `ordered_agent_pane_ids` reddens both `blocked_first_*` tests.
+- **Render scaling:** `just bench-render-scale`, client shell composition at 15 panes, median µs: background 348 off / 313 workspace / 322 token+`blocked_first`; active 307 / 309 / 303. The token arm reports no tokens, so every key takes the workspace fallback scan.
+
+### feat(sidebar): clear an agent view from the header, global menu, or palette
+
+- **PR:** [cameronsjo/herdr#86](https://github.com/cameronsjo/herdr/pull/86)
+- **Files:** `src/client/shell/agent_sidebar.rs` (`render_agent_panel_header`), `src/client/shell/{actions,global_menu,mouse,render,state}.rs`, `src/input/{keybindings,keybind_help}.rs`, `src/config/{keybinds,model}.rs`, `src/main.rs`, `src/server/client_commands.rs`, `tests/fixtures/endpoint-method-shapes-v1.json`
+- **Replaces:** Upstream draws an active view's label in place of the sort toggle and gives it no click target. The fork draws `<label> ✕`, which clears the view on click. It also adds `KeybindAction::ClearAgentView`, which serves the global menu while a view is active, the palette, and an optional `keys.clear_agent_view`. **Endpoint contract:** `agent.view.clear` joins `CLIENT_SHELL_METHODS` and the shape fixture as a new entry, as `workspace.open` did in PR #64; no existing digest changes. An upstream change to `CLIENT_SHELL_METHODS` or the fixture will conflict here, and keep the upstream digests.
+- **Regression check:** `cargo nextest run -E 'test(/clear_mark|global_menu_offers|clears_an_agent_view|advertised_client_shell/)'`. Staged breaks: zeroing `hits.agent_view_clear` reddens `an_active_view_shows_a_clear_mark_that_clears_it_on_click`; hiding the menu entry reddens `the_global_menu_offers_clear_agent_view_only_while_a_view_is_active`; removing `agent.view.clear` from `CLIENT_SHELL_METHODS` reddens `the_palette_clears_an_agent_view`, since the endpoint refuses the method.
+
 ## The endpoint agent list groups per machine, and the check parses a padded counter (PR [#84](https://github.com/cameronsjo/herdr/pull/84))
 
 ### fix: reconcile the endpoint agent list and agent focus with the upstream merge
