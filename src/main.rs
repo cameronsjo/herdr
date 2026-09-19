@@ -149,6 +149,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # detach = "prefix+q"
 # reload_config = "prefix+shift+r"
 # open_notification_target = "prefix+o"
+# clear_agent_view = "" # optional, unset by default
 # workspace_picker = "prefix+w"
 # command_palette = "prefix+/"
 # goto = "prefix+g"

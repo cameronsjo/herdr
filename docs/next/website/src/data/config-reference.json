@@ -602,6 +602,12 @@
           "description": "Focus the currently visible notification target."
         },
         {
+          "key": "keys.clear_agent_view",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Clear the active agent view, such as a plugin's focus filter. Also in the global menu and the command palette while a view is active. Unset by default."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",

@@ -2045,6 +2045,94 @@ fn token_grouping_turns_off_under_priority_order() {
     );
 }
 
+fn clears_agent_view(outcome: &ClientShellInput) -> bool {
+    outcome.actions.iter().any(|action| {
+        matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(request.method, crate::api::schema::Method::AgentViewClear(_))
+        )
+    })
+}
+
+fn click(state: &mut ClientShellState, rect: Rect) -> ClientShellInput {
+    let at = |kind| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column: rect.x,
+            row: rect.y,
+            modifiers: KeyModifiers::empty(),
+        })
+    };
+    let mut outcome = state.handle_raw_events(vec![at(MouseEventKind::Down(MouseButton::Left))]);
+    let up = state.handle_raw_events(vec![at(MouseEventKind::Up(MouseButton::Left))]);
+    outcome.actions.extend(up.actions);
+    outcome
+}
+
+#[test]
+fn an_active_view_shows_a_clear_mark_that_clears_it_on_click() {
+    let mut projected = grouped_agents_snapshot();
+    projected.agent_view_label = Some("focus homelab".into());
+    projected.agent_order = vec!["pane_1".into(), "pane_2".into()];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("view sidebar");
+
+    let mark = state.hits.agent_view_clear;
+    assert_ne!(mark, Rect::default(), "an active view is clickable");
+    assert_eq!(state.hits.agent_sort_toggle, Rect::default());
+    assert_eq!(frame_row(&frame, mark, 0), "focus homelab ✕");
+
+    let clicked = click(&mut state, mark);
+    assert!(
+        clears_agent_view(&clicked),
+        "the click sends agent.view.clear"
+    );
+
+    // With no view, the same spot is the sort toggle again and clears nothing.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("plain sidebar");
+    assert_eq!(state.hits.agent_view_clear, Rect::default());
+    let toggle = state.hits.agent_sort_toggle;
+    let clicked = click(&mut state, toggle);
+    assert!(!clears_agent_view(&clicked));
+    assert_eq!(
+        state.config.agent_panel_sort,
+        crate::config::AgentPanelSortConfig::Priority
+    );
+}
+
+#[test]
+fn the_global_menu_offers_clear_agent_view_only_while_a_view_is_active() {
+    let labels = |snapshot: &ClientShellSnapshot| {
+        super::super::global_menu::global_menu_items(snapshot)
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>()
+    };
+    let plain = grouped_agents_snapshot();
+    assert!(!labels(&plain).contains(&"clear agent view"));
+
+    let mut viewed = grouped_agents_snapshot();
+    viewed.agent_view_label = Some("focus".into());
+    viewed.agent_order = vec!["pane_1".into()];
+    let items = labels(&viewed);
+    let index = items
+        .iter()
+        .position(|label| *label == "clear agent view")
+        .expect("the menu offers the clear");
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(viewed));
+    let mut outcome = ClientShellInput::default();
+    state.activate_global_menu_item(index, &mut outcome);
+    assert!(clears_agent_view(&outcome));
+}
+
 #[test]
 fn blocked_first_leads_its_group_and_keeps_the_rest_in_order() {
     let mut projected = grouped_agents_snapshot();

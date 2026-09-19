@@ -115,6 +115,31 @@ fn typing_filters_and_enter_runs_the_highlighted_command() {
 }
 
 #[test]
+fn the_palette_clears_an_agent_view() {
+    let mut state = shell();
+    enter_prefix(&mut state);
+    open_palette(&mut state);
+    for character in "clear agent view".chars() {
+        press(&mut state, KeyCode::Char(character));
+    }
+    assert_eq!(
+        state
+            .filtered_palette_commands()
+            .first()
+            .map(|row| row.command.id.clone())
+            .as_deref(),
+        Some("core:clear-agent-view")
+    );
+    let ran = press(&mut state, KeyCode::Enter);
+    assert!(
+        endpoint_methods(&ran)
+            .iter()
+            .any(|method| matches!(method, crate::api::schema::Method::AgentViewClear(_))),
+        "the palette row sends agent.view.clear"
+    );
+}
+
+#[test]
 fn a_remembered_command_leads_the_next_empty_palette() {
     let mut state = shell();
     enter_prefix(&mut state);

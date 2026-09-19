@@ -119,6 +119,8 @@ Source: `/tmp/herdr-sidebar-brief-2.md`. Live state re-read with `herdr agent li
 - Step 1: `group_by = { token = "$project" }` is accepted as well as `"project"`, since rows spell the same token with `$`.
 - Step 1: fixed the stale `grouped_rows` reference entry, which said `rows_by_agent` wins while grouped.
 - Step 2: `src/ui/keybind_help.rs` no longer exists. Palette core rows come from `KeybindAction::palette_id`, so the palette row needs a new `KeybindAction` (amendment step 9).
+- Step 2: the TUI endpoint accepts only advertised methods, and `agent.view.clear` was not one. It joins `CLIENT_SHELL_METHODS` with a newly recorded shape digest (the fork's `workspace.open` precedent, PR #64); no existing digest changes.
+- Step 8: the ordering functions take `&AgentsSidebarConfig` instead of `&AgentGroupBy`, since they read `blocked_first` too.
 - Build env: CommandLineTools is gone from sjomba, and the vendored libghostty-vt needs Zig 0.16. Local builds now use the Xcode SDK plus `mise install zig@0.16.0`.
 
 ## Orchestrator
@@ -128,14 +130,14 @@ Driver: opus — one session implements in sequence; no fan-out (fewer than 3 in
 ## Tasks
 
 - [x] 1. Fork: token-keyed agent grouping + gather in `ordered_agent_pane_ids` + tests + `CHANGES.md`
-- [ ] 2. Fork: clear an active agent view from the header label and the palette
+- [x] 2. Fork: clear an active agent view from the header label and the palette
 - [ ] 3. Config: `grouped_rows` with `$thread` and `agent`, `group_by = { token = "project" }` after step 1, fix the stale comment
 - [ ] 4. Optional fork: `first_of` fallback token
 - [ ] 5. Upstream herdr-projects issue for workspace tokens (only with Cameron's go-ahead)
 - [ ] 6. Cameron: rename one of the two "Projects" workspaces
 - [x] 7. Fork: workspace-token fallback in `agent_group_key` (brief 2, item 5)
 - [x] 8. Fork: `blocked_first` option (brief 2, item 6)
-- [ ] 9. Fork: widen step 2 — `✕` on the view label, global-menu entry, palette row (brief 2, item 4)
+- [x] 9. Fork: widen step 2 — `✕` on the view label, global-menu entry, palette row (brief 2, item 4)
 - [ ] 10. Config: `$thread · workspace` row plus `agent`, `blocked_first` (brief 2, items 5 and name)
 
 Panel: none — T1 investigation plus a client-local sidebar presentation change; no security-critical control touched.

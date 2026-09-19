@@ -356,28 +356,40 @@ pub(super) fn render_agent_panel_header(
             .fg(config.palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
-    let sort_label = agent_view_label.unwrap_or(match config.agent_panel_sort {
-        crate::config::AgentPanelSortConfig::Spaces => "grouped",
-        crate::config::AgentPanelSortConfig::Priority => "priority",
-    });
-    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
+    // An active view shows its label with a ✕ that clears it. The label is
+    // truncated first so the ✕ stays visible next to " agents"; this runs once
+    // per frame, not per pane.
+    let sort_label: std::borrow::Cow<'_, str> = match agent_view_label {
+        Some(label) => {
+            let room = (area.width as usize).saturating_sub(display_width(" agents ✕ ") + 1);
+            format!("{} ✕", crate::ui::truncate_end(label, room)).into()
+        }
+        None => match config.agent_panel_sort {
+            crate::config::AgentPanelSortConfig::Spaces => "grouped",
+            crate::config::AgentPanelSortConfig::Priority => "priority",
+        }
+        .into(),
+    };
+    let sort_width = display_width(&sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
         area.y + 1,
         sort_width,
         1,
     );
-    hits.agent_sort_toggle = if config.mouse_capture && agent_view_label.is_none() {
-        sort_rect
-    } else {
-        Rect::default()
+    let (sort_toggle, view_clear) = match (config.mouse_capture, agent_view_label) {
+        (false, _) => (Rect::default(), Rect::default()),
+        (true, None) => (sort_rect, Rect::default()),
+        (true, Some(_)) => (Rect::default(), sort_rect),
     };
+    hits.agent_sort_toggle = sort_toggle;
+    hits.agent_view_clear = view_clear;
     put_text(
         buffer,
         sort_rect.x,
         sort_rect.y,
         sort_rect.width,
-        sort_label,
+        &sort_label,
         Style::default()
             .fg(if agent_view_label.is_some() {
                 config.palette.accent

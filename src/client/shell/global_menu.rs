@@ -46,6 +46,14 @@ pub(super) fn global_menu_items(
             ClientGlobalMenuAction::WhatsNew,
         ));
     }
+    // A plugin can filter the agent panel and leave it filtered; this is the
+    // one menu a stuck operator is sure to open.
+    if snapshot.agent_view_label.is_some() {
+        items.push((
+            "clear agent view",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ClearAgentView),
+        ));
+    }
     items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),

@@ -121,6 +121,10 @@ impl ClientShellState {
                     self.focus_visible_notification(outcome);
                     return;
                 }
+                if action == crate::input::KeybindAction::ClearAgentView {
+                    self.clear_agent_view(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::ReloadConfig {
                     self.push_endpoint_method_with_kind(
                         crate::api::schema::Method::ServerReloadConfig(
@@ -372,6 +376,19 @@ impl ClientShellState {
             label,
             env: Default::default(),
         })
+    }
+
+    /// Clears whichever agent view is active, whatever set it, through the
+    /// same `agent.view.clear` method a plugin or script would call.
+    pub(super) fn clear_agent_view(&mut self, outcome: &mut ClientShellInput) {
+        self.agent_scroll = 0;
+        self.push_endpoint_method(
+            crate::api::schema::Method::AgentViewClear(
+                crate::api::schema::AgentViewClearParams::default(),
+            ),
+            outcome,
+        );
+        outcome.repaint = true;
     }
 
     pub(super) fn push_endpoint_method(
