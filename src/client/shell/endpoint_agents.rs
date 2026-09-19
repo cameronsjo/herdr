@@ -138,7 +138,9 @@ fn agent_rows(
     let group_by = &config.agents.group_by;
     let grouped = group_by.is_grouped()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
-        && super::agent_sidebar::runs_are_contiguous(&ordered, |row| run_key(row, group_by));
+        // A gathered order is contiguous by construction; skip the scan.
+        && (super::agent_sidebar::gathers_group_runs(group_by, config.agent_panel_sort)
+            || super::agent_sidebar::runs_are_contiguous(&ordered, |row| run_key(row, group_by)));
 
     ordered
         .iter()

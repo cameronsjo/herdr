@@ -2032,6 +2032,43 @@ fn token_grouping_keeps_a_rank_sorted_view_grouped() {
 }
 
 #[test]
+fn token_grouping_orders_groups_by_their_best_ranked_member_under_a_view() {
+    // Two projects interleaved by the view's sort. Each group takes the place
+    // of its first-ranked member, and the view's order holds inside it.
+    let mut projected = token_agents_snapshot();
+    for pane in [1, 3] {
+        projected.agents[pane].tokens = vec![("project".into(), "y".into())];
+    }
+    projected.agent_view_label = Some("rank".into());
+    projected.agent_order = vec![
+        "pane_4".into(),
+        "pane_1".into(),
+        "pane_2".into(),
+        "pane_3".into(),
+    ];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&token_config()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("token-grouped view");
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(rect, pane_id)| (pane_id.as_str(), rect.height))
+            .collect::<Vec<_>>(),
+        vec![("pane_4", 2), ("pane_2", 1), ("pane_1", 2), ("pane_3", 1)],
+    );
+    assert_eq!(
+        agent_headers(&state, &frame)
+            .into_iter()
+            .map(|(_, header)| header)
+            .collect::<Vec<_>>(),
+        vec![" y", " x"],
+    );
+}
+
+#[test]
 fn token_grouping_turns_off_under_priority_order() {
     let mut config = token_config();
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;

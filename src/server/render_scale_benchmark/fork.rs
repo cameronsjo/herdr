@@ -5,10 +5,20 @@ pub(super) fn print_grouped_agent_profiles() {
         ("background", workspaces as fn(usize) -> Vec<Workspace>),
         ("active", active_panes),
     ] {
-        for grouped in [false, true] {
+        // The token arm reports no tokens, so every group key takes the
+        // workspace-token fallback scan: the worst case for that lookup.
+        for grouped in ["none", "workspace", "token+blocked_first"] {
             let mut config = Config::default();
-            if grouped {
-                config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Workspace;
+            match grouped {
+                "workspace" => {
+                    config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Workspace;
+                }
+                "token+blocked_first" => {
+                    config.ui.sidebar.agents.group_by =
+                        crate::config::AgentGroupBy::Token("project".into());
+                    config.ui.sidebar.agents.blocked_first = true;
+                }
+                _ => {}
             }
             let rows = [1, 15].map(|count| {
                 let mut pipeline = RenderPipeline::with_config(build(count), &config);

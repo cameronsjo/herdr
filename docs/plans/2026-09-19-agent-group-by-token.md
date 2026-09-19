@@ -121,6 +121,8 @@ Source: `/tmp/herdr-sidebar-brief-2.md`. Live state re-read with `herdr agent li
 - Step 2: `src/ui/keybind_help.rs` no longer exists. Palette core rows come from `KeybindAction::palette_id`, so the palette row needs a new `KeybindAction` (amendment step 9).
 - Step 2: the TUI endpoint accepts only advertised methods, and `agent.view.clear` was not one. It joins `CLIENT_SHELL_METHODS` with a newly recorded shape digest (the fork's `workspace.open` precedent, PR #64); no existing digest changes.
 - Step 8: the ordering functions take `&AgentsSidebarConfig` instead of `&AgentGroupBy`, since they read `blocked_first` too.
+- Review: token mode skips the contiguity scan, since the gather guarantees it and the scan is quadratic with many one-agent groups. Under a view with several token groups, each group takes its best-ranked member's place; a test now pins that.
+- Bench (`just bench-render-scale`, 15 panes, median µs, client composition): background 348 off / 313 workspace / 322 token+`blocked_first`; active 307 / 309 / 303. The fork bench gained a token arm that reports no tokens, so every key takes the workspace fallback scan.
 - Build env: CommandLineTools is gone from sjomba, and the vendored libghostty-vt needs Zig 0.16. Local builds now use the Xcode SDK plus `mise install zig@0.16.0`.
 
 ## Orchestrator

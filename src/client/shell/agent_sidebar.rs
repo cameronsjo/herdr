@@ -150,7 +150,8 @@ impl AgentRow {
 /// produced it, so the order itself is what gets checked: a filter-only view
 /// keeps space order and stays grouped, while a view that interleaves
 /// workspaces turns workspace grouping off. Token grouping gathers its runs in
-/// `ordered_agent_pane_ids`, so it passes this check under any view.
+/// `ordered_agent_pane_ids`, so the order is contiguous by construction and the
+/// scan is skipped: with many one-agent groups it is quadratic per frame.
 fn agent_grouping_is_effective(
     entries: &[(&ClientShellAgent, &ClientShellWorkspace)],
     workspaces: &[ClientShellWorkspace],
@@ -158,9 +159,10 @@ fn agent_grouping_is_effective(
 ) -> bool {
     config.agents.group_by.is_grouped()
         && config.agent_panel_sort == crate::config::AgentPanelSortConfig::Spaces
-        && runs_are_contiguous(entries, |(agent, _)| {
-            agent_group_key(agent, workspaces, &config.agents.group_by)
-        })
+        && (gathers_group_runs(&config.agents.group_by, config.agent_panel_sort)
+            || runs_are_contiguous(entries, |(agent, _)| {
+                agent_group_key(agent, workspaces, &config.agents.group_by)
+            }))
 }
 
 /// Whether `ordered_agent_pane_ids` gathers each group into one run.
