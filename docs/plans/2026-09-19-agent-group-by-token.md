@@ -1,5 +1,5 @@
 ---
-updated: "2026-09-19"
+updated: "2026-09-20"
 branch: "master"
 body_sha256: "e577bac5ae9b479638f3cf418a6a69c126bb99431e6fbeb3deb37d44b8d2139e"
 session_id: "5a79cc89-1a16-4c7c-b85e-d6c89dd6982a"
@@ -7,7 +7,8 @@ model: "claude-opus-5"
 harness: "claude-code 2.1.278"
 machine: "cf6e768835c7"
 approved_session_id: "cb45fd0a-6942-4744-a704-f57c90bd4ada"
-status: in-progress
+status: in-flight
+next: "Cameron upgrades herdr and restarts the server (kills ~10 live panes), then runs ~/.claude/scratch/herdr-sidebar/apply-token-grouping.sh and picks reload config in the global menu; Claude then commits the config to dotfiles-core. Steps 3 and 10 only."
 tier: T1
 ---
 
@@ -126,6 +127,8 @@ Source: `/tmp/herdr-sidebar-brief-2.md`. Live state re-read with `herdr agent li
 - Review: token mode skips the contiguity scan, since the gather guarantees it and the scan is quadratic with many one-agent groups. Under a view with several token groups, each group takes its best-ranked member's place; a test now pins that.
 - Bench (`just bench-render-scale`, 15 panes, median µs, client composition): background 348 off / 313 workspace / 322 token+`blocked_first`; active 307 / 309 / 303. The fork bench gained a token arm that reports no tokens, so every key takes the workspace fallback scan.
 - Polish: fixed `blocked_first` doing nothing under an interleaving view with workspace grouping (it now leads the whole list, as documented), reused `group_header` in the endpoint list, and made view labels drop format characters (security arm Nit, pre-existing).
+- Steps 1, 2, 7, 8, 9 shipped in fork PR [#86](https://github.com/cameronsjo/herdr/pull/86), merged 2026-09-19 as `02607d13`. Steps 3 and 10 wait on a build carrying it; the flip is staged at `~/.claude/scratch/herdr-sidebar/apply-token-grouping.sh`, which refuses nothing but restores the previous config when `herdr config check` fails.
+- Brief 2's item 7 (idle shell rows) was not reproduced: `pane_details` already drops panes with no agent and no name (`src/workspace/aggregate.rs:33`), and the live `agent list` showed only Claude panes.
 - Build env: CommandLineTools is gone from sjomba, and the vendored libghostty-vt needs Zig 0.16. Local builds now use the Xcode SDK plus `mise install zig@0.16.0`.
 
 ## Orchestrator
@@ -137,9 +140,9 @@ Driver: opus — one session implements in sequence; no fan-out (fewer than 3 in
 - [x] 1. Fork: token-keyed agent grouping + gather in `ordered_agent_pane_ids` + tests + `CHANGES.md`
 - [x] 2. Fork: clear an active agent view from the header label and the palette
 - [ ] 3. Config: `grouped_rows` with `$thread` and `agent`, `group_by = { token = "project" }` after step 1, fix the stale comment
-- [ ] 4. Optional fork: `first_of` fallback token
-- [ ] 5. Upstream herdr-projects issue for workspace tokens (only with Cameron's go-ahead)
-- [ ] 6. Cameron: rename one of the two "Projects" workspaces
+- [~] 4. Optional fork: `first_of` fallback token — declined; the two-row layout reads fine, so the fallback token is not needed
+- [x] 5. Upstream herdr-projects issue for workspace tokens — filed as [eliasstravik/herdr-projects#9](https://github.com/eliasstravik/herdr-projects/issues/9)
+- [x] 6. Cameron: rename one of the two "Projects" workspaces — `w74` is now `Cadence`, `w6X` is `Dotfiles` (verified live 2026-09-20)
 - [x] 7. Fork: workspace-token fallback in `agent_group_key` (brief 2, item 5)
 - [x] 8. Fork: `blocked_first` option (brief 2, item 6)
 - [x] 9. Fork: widen step 2 — `✕` on the view label, global-menu entry, palette row (brief 2, item 4)
