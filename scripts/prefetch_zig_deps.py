@@ -279,7 +279,7 @@ def main() -> int:
             seen.add(dep.hash)
             reason = unsafe_reason(dep)
             if reason:
-                failed[dep.hash] = f"{dep.url!r}: refused, {reason}"
+                failed[dep.hash] = f"{dep.url}: refused, {reason}"
                 continue
             source = cached_archive(cache, dep.hash)
             if source is None:
@@ -320,8 +320,10 @@ def main() -> int:
     for digest, reason in failed.items():
         # URLs and stderr lines come from downloaded content; escape control
         # characters so a hostile one cannot rewrite the terminal.
-        safe = reason.encode("unicode_escape", "backslashreplace").decode("ascii")
-        print(f"FAILED {digest} ({safe})", file=sys.stderr)
+        # The hash of a refused dependency is untrusted too, so escape the
+        # whole line once.
+        line = f"FAILED {digest} ({reason})"
+        print(line.encode("unicode_escape", "backslashreplace").decode("ascii"), file=sys.stderr)
     print(f"{len(seen)} dependencies, {fetched} fetched, {len(failed)} failed; cache at {cache}")
     return 1 if failed else 0
 
