@@ -2234,6 +2234,15 @@ impl TerminalState {
         self.agent_name.is_some() || self.effective_agent_label().is_some()
     }
 
+    /// Whether this terminal's agent name may route commands. A name alone is
+    /// not enough: it must be backed by a live agent, detected or reported, or
+    /// by a managed launch still in flight. Otherwise a stale name on a bare
+    /// shell would receive `agent.prompt` text and run it as commands.
+    pub fn agent_name_routes(&self) -> bool {
+        self.agent_name.is_some()
+            && (self.effective_agent_label().is_some() || self.managed_agent.is_some())
+    }
+
     fn reconcile_agent_name_owner(
         &mut self,
         agent_label: &str,

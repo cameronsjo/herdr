@@ -127,7 +127,7 @@ impl App {
                 "agent prompt must not be empty",
             ));
         }
-        let resolved = match self.resolve_agent_target(&params.target) {
+        let resolved = match self.resolve_agent_input_target(&params.target) {
             Ok(resolved) => resolved,
             Err(err) => return Err(encode_error_body(id, self.agent_target_error_body(err))),
         };
@@ -332,7 +332,7 @@ impl App {
         id: String,
         params: AgentSendKeysParams,
     ) -> String {
-        let resolved = match self.resolve_agent_target(&params.target) {
+        let resolved = match self.resolve_agent_input_target(&params.target) {
             Ok(resolved) => resolved,
             Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
         };
@@ -394,7 +394,7 @@ impl App {
                 ),
             );
         }
-        let resolved = match self.resolve_agent_target(&params.target) {
+        let resolved = match self.resolve_agent_input_target(&params.target) {
             Ok(resolved) => resolved,
             Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
         };
@@ -966,5 +966,43 @@ mod tests {
                 Some("shell-pane")
             );
         }
+    }
+
+    #[test]
+    fn agent_name_stops_routing_once_no_agent_backs_it() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        let response = app.handle_agent_rename(
+            "req".into(),
+            AgentRenameParams {
+                target: app.public_pane_id(0, pane_id).unwrap(),
+                name: Some("reviewer".into()),
+            },
+        );
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(app.resolve_agent_input_target("reviewer").is_ok());
+
+        // The agent leaves; the pane is a bare shell that still carries the name.
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(None, AgentState::Unknown);
+        assert_eq!(
+            app.state.terminals[&terminal_id].agent_name.as_deref(),
+            Some("reviewer"),
+            "precondition: the stale name survives"
+        );
+        assert!(app.resolve_agent_input_target("reviewer").is_err());
+        // Read and wait paths still find it while detection is uncertain.
+        assert!(app.resolve_agent_target("reviewer").is_ok());
     }
 }

@@ -76,6 +76,26 @@ impl App {
         &self,
         target: &str,
     ) -> Result<TerminalTarget, TerminalTargetError> {
+        self.resolve_agent_target_with(target, false)
+    }
+
+    /// Resolves a target that will receive typed input (`agent.prompt`,
+    /// `agent.send_keys`, `agent.type_submit`). A name only resolves while a
+    /// live agent backs it: a stale name on a bare shell would otherwise run
+    /// the prompt text as shell commands. Read and wait paths keep using
+    /// `resolve_agent_target`, which tolerates detection uncertainty.
+    pub(crate) fn resolve_agent_input_target(
+        &self,
+        target: &str,
+    ) -> Result<TerminalTarget, TerminalTargetError> {
+        self.resolve_agent_target_with(target, true)
+    }
+
+    fn resolve_agent_target_with(
+        &self,
+        target: &str,
+        require_live_name: bool,
+    ) -> Result<TerminalTarget, TerminalTargetError> {
         if let Some((ws_idx, pane_id)) = self.parse_current_public_pane_id(target) {
             if let Some(resolved) = self
                 .terminal_target_for_pane(ws_idx, pane_id)
@@ -93,7 +113,10 @@ impl App {
                     .terminals
                     .values()
                     .find(|terminal| terminal.id.to_string() == candidate.terminal_id)
-                    .is_some_and(|terminal| terminal.agent_name.as_deref() == Some(target))
+                    .is_some_and(|terminal| {
+                        terminal.agent_name.as_deref() == Some(target)
+                            && (!require_live_name || terminal.agent_name_routes())
+                    })
             })
             .collect();
         if let Some(resolved) = self.single_terminal_match(target, name_matches)? {
