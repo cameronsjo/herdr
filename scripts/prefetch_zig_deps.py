@@ -218,8 +218,10 @@ def download(dep: Dependency, workdir: Path) -> tuple[Path, str]:
             return target, "curl"
         except subprocess.CalledProcessError as err:
             errors.append(f"curl: {process_output(err)}")
-            if source is None:
-                raise FetchError("; ".join(errors)) from None
+        except OSError as err:
+            errors.append(f"curl: {err.strerror or err}")
+        if source is None:
+            raise FetchError("; ".join(errors))
     if source is None:
         raise FetchError("no download route")
     repo, rev = source
@@ -229,6 +231,9 @@ def download(dep: Dependency, workdir: Path) -> tuple[Path, str]:
     except subprocess.CalledProcessError as err:
         step = next((arg for arg in err.cmd if arg in {"init", "fetch", "archive"}), "git")
         errors.append(f"git {step}: {process_output(err)}")
+        raise FetchError("; then ".join(errors)) from None
+    except OSError as err:
+        errors.append(f"git: {err.strerror or err}")
         raise FetchError("; then ".join(errors)) from None
     return target, "git"
 
@@ -241,10 +246,21 @@ def process_output(err: subprocess.CalledProcessError) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return f"exit status {err.returncode}"
+    # Zig prefixes diagnostics with a location (`file:1:2: error: ...`).
     marked = [
-        line for line in lines if line.lower().startswith(("error", "fatal", "curl:"))
+        line
+        for line in lines
+        if line.lower().startswith(("error", "fatal", "curl:")) or ": error:" in line
     ]
     return (marked or lines)[-1]
+
+
+def format_failure(digest: str, reason: str) -> str:
+    """One FAILED line, escaped as a whole: URLs, stderr and the hash of a
+    refused dependency all come from downloaded content, so a control
+    character in any of them must not reach the terminal."""
+    line = f"FAILED {digest} ({reason})"
+    return line.encode("unicode_escape", "backslashreplace").decode("ascii")
 
 
 def main() -> int:
@@ -299,13 +315,19 @@ def main() -> int:
                 except subprocess.CalledProcessError as err:
                     failed[dep.hash] = f"{dep.url}: zig fetch (via {route}): {process_output(err)}"
                     continue
+                except OSError as err:
+                    failed[dep.hash] = f"{dep.url}: zig fetch: {err.strerror or err}"
+                    continue
                 # Trust nothing inside a download until Zig's own content hash
                 # matches the pinned one; a mismatch is a failure, not a fetch.
+                if not computed:
+                    failed[dep.hash] = f"{dep.url}: zig fetch printed no hash (via {route})"
+                    continue
                 if computed != dep.hash:
                     failed[dep.hash] = (
-                        f"{dep.url}: expected {dep.hash}, zig computed "
-                        f"{computed or 'no hash'} (via {route}); the mismatched copy "
-                        "is cached under its own hash and never used"
+                        f"{dep.url}: expected {dep.hash}, zig computed {computed} "
+                        f"(via {route}); the mismatched copy is cached under its own "
+                        "hash and never used"
                     )
                     continue
                 source = cached_archive(cache, dep.hash)
@@ -318,12 +340,7 @@ def main() -> int:
             if zon:
                 queue.extend(parse_dependencies(zon))
     for digest, reason in failed.items():
-        # URLs and stderr lines come from downloaded content; escape control
-        # characters so a hostile one cannot rewrite the terminal.
-        # The hash of a refused dependency is untrusted too, so escape the
-        # whole line once.
-        line = f"FAILED {digest} ({reason})"
-        print(line.encode("unicode_escape", "backslashreplace").decode("ascii"), file=sys.stderr)
+        print(format_failure(digest, reason), file=sys.stderr)
     print(f"{len(seen)} dependencies, {fetched} fetched, {len(failed)} failed; cache at {cache}")
     return 1 if failed else 0
 

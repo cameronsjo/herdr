@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
+
+import scripts.prefetch_zig_deps as prefetch
 
 from scripts.prefetch_zig_deps import (
     Dependency,
@@ -69,6 +75,10 @@ class ProcessOutputTest(unittest.TestCase):
             1, ["zig", "fetch"], stderr="error: hash mismatch\nnote: expected .hash = x\n"
         )
         self.assertEqual(process_output(err), "error: hash mismatch")
+        located = subprocess.CalledProcessError(
+            1, ["zig"], stderr="build.zig.zon:7:20: error: bad hash\nnote: see here\n"
+        )
+        self.assertEqual(process_output(located), "build.zig.zon:7:20: error: bad hash")
         quiet = subprocess.CalledProcessError(22, ["curl"], stderr="")
         self.assertEqual(process_output(quiet), "exit status 22")
 
@@ -101,6 +111,43 @@ class UnsafeReasonTest(unittest.TestCase):
             self.assertIsNotNone(
                 unsafe_reason(Dependency("https://x/pkg.tar.gz", digest)), digest
             )
+
+
+class FailureReportingTest(unittest.TestCase):
+    def test_a_failure_line_escapes_every_control_character(self) -> None:
+        line = prefetch.format_failure(
+            "\x1b[2Jhash", "https://x/\x1b]0;owned\x07: curl: \u202egnp"
+        )
+        self.assertTrue(line.isascii())
+        self.assertNotIn("\x1b", line)
+        self.assertNotIn("\x07", line)
+        self.assertIn("\\x1b[2Jhash", line)
+
+    def test_a_failed_curl_and_git_fallback_keep_both_errors_and_the_git_step(self) -> None:
+        dep = Dependency("https://github.com/o/r/archive/abcdef1.tar.gz", "r-0.0.0-AAAA")
+        curl_err = subprocess.CalledProcessError(22, ["curl"], stderr="curl: (22) 403 Forbidden\n")
+        git_err = subprocess.CalledProcessError(
+            128,
+            ["git", "-c", "protocol.allow=never", "-C", "x", "fetch", "-q", "--", "r", "abcdef1"],
+            stderr="fatal: unable to access\n",
+        )
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            prefetch, "curl_download", side_effect=curl_err
+        ), mock.patch.object(prefetch, "git_download", side_effect=git_err):
+            with self.assertRaises(prefetch.FetchError) as caught:
+                prefetch.download(dep, Path(tmp))
+        message = str(caught.exception)
+        self.assertIn("curl: curl: (22) 403 Forbidden", message)
+        self.assertIn("then git fetch: fatal: unable to access", message)
+
+    def test_a_missing_binary_is_a_fetch_error_not_a_traceback(self) -> None:
+        dep = Dependency("https://deps.example/pkg.tar.gz", "pkg-0.0.0-AAAA")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            prefetch, "curl_download", side_effect=FileNotFoundError(2, "No such file", "curl")
+        ):
+            with self.assertRaises(prefetch.FetchError) as caught:
+                prefetch.download(dep, Path(tmp))
+        self.assertIn("curl: No such file", str(caught.exception))
 
 
 if __name__ == "__main__":
