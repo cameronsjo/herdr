@@ -25,10 +25,14 @@ impl App {
     /// index. An out-of-range index is a bug, but it must not panic the server
     /// from one socket request: it logs, trips in debug builds, and yields an
     /// empty id that matches no workspace.
+    #[track_caller]
     pub(crate) fn public_workspace_id(&self, ws_idx: usize) -> String {
+        // Captured here: `#[track_caller]` does not reach into the closure.
+        let caller = std::panic::Location::caller();
         self.try_public_workspace_id(ws_idx).unwrap_or_else(|| {
             tracing::error!(
                 ws_idx,
+                caller = %caller,
                 workspace_count = self.state.workspaces.len(),
                 "public_workspace_id called with an out-of-range index"
             );

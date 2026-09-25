@@ -152,11 +152,19 @@ pub(crate) fn public_tab_id_for_number(workspace_id: &str, tab_number: usize) ->
 /// plus a canonical public number. Restore uses it to refuse ids that
 /// `public_workspace_number` cannot read, since `reserve_workspace_ids` would
 /// skip them and a later generated id could collide.
+///
+/// The number is capped far below the counter's range: an id near
+/// `u64::MAX` would make reservation overflow or wrap the counter back to
+/// ids already in use.
 pub(crate) fn is_canonical_workspace_id(id: &str) -> bool {
     public_workspace_number(id).is_some_and(|number| {
-        number > 0 && id.strip_prefix('w') == Some(encode_public_number(number).as_str())
+        (1..=MAX_CANONICAL_WORKSPACE_NUMBER).contains(&number)
+            && id.strip_prefix('w') == Some(encode_public_number(number).as_str())
     })
 }
+
+/// Largest public number a restored workspace id may carry.
+const MAX_CANONICAL_WORKSPACE_NUMBER: usize = u32::MAX as usize;
 
 pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
     reserve_workspace_id_strs(workspaces.iter().map(|workspace| workspace.id.as_str()));
@@ -1609,6 +1617,13 @@ mod tests {
         for id in ["", "w", "1", "w_1", "wi", "W1", "w1 ", "ws_1", "w\u{200b}1"] {
             assert!(!is_canonical_workspace_id(id), "{id:?}");
         }
+        // Past the cap: would overflow reservation or wrap the id counter.
+        for number in [MAX_CANONICAL_WORKSPACE_NUMBER + 1, usize::MAX] {
+            let id = format!("w{}", encode_public_number(number));
+            assert!(!is_canonical_workspace_id(&id), "{id}");
+        }
+        let at_cap = format!("w{}", encode_public_number(MAX_CANONICAL_WORKSPACE_NUMBER));
+        assert!(is_canonical_workspace_id(&at_cap), "{at_cap}");
     }
 
     #[test]
