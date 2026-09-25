@@ -25,6 +25,37 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+## Fork issue fixes riding the 2026-09-25 upstream sync
+
+### fix: close the global menu when a snapshot changes its rows (#72)
+
+- **Files:** `src/client/shell/global_menu.rs` (`reconcile_global_menu`), `src/client/shell/state.rs`, `src/client/shell/tests/startup_overlays.rs`
+- **Replaces:** Upstream dispatches a global-menu click by index against the current snapshot while the rows were drawn from an earlier one. The fork closes the menu in the snapshot path when the item list would change, as `reconcile_context_menu` does.
+- **Regression check:** `cargo nextest run -E 'test(global_menu_closes_when_an_update_row_arrives_under_it)'`. Staged break confirmed 2026-09-25: commenting out the `reconcile_global_menu` call reddens it.
+
+### fix: keep the api accept loop alive when a connection thread fails (#71, partial)
+
+- **Files:** `src/api/server.rs`
+- **Replaces:** Upstream spawns each API connection with `std::thread::spawn`, which panics inside the accept loop on thread exhaustion, and logs the loop's exit at `debug`. The fork uses `thread::Builder` and drops only the failed connection, and warns when the loop exits while the server runs. The root mechanism in #71 is still open.
+- **Regression check:** `cargo nextest run -E 'test(/api::/)'`. No test forces a thread-spawn failure.
+
+### refactor: move valid_agent_name beside sanitize_label (#34)
+
+- **Files:** `src/label.rs`, `src/app/{agents,mod}.rs`, `src/terminal/state.rs`, `src/persist/restore.rs`
+- **Replaces:** Upstream has no `valid_agent_name`; it is the fork's (#18). It moved from `src/app/agents.rs` to `src/label.rs`. Upstream edits near either spot may conflict.
+- **Regression check:** `cargo nextest run -E 'test(agent_names_use_a_small_cli_safe_grammar)'`.
+
+### ci: skip upstream-synced commits when labelling fork issues (#60)
+
+- **Files:** `.github/workflows/label-next-release-issues.yml`
+- **Replaces:** Upstream scans every pushed commit. On the fork, the scan now excludes commits reachable from `herdrdev/herdr` `master` (fetched read-only).
+- **Regression check:** `actionlint .github/workflows/label-next-release-issues.yml`; `git log --format=%b <before>..<after> --not upstream/master` over a sync range yields only fork refs (34 refs down to `#42` for the 2026-09-25 sync).
+
+### docs: ja and zh-cn rows_by_agent wording (#42)
+
+- **Files:** `docs/next/website/src/content/docs/{ja,zh-cn}/configuration.mdx`
+- **Regression check:** manual read — neither locale claims `rows_by_agent` wins while grouped.
+
 ## Agents group by a project token, blocked agents lead, and agent views clear from the TUI (PR [#86](https://github.com/cameronsjo/herdr/pull/86))
 
 ### feat(sidebar): group agents by a pane metadata token
