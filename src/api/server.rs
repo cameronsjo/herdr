@@ -126,7 +126,7 @@ fn start_server_inner(
             }
             match stream {
                 Ok(stream) => {
-                    if backoff.consecutive() > 1 {
+                    if streak_hid_failures(backoff.consecutive()) {
                         // Close the streak in the log: with errors logged only
                         // every 50th time, silence alone cannot mean recovery.
                         // A single failure was logged in full already, so a
@@ -193,6 +193,14 @@ fn start_server_inner(
         // the thread is never joined. `incoming()` does not end on its own, so
         // this warning guards a future change that lets it: nothing restarts
         // this thread.
+        if streak_hid_failures(backoff.consecutive()) || streak_hid_failures(spawn_drops.streak) {
+            // Shutdown cut a streak short; keep the count it had hidden.
+            info!(
+                failed_accepts = backoff.consecutive(),
+                dropped_in_episode = spawn_drops.streak,
+                "api listener stopping during a failure streak"
+            );
+        }
         if listener_running.load(Ordering::Relaxed) {
             warn!("api server stopped accepting connections; the api socket is now unresponsive");
         } else {
@@ -240,10 +248,18 @@ impl AcceptBackoff {
     }
 }
 
+/// Whether a failure streak ending now hid failures from the log. Streaks log
+/// their first failure and every 50th, so a streak of one was logged in full
+/// and needs no closing line; two or more did hide some.
+fn streak_hid_failures(streak: u32) -> bool {
+    streak > 1
+}
+
 /// Tracks connections dropped because the OS refused their thread. Drops are
 /// counted per episode, like accept failures: the first and every 50th drop
 /// of an episode log with the lifetime total, and the next successful spawn
-/// closes the episode with a recovery line. A lifetime-only counter would let
+/// closes the episode, with a recovery line after a streak of two or more (a
+/// single drop was already logged in full). A lifetime-only counter would let
 /// a later episode fall between multiples of 50 and log nothing.
 #[derive(Debug, Default)]
 struct SpawnDrops {
@@ -256,7 +272,7 @@ impl SpawnDrops {
         match spawned {
             Ok(_) => {
                 // As for accepts: only a streak that hid drops needs closing.
-                if self.streak > 1 {
+                if streak_hid_failures(self.streak) {
                     info!(
                         dropped_in_episode = self.streak,
                         dropped_total = self.total,
@@ -1156,6 +1172,15 @@ fn accept_backoff_grows_to_a_cap_and_resets_on_success() {
         backoff.should_log(),
         "the 50th does, so a stuck listener stays visible"
     );
+}
+
+#[cfg(test)]
+#[test]
+fn only_a_streak_that_hid_failures_gets_a_recovery_line() {
+    assert!(!streak_hid_failures(0), "no streak");
+    assert!(!streak_hid_failures(1), "one failure was logged in full");
+    assert!(streak_hid_failures(2), "the second failure went unlogged");
+    assert!(streak_hid_failures(49));
 }
 
 #[cfg(test)]
