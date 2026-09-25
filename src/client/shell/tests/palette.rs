@@ -1060,7 +1060,10 @@ fn a_merge_picker_with_no_other_space_says_so() {
     let frame = state.compose(106, 24).expect("composed frame");
     let text = frame_rows(&frame).join("\n");
     assert!(text.contains("No other space to merge into"), "{text}");
-    assert!(!text.contains("0 terminals"), "a spaces-only picker counts no terminals");
+    assert!(
+        !text.contains("0 terminals"),
+        "a spaces-only picker counts no terminals"
+    );
     assert!(text.contains("search spaces"), "{text}");
 }
 
