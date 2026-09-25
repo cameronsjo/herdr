@@ -116,12 +116,16 @@ class PreviewNotesTests(unittest.TestCase):
             self.assertEqual(preview.preview_range_base("newer-master", "hotfix"), "v0.7.0")
 
     def test_post_stable_history_bases_range_on_stable_tag(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        # A cleanup race must not fail a test about preview_range_base.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             repo = Path(tmp)
 
             def git(*args: str) -> str:
+                # No background auto-maintenance: newer git can detach one
+                # after a commit, and it writes into .git while the temp
+                # directory is being removed ("Directory not empty: '.git'").
                 return subprocess.check_output(
-                    ["git", *args],
+                    ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args],
                     cwd=repo,
                     text=True,
                     stderr=subprocess.DEVNULL,
