@@ -262,6 +262,27 @@ pub(crate) fn receive(socket_path: &Path, token: &str) -> io::Result<ReceivedHan
             crate::build_info::version()
         )));
     }
+    // Protocol versions differ on every in-place upgrade, so a mismatch alone
+    // is not a reason to refuse. Crossing between an upstream build and this
+    // fork is different: each side may carry state the other does not model.
+    // Say so, since nothing else would.
+    if crate::protocol::is_fork_protocol(manifest.source_protocol)
+        != crate::protocol::is_fork_protocol(crate::protocol::PROTOCOL_VERSION)
+    {
+        warn!(
+            source_protocol = manifest.source_protocol,
+            source_version = %manifest.source_version,
+            protocol = crate::protocol::PROTOCOL_VERSION,
+            "live handoff crosses between an upstream herdr build and a fork build; \
+             state only the source build models may not carry over"
+        );
+    } else {
+        info!(
+            source_protocol = manifest.source_protocol,
+            source_version = %manifest.source_version,
+            "accepting live handoff"
+        );
+    }
     stream.write_all(b"validated\n")?;
     stream.flush()?;
     let fds = recv_fds(&stream, manifest.panes.len())?;
