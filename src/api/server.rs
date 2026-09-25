@@ -118,9 +118,15 @@ fn start_server_inner(
     let running = Arc::new(AtomicBool::new(true));
     let listener_running = Arc::clone(&running);
     let thread = std::thread::spawn(move || {
+        let mut backoff = AcceptBackoff::default();
+        let dropped_connections = std::sync::atomic::AtomicU64::new(0);
         for stream in listener.incoming() {
+            if !listener_running.load(Ordering::Relaxed) {
+                break;
+            }
             match stream {
                 Ok(stream) => {
+                    backoff.reset();
                     let api_tx = api_tx.clone();
                     let event_hub = event_hub.clone();
                     let capabilities = capabilities.clone();
@@ -148,18 +154,32 @@ fn start_server_inner(
                                 warn!(err = %err, "api connection failed");
                             }
                         });
-                    if let Err(err) = spawned {
-                        warn!(err = %err, "api connection dropped: could not start its thread");
-                    }
+                    record_connection_spawn(spawned, &dropped_connections);
                 }
                 Err(err) => {
-                    error!(err = %err, "api listener accept failed");
-                    break;
+                    // An accept error is not a dead listener: fd or memory
+                    // exhaustion (EMFILE, ENFILE, ENOMEM) and aborted
+                    // connections clear on their own. Ending the loop here
+                    // left the socket file in place with nothing accepting, so
+                    // every later connect was refused while the server ran on.
+                    // Back off and keep accepting instead.
+                    let delay = backoff.next_delay();
+                    if backoff.should_log() {
+                        error!(
+                            err = %err,
+                            kind = ?err.kind(),
+                            os_error = ?err.raw_os_error(),
+                            consecutive = backoff.consecutive(),
+                            retry_in_ms = delay.as_millis() as u64,
+                            "api listener accept failed; retrying"
+                        );
+                    }
+                    std::thread::sleep(delay);
                 }
             }
         }
-        // Nothing restarts this thread, so its exit means the API socket stops
-        // answering while the server stays up. Say so at a visible level.
+        // Only shutdown ends the loop now, but say so loudly if the listener
+        // ever stops without it: nothing restarts this thread.
         if listener_running.load(Ordering::Relaxed) {
             warn!("api server stopped accepting connections; the api socket is now unresponsive");
         } else {
@@ -173,6 +193,59 @@ fn start_server_inner(
         identity,
         running,
     })
+}
+
+/// Retry pacing for a failing `accept`: 10 ms doubling to 1 s, reset by the
+/// next accepted connection. Logs the first failure of a streak and every
+/// 50th after it, so a listener stuck failing is visible without flooding.
+#[derive(Debug, Default)]
+struct AcceptBackoff {
+    consecutive: u32,
+}
+
+impl AcceptBackoff {
+    const INITIAL: Duration = Duration::from_millis(10);
+    const MAX: Duration = Duration::from_secs(1);
+    const LOG_EVERY: u32 = 50;
+
+    fn next_delay(&mut self) -> Duration {
+        self.consecutive = self.consecutive.saturating_add(1);
+        let shift = (self.consecutive - 1).min(16);
+        Self::INITIAL.saturating_mul(1 << shift).min(Self::MAX)
+    }
+
+    fn should_log(&self) -> bool {
+        self.consecutive == 1 || self.consecutive.is_multiple_of(Self::LOG_EVERY)
+    }
+
+    fn consecutive(&self) -> u32 {
+        self.consecutive
+    }
+
+    fn reset(&mut self) {
+        self.consecutive = 0;
+    }
+}
+
+/// Handles the result of starting a connection's thread. A refused thread
+/// drops only that connection, counted so a thread-exhaustion episode reads as
+/// one growing number rather than a wall of identical lines.
+fn record_connection_spawn<T>(
+    spawned: io::Result<T>,
+    dropped: &std::sync::atomic::AtomicU64,
+) -> bool {
+    match spawned {
+        Ok(_) => true,
+        Err(err) => {
+            let dropped_total = dropped.fetch_add(1, Ordering::Relaxed) + 1;
+            warn!(
+                err = %err,
+                dropped_total,
+                "api connection dropped: could not start its thread"
+            );
+            false
+        }
+    }
 }
 
 fn retired_pane_graphics_method_error(line: &str, id: &str) -> Option<ErrorResponse> {
@@ -1016,6 +1089,39 @@ fn dispatch_to_app(
             )
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn accept_backoff_grows_to_a_cap_and_resets_on_success() {
+    let mut backoff = AcceptBackoff::default();
+    let delays: Vec<_> = (0..10).map(|_| backoff.next_delay()).collect();
+    assert_eq!(delays[0], Duration::from_millis(10));
+    assert_eq!(delays[1], Duration::from_millis(20));
+    assert!(delays.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert_eq!(delays[9], Duration::from_secs(1));
+    for _ in 0..1_000 {
+        assert!(backoff.next_delay() <= Duration::from_secs(1));
+    }
+    backoff.reset();
+    assert_eq!(backoff.next_delay(), Duration::from_millis(10));
+    assert!(backoff.should_log(), "the first failure of a streak logs");
+    backoff.next_delay();
+    assert!(!backoff.should_log(), "the second does not");
+}
+
+#[cfg(test)]
+#[test]
+fn a_refused_connection_thread_drops_only_that_connection() {
+    let dropped = std::sync::atomic::AtomicU64::new(0);
+    assert!(record_connection_spawn(Ok(()), &dropped));
+    for _ in 0..2 {
+        assert!(!record_connection_spawn::<()>(
+            Err(io::Error::other("thread limit")),
+            &dropped
+        ));
+    }
+    assert_eq!(dropped.load(Ordering::Relaxed), 2);
 }
 
 #[cfg(test)]
