@@ -78,6 +78,22 @@ jobs:
               | sort -nu
           )
 
+          if [ "${#EXCLUDE_ARGS[@]}" -gt 0 ]; then
+            # Record what the exclusion dropped, so a missing label can be
+            # explained from this log.
+            declare -A KEPT=()
+            for issue in "${ISSUES[@]}"; do KEPT[$issue]=1; done
+            IGNORED=()
+            while read -r issue; do
+              [ -n "$issue" ] && [ -z "${KEPT[$issue]:-}" ] && IGNORED+=("#$issue")
+            done < <(
+              git log --format=%b "${RANGE_ARGS[@]}" \
+                | perl -ne 'print "$1\n" if /^\s*refs\s+#([0-9]+)\s*$/i' \
+                | sort -nu
+            )
+            echo "Ignored ${#IGNORED[@]} upstream ref(s): ${IGNORED[*]:-none}"
+          fi
+
           if [ "${#ISSUES[@]}" -eq 0 ]; then
             echo "No issue refs found."
             exit 0

@@ -11,7 +11,7 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); fork navigator move/merge pickers adapted to upstream's flat Go-to list (no tab rows, no expand)
+- `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
 - `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
 - `e563360d` PR [#57](https://github.com/cameronsjo/herdr/pull/57) (2026-09-08) — merge upstream through `9e01168b`
 - `e839cf59` PR [#56](https://github.com/cameronsjo/herdr/pull/56) (2026-09-07) — sync upstream master into the fork
@@ -25,13 +25,67 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
 
+### 2026-09-25 sync: conflict resolutions (`38b3ac7`)
+
+Sixteen files conflicted. The decisions that change behavior, and where the
+next sync is likely to conflict again:
+
+- **Navigator pickers** (`src/client/shell/{overlays,overlay_input,navigator_moves,state}.rs`):
+  upstream replaced the Go-to tree with a flat list and removed the `Tab`
+  target and workspace expand/collapse. The fork's pane/tab move and merge
+  pickers now sit on that list; tab destinations resolve through pane rows.
+  **Collision:** upstream edits to `aggregate_navigation::navigator_rows`,
+  the navigator footer, or `move_navigator_workspace` conflict here.
+- **Sidebar row colors** (`src/client/shell/{sidebar,endpoint_sidebar}.rs`):
+  both sides added `workspace_selection_background`. Upstream's keeps the
+  name; the fork's drop-target variant is `workspace_highlight_background`.
+  **Collision:** `render_workspace_rows`' signature.
+- **Worktree lookup** (`src/app/api/worktrees.rs`): the fork's
+  focused-space preference (`preferred_workspace_idx`) kept, with upstream's
+  "explicit worktree provenance wins" applied inside its filter. Upstream
+  removed `list_source_workspace_idx_for_space`; the fork dropped it too.
+- **Tab close** (`src/client/shell/actions.rs`): upstream's last-tab
+  confirmation owns `CloseTab`; the fork's action-table arm was removed.
+- **Compile follow-ups:** `ClearPane` palette id `core:clear-pane`;
+  `stream_active` removed with upstream's graphics API; the `close_tab`
+  test finds the Close row by label because the fork's tab menu is longer.
+- **Build:** this session's `cargo build` needed the Zig dependencies
+  prefetched (`just zig-prefetch`); see that entry below.
+
 ## Fork issue fixes riding the 2026-09-25 upstream sync
+
+### Review-panel fixes on PR #87 (2026-09-25)
+
+A six-seat cadence panel (code ×2, security, operability, developer and user
+experience) reviewed the sync resolution and fork commits. Fixes:
+
+- **Accept loop** (`src/api/server.rs`, #71): accept errors back off 10 ms→1 s
+  and keep accepting instead of ending the loop; errors log kind and OS code;
+  refused connection threads are counted. **Regression check:**
+  `cargo nextest run -E 'test(accept_backoff_grows_to_a_cap_and_resets_on_success) + test(a_refused_connection_thread_drops_only_that_connection)'`.
+- **Stale agent name** (`src/app/terminal_targets.rs`, #73): refusal keeps
+  `agent_not_found` but names the pane and the next step; comments now name
+  the handlers' own live-agent checks as the control.
+- **Logs and ids** (#80, #44): restore and handoff escape untrusted strings;
+  restore names new id, index, label and reason; `public_workspace_id` logs
+  its caller; restored ids are capped at `u32::MAX`; the command-target check
+  uses `try_public_workspace_id`. **Regression check:**
+  `cargo nextest run -E 'test(canonical_workspace_ids) + test(distribution_change)'`.
+- **Pickers** (`src/client/shell/`): mode titles, split chooser names its
+  tab and pane, ←→ steps between spaces, merge footer and no source row.
+  **Regression check:**
+  `cargo nextest run -E 'test(left_and_right_step_between_spaces) + test(a_pane_row_destination_asks) + test(the_merge_picker_does_not_offer_the_source_space)'`.
+- **Label workflow** logs the upstream refs it ignored.
+- **Zig prefetch** (`scripts/prefetch_zig_deps.py`, `just zig-prefetch`):
+  fills the Zig cache when `build.rs` fails on a `build.zig.zon` fetch, as it
+  did behind this session's proxy; also named in `sync-upstream.sh`'s next
+  steps. **Regression check:** `python3 -m unittest scripts.test_prefetch_zig_deps`.
 
 ### test: share one env lock across every test that mutates the environment (#74, #36)
 
 - **Files:** `src/config.rs` (`test_config_env_lock`), the test `env_lock()` in `src/{api/server,client/tests/mod,platform/linux,product_announcements,server/autodetect,session,update}.rs`
 - **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. Upstream adding a new private `env_lock()` will reintroduce the race; route it through the shared one.
-- **Regression check:** `cargo test --locked --bin herdr` run several times reaches `test result: ok` each time (3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25).
+- **Regression check:** `just test-single-process` (five single-process `cargo test --bin herdr` runs; each must reach `test result: ok`). `just test` cannot show this race: nextest runs every test in its own process. 3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25. The follow-up sweep also moved `remote/attach.rs`'s `TMPDIR` lock and `integration_env_lock` onto the shared lock.
 
 ### test: point the hot-path architecture guard at the client shell (#40)
 
