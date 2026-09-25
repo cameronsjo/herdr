@@ -10,6 +10,13 @@ HOT_PATH_SOURCES = (
     PROJECT_ROOT / "src" / "ui.rs",
     *sorted((PROJECT_ROOT / "src" / "ui").rglob("*.rs")),
     PROJECT_ROOT / "src" / "server" / "render_stream.rs",
+    # The per-pane render path moved here in upstream's client-shell refactor;
+    # without it the guard passed while watching almost none of that path.
+    *sorted(
+        path
+        for path in (PROJECT_ROOT / "src" / "client" / "shell").rglob("*.rs")
+        if "tests" not in path.relative_to(PROJECT_ROOT / "src" / "client" / "shell").parts
+    ),
 )
 APP_SERVER_SOURCES = (
     *sorted((PROJECT_ROOT / "src" / "app").rglob("*.rs")),
