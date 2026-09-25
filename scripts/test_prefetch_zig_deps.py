@@ -7,6 +7,7 @@ from scripts.prefetch_zig_deps import (
     archive_suffix,
     git_source,
     parse_dependencies,
+    unsafe_reason,
 )
 
 
@@ -57,6 +58,36 @@ class ArchiveSuffixTest(unittest.TestCase):
         self.assertEqual(archive_suffix("https://x/themes.tgz"), ".tgz")
         self.assertEqual(archive_suffix("https://x/pkg.tar.gz?download=1"), ".tar.gz")
         self.assertEqual(archive_suffix("https://x/no-extension"), ".tar.gz")
+
+
+class UnsafeReasonTest(unittest.TestCase):
+    """A nested build.zig.zon comes out of a downloaded archive, so its url and
+    hash reach curl, git and file paths only after these checks."""
+
+    def test_accepts_the_shapes_the_vendored_tree_uses(self) -> None:
+        for dep in [
+            Dependency("https://deps.files.ghostty.org/zlib.tar.gz", "N-V-__8AAB0eQwD-0MdOEBmz7intriBR"),
+            Dependency("https://x/pkg.tar.gz", "1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb"),
+            Dependency("git+https://github.com/zigimg/zigimg#d695acd97c02e57bb151e8f659d1280f5cd6ca70", "zigimg-0.1.0-lly-O6N2EABOxke8dqyzCwhtUCAafqP35zC7wsZ4Ddxj"),
+        ]:
+            self.assertIsNone(unsafe_reason(dep), dep)
+
+    def test_refuses_option_injection_and_non_https_sources(self) -> None:
+        for url in [
+            "git+--upload-pack=touch PWNED#.",
+            "git+https://github.com/a/b#--upload-pack=x",
+            "file:///etc/passwd",
+            "git+file:///tmp/repo#main",
+            "http://deps.example/pkg.tar.gz",
+            "-o/tmp/x",
+        ]:
+            self.assertIsNotNone(unsafe_reason(Dependency(url, "pkg-0.0.0-AAAA")), url)
+
+    def test_refuses_hashes_that_would_leave_the_work_directory(self) -> None:
+        for digest in ["../../../home/u/x", "/home/u/.config/foo", "a/b", "..", "-rf", ""]:
+            self.assertIsNotNone(
+                unsafe_reason(Dependency("https://x/pkg.tar.gz", digest)), digest
+            )
 
 
 if __name__ == "__main__":

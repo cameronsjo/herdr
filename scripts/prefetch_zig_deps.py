@@ -13,6 +13,12 @@ A package already cached is skipped; a missing one is downloaded with `curl`
 to `zig fetch`, which stores it under its content hash. Any dependency that
 cannot be fetched makes the script exit non-zero.
 
+Everything below the vendored tree is untrusted input: a package's own
+build.zig.zon comes out of a downloaded archive. So a dependency is refused
+unless its hash and URL have the expected shape (https only, no leading `-`,
+no path characters in the hash), and a download is trusted, and its own
+build.zig.zon read, only once `zig fetch` computes exactly the pinned hash.
+
 Usage: python3 scripts/prefetch_zig_deps.py   (honours $ZIG, default `zig`)
 """
 
@@ -36,6 +42,10 @@ _HASH = re.compile(r'\.hash\s*=\s*"([^"]+)"')
 _GITHUB_ARCHIVE = re.compile(
     r"^https://github\.com/([^/]+/[^/]+)/archive/([0-9a-f]{7,40})\.tar\.gz$"
 )
+# Zig package hashes: legacy multihash hex (1220...) or name-version-digest.
+# No path separators, so a hash is always a single file name.
+_SAFE_HASH = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,199}")
+_SAFE_REV = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,199}")
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,21 @@ def parse_dependencies(zon: str) -> list[Dependency]:
         if url and digest:
             found.append(Dependency(url.group(1), digest.group(1)))
     return found
+
+
+def unsafe_reason(dep: Dependency) -> str | None:
+    """Why a dependency from an untrusted build.zig.zon must not be fetched,
+    or None when its hash and URL are safe to hand to curl, git and paths."""
+    if not _SAFE_HASH.fullmatch(dep.hash) or ".." in dep.hash:
+        return "hash is not a plain Zig package hash"
+    if not (dep.url.startswith("https://") or dep.url.startswith("git+https://")):
+        return "only https:// and git+https:// sources are fetched"
+    source = git_source(dep.url)
+    if source is not None:
+        _, rev = source
+        if not _SAFE_REV.fullmatch(rev) or ".." in rev:
+            return "git revision has an unexpected shape"
+    return None
 
 
 def git_source(url: str) -> tuple[str, str] | None:
@@ -91,7 +116,12 @@ def global_cache_dir(zig: str) -> Path:
     override = os.environ.get("ZIG_GLOBAL_CACHE_DIR")
     if override:
         return Path(override)
-    env = subprocess.run([zig, "env"], check=True, capture_output=True, text=True).stdout
+    try:
+        env = subprocess.run([zig, "env"], check=True, capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError) as err:
+        raise SystemExit(
+            f"cannot run `{zig} env` ({err}); install Zig 0.16.0 or set $ZIG to its binary"
+        ) from None
     match = re.search(r'global_cache_dir"?\s*[=:]\s*"([^"]+)"', env)
     if not match:
         raise SystemExit(f"could not find global_cache_dir in `{zig} env` output")
@@ -134,26 +164,55 @@ def package_zon(source: Path) -> str | None:
     return None
 
 
-def download(dep: Dependency, workdir: Path) -> Path:
-    source = git_source(dep.url)
-    # `git archive` below always writes gzip; a download keeps its own format.
-    target = workdir / f"{dep.hash}{'.tar.gz' if source else archive_suffix(dep.url)}"
-    if source is None:
-        subprocess.run(
-            ["curl", "-fsSL", "--retry", "3", "-o", str(target), dep.url], check=True
-        )
-        return target
-    repo, rev = source
-    checkout = workdir / f"{dep.hash}.git"
-    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+def curl_download(url: str, target: Path) -> None:
     subprocess.run(
-        ["git", "-C", str(checkout), "fetch", "-q", "--depth", "1", repo, rev], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(checkout), "archive", "--prefix=pkg/", "-o", str(target), "FETCH_HEAD"],
+        ["curl", "-fsSL", "--proto", "=https", "--retry", "3", "-o", str(target), url],
         check=True,
+        capture_output=True,
     )
+
+
+def git_download(repo: str, rev: str, checkout: Path, target: Path) -> None:
+    # https only, and `--` so neither argument can be read as an option.
+    git = ["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"]
+    subprocess.run([*git, "init", "-q", str(checkout)], check=True, capture_output=True)
+    subprocess.run(
+        [*git, "-C", str(checkout), "fetch", "-q", "--depth", "1", "--", repo, rev],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [*git, "-C", str(checkout), "archive", "--prefix=pkg/", "-o", str(target), "FETCH_HEAD"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def download(dep: Dependency, workdir: Path) -> Path:
+    """Fetches a dependency whose hash and URL passed `unsafe_reason`."""
+    source = git_source(dep.url)
+    if not dep.url.startswith("git+"):
+        # A plain download first, GitHub archives included; git is the
+        # fallback for a proxy that refuses archive downloads.
+        target = workdir / f"{dep.hash}{archive_suffix(dep.url)}"
+        try:
+            curl_download(dep.url, target)
+            return target
+        except subprocess.CalledProcessError:
+            if source is None:
+                raise
+    assert source is not None
+    repo, rev = source
+    target = workdir / f"{dep.hash}.git.tar.gz"
+    git_download(repo, rev, workdir / f"{dep.hash}.git", target)
     return target
+
+
+def process_output(err: subprocess.CalledProcessError) -> str:
+    """The failing command's own words, which `str(err)` leaves out."""
+    output = err.stderr or err.stdout or b""
+    text = output.decode(errors="replace") if isinstance(output, bytes) else output
+    return text.strip().splitlines()[-1] if text.strip() else ""
 
 
 def main() -> int:
@@ -186,18 +245,35 @@ def main() -> int:
             if dep.hash in seen:
                 continue
             seen.add(dep.hash)
+            reason = unsafe_reason(dep)
+            if reason:
+                failed[dep.hash] = f"{dep.url!r}: refused, {reason}"
+                continue
             source = cached_archive(cache, dep.hash)
             if source is None:
                 try:
-                    source = download(dep, workdir)
-                    subprocess.run(
-                        [zig, "fetch", str(source)], cwd=stub, check=True, capture_output=True
-                    )
-                    fetched += 1
-                    print(f"fetched {dep.hash}")
+                    archive = download(dep, workdir)
+                    computed = subprocess.run(
+                        [zig, "fetch", str(archive)],
+                        cwd=stub,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    ).stdout.strip()
                 except subprocess.CalledProcessError as err:
-                    failed[dep.hash] = f"{dep.url}: {err}"
+                    failed[dep.hash] = f"{dep.url}: {' '.join(err.cmd[:2])} failed: {process_output(err)}"
                     continue
+                # Trust nothing inside a download until Zig's own content hash
+                # matches the pinned one; a mismatch is a failure, not a fetch.
+                if computed != dep.hash:
+                    failed[dep.hash] = f"{dep.url}: zig computed {computed or 'no hash'}"
+                    continue
+                source = cached_archive(cache, dep.hash)
+                if source is None:
+                    failed[dep.hash] = f"{dep.url}: zig fetch did not store {dep.hash}"
+                    continue
+                fetched += 1
+                print(f"fetched {dep.hash}")
             zon = package_zon(source)
             if zon:
                 queue.extend(parse_dependencies(zon))
