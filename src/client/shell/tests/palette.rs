@@ -1068,6 +1068,22 @@ fn a_merge_picker_with_no_other_space_says_so() {
 }
 
 #[test]
+fn a_filter_that_empties_the_merge_picker_is_not_called_no_other_space() {
+    let mut state = shell_with_second_workspace();
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.filter = Some(ClientNavigatorFilter::Done);
+    }
+    let frame = state.compose(106, 24).expect("composed frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("No matching spaces"), "{text}");
+    assert!(
+        !text.contains("No other space"),
+        "ws_2 exists; the filter hid it"
+    );
+}
+
+#[test]
 fn the_merge_picker_does_not_offer_the_source_space() {
     let mut state = shell_with_second_workspace();
     state.open_navigator_overlay_for_merge("ws_1".into());

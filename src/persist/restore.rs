@@ -605,7 +605,8 @@ fn unavailable_restored_terminal(
     // strings this module logs.
     warn!(
         cwd = %cwd.display().to_string().escape_debug(),
-        reason = %reason,
+        // The reason can quote a spawn error that echoes the stored cwd.
+        reason = %reason.escape_debug(),
         "preserving unavailable restored pane"
     );
     let mut terminal = TerminalState::new(TerminalId::alloc(), cwd);

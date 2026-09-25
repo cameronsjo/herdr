@@ -840,7 +840,9 @@ fn render_navigator_overlay(
             body.x,
             body.y,
             body.width,
-            if n.pending_workspace_merge.is_some() && n.query.is_empty() {
+            // A status filter can empty the list too; only an unfiltered,
+            // unsearched merge picker with no rows truly has no other space.
+            if n.pending_workspace_merge.is_some() && n.query.is_empty() && n.filter.is_none() {
                 " No other space to merge into"
             } else if spaces_only_picker(n) {
                 " No matching spaces"

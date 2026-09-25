@@ -305,9 +305,12 @@ impl App {
                     code: "agent_not_found".into(),
                     message: format!(
                         "agent name {target} belongs to {panes}, but herdr detects no agent \
-                         there; wait for a just-started agent to be detected, check with \
-                         `herdr agent explain {first}`, or target a running agent",
-                        first = pane_ids.first().map(String::as_str).unwrap_or_default()
+                         there; wait for a just-started agent to be detected{explain}, or \
+                         target a running agent",
+                        explain = pane_ids
+                            .first()
+                            .map(|pane| format!(", check with `herdr agent explain {pane}`"))
+                            .unwrap_or_default()
                     ),
                 }
             }
