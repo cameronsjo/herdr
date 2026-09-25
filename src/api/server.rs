@@ -119,16 +119,18 @@ fn start_server_inner(
     let listener_running = Arc::clone(&running);
     let thread = std::thread::spawn(move || {
         let mut backoff = AcceptBackoff::default();
-        let dropped_connections = std::sync::atomic::AtomicU64::new(0);
+        let mut spawn_drops = SpawnDrops::default();
         for stream in listener.incoming() {
             if !listener_running.load(Ordering::Relaxed) {
                 break;
             }
             match stream {
                 Ok(stream) => {
-                    if backoff.consecutive() > 0 {
+                    if backoff.consecutive() > 1 {
                         // Close the streak in the log: with errors logged only
                         // every 50th time, silence alone cannot mean recovery.
+                        // A single failure was logged in full already, so a
+                        // flapping listener adds no line per flap here.
                         info!(
                             failed_accepts = backoff.consecutive(),
                             "api listener accepting again"
@@ -162,7 +164,7 @@ fn start_server_inner(
                                 warn!(err = %err, "api connection failed");
                             }
                         });
-                    record_connection_spawn(spawned, &dropped_connections);
+                    spawn_drops.record(spawned);
                 }
                 Err(err) => {
                     // An accept error is not a dead listener: fd or memory
@@ -238,27 +240,50 @@ impl AcceptBackoff {
     }
 }
 
-/// Handles the result of starting a connection's thread. A refused thread
-/// drops only that connection. Drops are counted and logged on the first and
-/// every 50th, so a thread-exhaustion episode reads as one growing number
-/// rather than a wall of identical lines.
-fn record_connection_spawn<T>(
-    spawned: io::Result<T>,
-    dropped: &std::sync::atomic::AtomicU64,
-) -> bool {
-    match spawned {
-        Ok(_) => true,
-        Err(err) => {
-            let dropped_total = dropped.fetch_add(1, Ordering::Relaxed) + 1;
-            if dropped_total == 1 || dropped_total.is_multiple_of(50) {
-                warn!(
-                    err = %err,
-                    dropped_total,
-                    "api connection dropped: could not start its thread"
-                );
+/// Tracks connections dropped because the OS refused their thread. Drops are
+/// counted per episode, like accept failures: the first and every 50th drop
+/// of an episode log with the lifetime total, and the next successful spawn
+/// closes the episode with a recovery line. A lifetime-only counter would let
+/// a later episode fall between multiples of 50 and log nothing.
+#[derive(Debug, Default)]
+struct SpawnDrops {
+    streak: u32,
+    total: u64,
+}
+
+impl SpawnDrops {
+    fn record<T>(&mut self, spawned: io::Result<T>) -> bool {
+        match spawned {
+            Ok(_) => {
+                // As for accepts: only a streak that hid drops needs closing.
+                if self.streak > 1 {
+                    info!(
+                        dropped_in_episode = self.streak,
+                        dropped_total = self.total,
+                        "api connection threads starting again"
+                    );
+                }
+                self.streak = 0;
+                true
             }
-            false
+            Err(err) => {
+                self.streak = self.streak.saturating_add(1);
+                self.total = self.total.saturating_add(1);
+                if self.should_log() {
+                    warn!(
+                        err = %err,
+                        dropped_in_episode = self.streak,
+                        dropped_total = self.total,
+                        "api connection dropped: could not start its thread"
+                    );
+                }
+                false
+            }
         }
+    }
+
+    fn should_log(&self) -> bool {
+        self.streak == 1 || self.streak.is_multiple_of(AcceptBackoff::LOG_EVERY)
     }
 }
 
@@ -1136,15 +1161,28 @@ fn accept_backoff_grows_to_a_cap_and_resets_on_success() {
 #[cfg(test)]
 #[test]
 fn a_refused_connection_thread_drops_only_that_connection() {
-    let dropped = std::sync::atomic::AtomicU64::new(0);
-    assert!(record_connection_spawn(Ok(()), &dropped));
+    let mut drops = SpawnDrops::default();
+    assert!(drops.record(Ok(())));
     for _ in 0..2 {
-        assert!(!record_connection_spawn::<()>(
-            Err(io::Error::other("thread limit")),
-            &dropped
-        ));
+        assert!(!drops.record::<()>(Err(io::Error::other("thread limit"))));
     }
-    assert_eq!(dropped.load(Ordering::Relaxed), 2);
+    assert_eq!((drops.streak, drops.total), (2, 2));
+    assert!(drops.record(Ok(())), "a later spawn succeeds");
+    assert_eq!(drops.streak, 0, "and closes the episode");
+    drops.record::<()>(Err(io::Error::other("thread limit")));
+    drops.record(Ok(()));
+    assert_eq!(drops.streak, 0, "a single drop also closes on success");
+
+    // A second episode logs its own first drop, whatever the lifetime total.
+    assert!(!drops.record::<()>(Err(io::Error::other("thread limit"))));
+    assert!(drops.should_log(), "the first drop of a new episode logs");
+    while drops.streak < 49 {
+        drops.record::<()>(Err(io::Error::other("thread limit")));
+    }
+    assert!(!drops.should_log(), "the 49th does not");
+    drops.record::<()>(Err(io::Error::other("thread limit")));
+    assert!(drops.should_log(), "the 50th does");
+    assert_eq!(drops.total, 53);
 }
 
 #[cfg(test)]
