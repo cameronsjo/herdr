@@ -1164,12 +1164,10 @@ fn process_session_id(pid: u32) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
     use std::{cell::RefCell, collections::HashMap};
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        crate::config::test_config_env_lock()
     }
 
     #[test]
@@ -1874,6 +1872,9 @@ mod tests {
 
     #[test]
     fn finite_clipboard_commands_report_exit_status() {
+        // Sibling tests point PATH at a temp dir under this lock; spawning `sh`
+        // without it fails whenever one of them runs concurrently.
+        let _guard = env_lock().lock().unwrap();
         let success = ClipboardCommand {
             program: "sh",
             args: &["-c", "cat >/dev/null"],
