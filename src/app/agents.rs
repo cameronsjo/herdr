@@ -295,13 +295,22 @@ impl App {
             },
             // Same code as not-found so existing callers keep working; the
             // message carries the reason and the next step.
-            TerminalTargetError::NameNotLive { target, pane_id } => crate::api::schema::ErrorBody {
-                code: "agent_not_found".into(),
-                message: format!(
-                    "agent target {target} names pane {pane_id}, but no agent is running there; \
-                     start an agent in that pane or target a running agent"
-                ),
-            },
+            TerminalTargetError::NameNotLive { target, pane_ids } => {
+                let panes = format!(
+                    "{} {}",
+                    if pane_ids.len() == 1 { "pane" } else { "panes" },
+                    pane_ids.join(", ")
+                );
+                crate::api::schema::ErrorBody {
+                    code: "agent_not_found".into(),
+                    message: format!(
+                        "agent name {target} belongs to {panes}, but herdr detects no agent \
+                         there; wait for a just-started agent to be detected, check with \
+                         `herdr agent explain {first}`, or target a running agent",
+                        first = pane_ids.first().map(String::as_str).unwrap_or_default()
+                    ),
+                }
+            }
             TerminalTargetError::Ambiguous { target, candidates } => {
                 crate::api::schema::ErrorBody {
                     code: "agent_target_ambiguous".into(),

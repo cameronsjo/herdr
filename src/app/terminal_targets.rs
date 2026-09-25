@@ -31,7 +31,7 @@ pub(crate) enum TerminalTargetError {
     /// refused. Read and wait paths never return this.
     NameNotLive {
         target: String,
-        pane_id: String,
+        pane_ids: Vec<String>,
     },
 }
 
@@ -135,26 +135,27 @@ impl App {
             // Say why rather than "not found": the name still resolves for
             // agent get, read and wait, so a bare not-found reads as a
             // contradiction.
-            if let Some(stale) = self
+            let stale: Vec<String> = self
                 .terminal_targets()
                 .into_iter()
-                .find(|candidate| {
+                .filter(|candidate| {
                     self.state
                         .terminals
                         .values()
                         .find(|terminal| terminal.id.to_string() == candidate.terminal_id)
                         .is_some_and(|terminal| terminal.agent_name.as_deref() == Some(target))
                 })
-                .and_then(|candidate| self.public_pane_id(candidate.ws_idx, candidate.pane_id))
-            {
+                .filter_map(|candidate| self.public_pane_id(candidate.ws_idx, candidate.pane_id))
+                .collect();
+            if !stale.is_empty() {
                 tracing::info!(
                     target = %target,
-                    pane_id = %stale,
-                    "refusing input: agent name has no live agent behind it"
+                    pane_ids = ?stale,
+                    "refusing input: agent name has no detected agent behind it"
                 );
                 return Err(TerminalTargetError::NameNotLive {
                     target: target.to_string(),
-                    pane_id: stale,
+                    pane_ids: stale,
                 });
             }
         }
