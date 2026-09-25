@@ -315,7 +315,9 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
     assert!(endpoint_methods(&outcome).is_empty(), "nothing moves yet");
     match state.overlay.as_ref() {
         Some(ClientShellOverlay::Chooser(chooser)) => assert!(
-            chooser.title.starts_with("split beside ") && chooser.title.contains(" in tab "),
+            chooser.title.starts_with("split beside ")
+                && chooser.title.contains(" / tab ")
+                && !chooser.title.contains("pane_1"),
             "the chooser names where the pane lands, got {:?}",
             chooser.title
         ),
@@ -1049,6 +1051,17 @@ fn left_and_right_step_between_spaces_in_a_destination_picker() {
     assert_eq!(selected_space(&state).as_deref(), Some("ws_2"));
     press(&mut state, KeyCode::Left);
     assert_eq!(selected_space(&state).as_deref(), Some("ws_1"));
+}
+
+#[test]
+fn a_merge_picker_with_no_other_space_says_so() {
+    let mut state = shell();
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    let frame = state.compose(106, 24).expect("composed frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("No other space to merge into"), "{text}");
+    assert!(!text.contains("0 terminals"), "a spaces-only picker counts no terminals");
+    assert!(text.contains("search spaces"), "{text}");
 }
 
 #[test]

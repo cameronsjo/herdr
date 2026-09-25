@@ -273,19 +273,44 @@ impl ClientShellState {
         // Name the landing spot: the navigator row that led here showed an
         // agent or cwd label, not which tab or pane the split joins.
         let snapshot = self.snapshot.as_deref();
-        let tab_label = snapshot
-            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
-            .map(|tab| tab.label.clone())
-            .unwrap_or_else(|| tab_id.clone());
+        let tab =
+            snapshot.and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id));
+        let tab_label = tab.map_or_else(|| tab_id.clone(), |tab| tab.label.clone());
+        // Tab numbers repeat across spaces, so name the space too.
+        let space_label = tab
+            .and_then(|tab| {
+                snapshot?
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == tab.workspace_id)
+            })
+            .map(|workspace| format!("{} / ", workspace.label))
+            .unwrap_or_default();
         let title = match target_pane_id.as_deref() {
             Some(target) => {
-                let pane_label = snapshot
-                    .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == target))
-                    .and_then(|pane| pane.label.clone())
-                    .unwrap_or_else(|| target.to_owned());
-                format!("split beside {pane_label} in tab {tab_label}")
+                // The navigator row the user picked, read while the picker
+                // is still open: its label is what they saw (an agent, a
+                // title, a cwd), where `pane.label` is only a custom name.
+                let pane_label = match self.overlay.as_ref() {
+                    Some(ClientShellOverlay::Navigator(navigator)) => {
+                        render::client_navigator_rows(
+                            &self.endpoints,
+                            &self.active_endpoint_id,
+                            navigator,
+                        )
+                        .into_iter()
+                        .find(|row| {
+                            matches!(&row.target, ClientNavigatorTarget::Pane { endpoint_id, pane_id }
+                                if endpoint_id == &self.active_endpoint_id && pane_id == target)
+                        })
+                        .map(|row| row.label)
+                    }
+                    _ => None,
+                }
+                .unwrap_or_else(|| target.to_owned());
+                format!("split beside {pane_label} in {space_label}tab {tab_label}")
             }
-            None => format!("split into tab {tab_label}"),
+            None => format!("split into {space_label}tab {tab_label}"),
         };
         self.open_chooser_overlay(
             title,
@@ -622,7 +647,10 @@ impl ClientShellState {
         // (a new tab there) is a destination of its own.
         if navigator.move_armed() || navigator.pending_workspace_merge.is_some() {
             let is_space = |row: &ClientNavigatorRow| {
-                matches!(row.target, ClientNavigatorTarget::Workspace { .. })
+                matches!(
+                    row.target,
+                    ClientNavigatorTarget::Workspace { .. } | ClientNavigatorTarget::NewWorkspace
+                )
             };
             let destination = if forward {
                 rows.iter().skip(selected + 1).find(|row| is_space(row))

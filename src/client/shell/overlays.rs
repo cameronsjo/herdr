@@ -695,6 +695,11 @@ fn render_rename_overlay(
     })
 }
 
+/// The tab-move and merge pickers offer spaces only, never panes.
+fn spaces_only_picker(n: &ClientNavigatorOverlay) -> bool {
+    n.pending_tab_move.is_some() || n.pending_workspace_merge.is_some()
+}
+
 fn render_navigator_overlay(
     b: &mut Buffer,
     n: &ClientNavigatorOverlay,
@@ -746,7 +751,11 @@ fn render_navigator_overlay(
             }
         )
     } else if n.query.is_empty() {
-        " / search agents and terminals".to_owned()
+        if spaces_only_picker(n) {
+            " / search spaces".to_owned()
+        } else {
+            " / search agents and terminals".to_owned()
+        }
     } else {
         format!(" / {}", n.query)
     };
@@ -754,14 +763,20 @@ fn render_navigator_overlay(
         .iter()
         .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
         .count();
-    let count = format!(
-        "{terminal_count} {}",
-        if terminal_count == 1 {
-            "terminal"
-        } else {
-            "terminals"
-        }
-    );
+    // The tab-move and merge pickers list spaces only; a terminal count
+    // there always reads 0.
+    let count = if spaces_only_picker(n) {
+        String::new()
+    } else {
+        format!(
+            "{terminal_count} {}",
+            if terminal_count == 1 {
+                "terminal"
+            } else {
+                "terminals"
+            }
+        )
+    };
     put_text(
         b,
         i.x,
@@ -825,7 +840,13 @@ fn render_navigator_overlay(
             body.x,
             body.y,
             body.width,
-            " No matching agents or terminals",
+            if n.pending_workspace_merge.is_some() && n.query.is_empty() {
+                " No other space to merge into"
+            } else if spaces_only_picker(n) {
+                " No matching spaces"
+            } else {
+                " No matching agents or terminals"
+            },
             Style::default().fg(p.overlay0).bg(p.panel_bg),
         );
     }
