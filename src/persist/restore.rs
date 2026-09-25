@@ -601,7 +601,13 @@ fn unavailable_restored_terminal(
     cwd: PathBuf,
     reason: String,
 ) -> TerminalState {
-    warn!(cwd = %cwd.display(), reason = %reason, "preserving unavailable restored pane");
+    // The cwd comes from the session file; escape it like the other restored
+    // strings this module logs.
+    warn!(
+        cwd = %cwd.display().to_string().escape_debug(),
+        reason = %reason,
+        "preserving unavailable restored pane"
+    );
     let mut terminal = TerminalState::new(TerminalId::alloc(), cwd);
     terminal.restore_error = Some(reason);
     if let Some(pane) = pane {

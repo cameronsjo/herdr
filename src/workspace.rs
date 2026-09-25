@@ -1618,7 +1618,15 @@ mod tests {
             assert!(!is_canonical_workspace_id(id), "{id:?}");
         }
         // Past the cap: would overflow reservation or wrap the id counter.
-        for number in [MAX_CANONICAL_WORKSPACE_NUMBER + 1, usize::MAX] {
+        // `checked_add`: on a 32-bit target the cap is already usize::MAX.
+        for number in [
+            MAX_CANONICAL_WORKSPACE_NUMBER.checked_add(1),
+            Some(usize::MAX),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|number| *number > MAX_CANONICAL_WORKSPACE_NUMBER)
+        {
             let id = format!("w{}", encode_public_number(number));
             assert!(!is_canonical_workspace_id(&id), "{id}");
         }
