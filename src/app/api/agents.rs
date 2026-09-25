@@ -1001,7 +1001,10 @@ mod tests {
             Some("reviewer"),
             "precondition: the stale name survives"
         );
-        assert!(app.resolve_agent_input_target("reviewer").is_err());
+        assert!(matches!(
+            app.resolve_agent_input_target("reviewer"),
+            Err(crate::app::terminal_targets::TerminalTargetError::NameNotLive { .. })
+        ));
         // Read and wait paths still find it while detection is uncertain.
         assert!(app.resolve_agent_target("reviewer").is_ok());
     }

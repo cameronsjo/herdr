@@ -2234,10 +2234,10 @@ impl TerminalState {
         self.agent_name.is_some() || self.effective_agent_label().is_some()
     }
 
-    /// Whether this terminal's agent name may route commands. A name alone is
-    /// not enough: it must be backed by a live agent, detected or reported, or
-    /// by a managed launch still in flight. Otherwise a stale name on a bare
-    /// shell would receive `agent.prompt` text and run it as commands.
+    /// Whether this terminal's agent name may route input commands. A name
+    /// alone is not enough: it must be backed by a live agent, detected or
+    /// reported, or by a managed launch still in flight. The input handlers'
+    /// own agent checks remain the control that keeps text out of a shell.
     pub fn agent_name_routes(&self) -> bool {
         self.agent_name.is_some()
             && (self.effective_agent_label().is_some() || self.managed_agent.is_some())

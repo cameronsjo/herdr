@@ -27,6 +27,12 @@ pub(crate) enum TerminalTargetError {
         target: String,
         candidates: Vec<TerminalTargetCandidate>,
     },
+    /// The name is held by a pane, but no live agent backs it, so input is
+    /// refused. Read and wait paths never return this.
+    NameNotLive {
+        target: String,
+        pane_id: String,
+    },
 }
 
 impl App {
@@ -81,9 +87,12 @@ impl App {
 
     /// Resolves a target that will receive typed input (`agent.prompt`,
     /// `agent.send_keys`, `agent.type_submit`). A name only resolves while a
-    /// live agent backs it: a stale name on a bare shell would otherwise run
-    /// the prompt text as shell commands. Read and wait paths keep using
-    /// `resolve_agent_target`, which tolerates detection uncertainty.
+    /// live agent backs it, so a stale name is refused with a reason instead
+    /// of routing to a pane its agent has left. This is defense in depth: the
+    /// control that keeps input out of a bare shell is each handler's own
+    /// `effective_known_agent` and foreground-process check, which also covers
+    /// pane-id targets. Read and wait paths keep using `resolve_agent_target`,
+    /// which tolerates detection uncertainty.
     pub(crate) fn resolve_agent_input_target(
         &self,
         target: &str,
@@ -121,6 +130,33 @@ impl App {
             .collect();
         if let Some(resolved) = self.single_terminal_match(target, name_matches)? {
             return Ok(resolved);
+        }
+        if require_live_name {
+            // Say why rather than "not found": the name still resolves for
+            // agent get, read and wait, so a bare not-found reads as a
+            // contradiction.
+            if let Some(stale) = self
+                .terminal_targets()
+                .into_iter()
+                .find(|candidate| {
+                    self.state
+                        .terminals
+                        .values()
+                        .find(|terminal| terminal.id.to_string() == candidate.terminal_id)
+                        .is_some_and(|terminal| terminal.agent_name.as_deref() == Some(target))
+                })
+                .and_then(|candidate| self.public_pane_id(candidate.ws_idx, candidate.pane_id))
+            {
+                tracing::info!(
+                    target = %target,
+                    pane_id = %stale,
+                    "refusing input: agent name has no live agent behind it"
+                );
+                return Err(TerminalTargetError::NameNotLive {
+                    target: target.to_string(),
+                    pane_id: stale,
+                });
+            }
         }
 
         Err(TerminalTargetError::NotFound {
