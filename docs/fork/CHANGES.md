@@ -76,6 +76,20 @@ experience) reviewed the sync resolution and fork commits. Fixes:
   **Regression check:**
   `cargo nextest run -E 'test(left_and_right_step_between_spaces) + test(a_pane_row_destination_asks) + test(the_merge_picker_does_not_offer_the_source_space)'`.
 - **Label workflow** logs the upstream refs it ignored.
+- **Round 2** (fix-delta panel, 2026-09-25): the prefetch refuses any
+  dependency whose hash or URL could inject git options or escape the work
+  directory, and trusts a download (and its nested `build.zig.zon`) only
+  once `zig fetch` computes the pinned hash; failures carry Zig's own error.
+  The merge picker with no other space says so; spaces-only pickers search
+  and count spaces; `←→` also stops on "new space"; the split chooser names
+  the space and the row's label. The accept loop logs recovery, rate-limits
+  dropped-connection warnings, and tests the every-50th log rule. The stale
+  name refusal lists every holding pane and says "detects", not "running".
+  **Regression check:**
+  `python3 -m unittest scripts.test_prefetch_zig_deps` (includes the
+  `git+--upload-pack` and `../` hash cases) and
+  `cargo nextest run -E 'test(a_merge_picker_with_no_other_space_says_so)'`.
+  Proven from an empty Zig cache 2026-09-25: 39 fetched, all hash-verified.
 - **Zig prefetch** (`scripts/prefetch_zig_deps.py`, `just zig-prefetch`):
   fills the Zig cache when `build.rs` fails on a `build.zig.zon` fetch, as it
   did behind this session's proxy; also named in `sync-upstream.sh`'s next

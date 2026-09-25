@@ -72,11 +72,14 @@ jobs:
             echo "Excluding commits reachable from ${UPSTREAM_REPOSITORY} master."
           fi
 
-          mapfile -t ISSUES < <(
-            git log --format=%b "${RANGE_ARGS[@]}" "${EXCLUDE_ARGS[@]}" \
+          # The fork-only set is the refs that survive the upstream exclusion;
+          # the same pipeline without it gives what the exclusion dropped.
+          refs_in() {
+            git log --format=%b "$@" \
               | perl -ne 'print "$1\n" if /^\s*refs\s+#([0-9]+)\s*$/i' \
               | sort -nu
-          )
+          }
+          mapfile -t ISSUES < <(refs_in "${RANGE_ARGS[@]}" "${EXCLUDE_ARGS[@]}")
 
           if [ "${#EXCLUDE_ARGS[@]}" -gt 0 ]; then
             # Record what the exclusion dropped, so a missing label can be
@@ -86,11 +89,7 @@ jobs:
             IGNORED=()
             while read -r issue; do
               [ -n "$issue" ] && [ -z "${KEPT[$issue]:-}" ] && IGNORED+=("#$issue")
-            done < <(
-              git log --format=%b "${RANGE_ARGS[@]}" \
-                | perl -ne 'print "$1\n" if /^\s*refs\s+#([0-9]+)\s*$/i' \
-                | sort -nu
-            )
+            done < <(refs_in "${RANGE_ARGS[@]}")
             echo "Ignored ${#IGNORED[@]} upstream ref(s): ${IGNORED[*]:-none}"
           fi
 
