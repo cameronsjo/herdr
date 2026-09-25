@@ -20,8 +20,7 @@ pub(super) fn navigator_rows(
         ClientNavigatorTarget::Workspace { endpoint_id, .. } => {
             endpoint_id == active_endpoint_id && !row.stale
         }
-        ClientNavigatorTarget::Tab { endpoint_id, .. }
-        | ClientNavigatorTarget::Pane { endpoint_id, .. } => {
+        ClientNavigatorTarget::Pane { endpoint_id, .. } => {
             !workspace_only && endpoint_id == active_endpoint_id && !row.stale
         }
         _ => false,
@@ -38,6 +37,8 @@ pub(super) fn navigator_rows(
                 depth: 0,
                 label: "new space".to_owned(),
                 meta: "move into a space created for it".to_owned(),
+                detail: String::new(),
+                agent: None,
                 status: None,
                 stale: false,
                 current: false,

@@ -61,6 +61,7 @@ pub(crate) enum KeybindAction {
     SplitHorizontal,
     ClosePane,
     EditScrollback,
+    ClearPane,
     CopyMode,
     Zoom,
     EnterResizeMode,
@@ -127,6 +128,7 @@ impl KeybindAction {
             Self::SplitVertical => Some("core:split-vertical"),
             Self::SplitHorizontal => Some("core:split-horizontal"),
             Self::ClosePane => Some("core:close-pane"),
+            Self::ClearPane => Some("core:clear-pane"),
             Self::Zoom => Some("core:zoom-pane"),
             Self::EnterResizeMode => Some("core:resize-mode"),
             Self::ResizePaneLeft => Some("core:resize-pane-left"),
@@ -227,6 +229,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.close_tab, KeybindAction::CloseTab),
         (&keybinds.rename_pane, KeybindAction::RenamePane),
         (&keybinds.edit_scrollback, KeybindAction::EditScrollback),
+        (&keybinds.clear_pane, KeybindAction::ClearPane),
         (&keybinds.copy_mode, KeybindAction::CopyMode),
         (&keybinds.focus_pane_left, KeybindAction::FocusPaneLeft),
         (&keybinds.focus_pane_down, KeybindAction::FocusPaneDown),
@@ -365,6 +368,40 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn clear_pane_is_unbound_by_default_and_configurable() {
+        assert!(crate::config::Config::default()
+            .keybinds()
+            .clear_pane
+            .bindings
+            .is_empty());
+        let config: crate::config::Config =
+            toml::from_str("[keys]\nclear_pane = [\"super+k\", \"prefix+ctrl+k\"]").unwrap();
+        assert!(config.collect_diagnostics().is_empty());
+        let keybinds = config.keybinds();
+        assert!(matches!(
+            resolve_direct_binding(
+                &keybinds,
+                &TerminalKey::new(KeyCode::Char('k'), KeyModifiers::SUPER)
+            ),
+            Some(KeybindMatch::Action(KeybindAction::ClearPane))
+        ));
+        assert!(matches!(
+            resolve_prefix_binding(
+                &keybinds,
+                &TerminalKey::new(KeyCode::Char('k'), KeyModifiers::CONTROL)
+            ),
+            Some(KeybindMatch::Action(KeybindAction::ClearPane))
+        ));
+        assert!(matches!(
+            resolve_prefix_binding(
+                &keybinds,
+                &TerminalKey::new(KeyCode::Char('k'), KeyModifiers::SHIFT)
+            ),
+            Some(KeybindMatch::Action(KeybindAction::SwapPaneUp))
+        ));
+    }
 
     #[test]
     fn one_shared_resolver_handles_direct_prefix_and_indexed_bindings() {
