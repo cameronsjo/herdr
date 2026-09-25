@@ -98,7 +98,17 @@ experience) reviewed the sync resolution and fork commits. Fixes:
   a streak hid failures. A status filter that empties the merge picker reads
   "No matching spaces". A stale name held by several panes names each.
   **Regression check:**
-  `cargo nextest run -E 'test(a_refused_connection_thread_drops_only_that_connection) + test(a_stale_name_on_several_panes_names_each_of_them) + test(a_filter_that_empties_the_merge_picker_is_not_called_no_other_space)'`.
+  `cargo nextest run -E 'test(a_refused_connection_thread_drops_only_that_connection) + test(a_stale_name_on_several_panes_names_each_of_them) + test(a_filter_that_empties_the_merge_picker_is_not_called_no_other_space)'` and
+  `python3 -m unittest scripts.test_prefetch_zig_deps`.
+- **Round 4** (2026-09-25): the prefetch's error chain, git step naming,
+  output escaping (now `format_failure`) and missing-binary handling are
+  tested; each was confirmed red with its fix reverted. Accept and spawn
+  recovery share `streak_hid_failures`, tested at streaks 0, 1 and 2, and a
+  shutdown mid-streak logs the hidden count. Temp-repo tests in
+  `test_preview.py` and `test_release.py` disable git auto-maintenance,
+  which raced their cleanup in CI. **Regression check:**
+  `python3 -m unittest scripts.test_prefetch_zig_deps scripts.test_preview scripts.test_release`
+  and `cargo nextest run -E 'test(only_a_streak_that_hid_failures_gets_a_recovery_line)'`.
 - **Zig prefetch** (`scripts/prefetch_zig_deps.py`, `just zig-prefetch`):
   fills the Zig cache when `build.rs` fails on a `build.zig.zon` fetch, as it
   did behind this session's proxy; also named in `sync-upstream.sh`'s next
