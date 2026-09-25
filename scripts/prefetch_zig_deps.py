@@ -166,7 +166,19 @@ def package_zon(source: Path) -> str | None:
 
 def curl_download(url: str, target: Path) -> None:
     subprocess.run(
-        ["curl", "-fsSL", "--proto", "=https", "--retry", "3", "-o", str(target), url],
+        [
+            "curl",
+            "-fsSL",
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--retry",
+            "3",
+            "-o",
+            str(target),
+            url,
+        ],
         check=True,
         capture_output=True,
     )
@@ -188,31 +200,51 @@ def git_download(repo: str, rev: str, checkout: Path, target: Path) -> None:
     )
 
 
-def download(dep: Dependency, workdir: Path) -> Path:
-    """Fetches a dependency whose hash and URL passed `unsafe_reason`."""
+class FetchError(Exception):
+    """A download that failed on every route, naming each route's own error."""
+
+
+def download(dep: Dependency, workdir: Path) -> tuple[Path, str]:
+    """Fetches a dependency whose hash and URL passed `unsafe_reason`.
+    Returns the archive and the route that produced it ("curl" or "git")."""
     source = git_source(dep.url)
+    errors = []
     if not dep.url.startswith("git+"):
         # A plain download first, GitHub archives included; git is the
         # fallback for a proxy that refuses archive downloads.
         target = workdir / f"{dep.hash}{archive_suffix(dep.url)}"
         try:
             curl_download(dep.url, target)
-            return target
-        except subprocess.CalledProcessError:
+            return target, "curl"
+        except subprocess.CalledProcessError as err:
+            errors.append(f"curl: {process_output(err)}")
             if source is None:
-                raise
-    assert source is not None
+                raise FetchError("; ".join(errors)) from None
+    if source is None:
+        raise FetchError("no download route")
     repo, rev = source
     target = workdir / f"{dep.hash}.git.tar.gz"
-    git_download(repo, rev, workdir / f"{dep.hash}.git", target)
-    return target
+    try:
+        git_download(repo, rev, workdir / f"{dep.hash}.git", target)
+    except subprocess.CalledProcessError as err:
+        step = next((arg for arg in err.cmd if arg in {"init", "fetch", "archive"}), "git")
+        errors.append(f"git {step}: {process_output(err)}")
+        raise FetchError("; then ".join(errors)) from None
+    return target, "git"
 
 
 def process_output(err: subprocess.CalledProcessError) -> str:
-    """The failing command's own words, which `str(err)` leaves out."""
+    """The failing command's own words, which `str(err)` leaves out: its
+    last `error:`/`fatal:`/`curl:` line when it has one, else its last line."""
     output = err.stderr or err.stdout or b""
     text = output.decode(errors="replace") if isinstance(output, bytes) else output
-    return text.strip().splitlines()[-1] if text.strip() else ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return f"exit status {err.returncode}"
+    marked = [
+        line for line in lines if line.lower().startswith(("error", "fatal", "curl:"))
+    ]
+    return (marked or lines)[-1]
 
 
 def main() -> int:
@@ -252,7 +284,11 @@ def main() -> int:
             source = cached_archive(cache, dep.hash)
             if source is None:
                 try:
-                    archive = download(dep, workdir)
+                    archive, route = download(dep, workdir)
+                except FetchError as err:
+                    failed[dep.hash] = f"{dep.url}: {err}"
+                    continue
+                try:
                     computed = subprocess.run(
                         [zig, "fetch", str(archive)],
                         cwd=stub,
@@ -261,12 +297,16 @@ def main() -> int:
                         text=True,
                     ).stdout.strip()
                 except subprocess.CalledProcessError as err:
-                    failed[dep.hash] = f"{dep.url}: {' '.join(err.cmd[:2])} failed: {process_output(err)}"
+                    failed[dep.hash] = f"{dep.url}: zig fetch (via {route}): {process_output(err)}"
                     continue
                 # Trust nothing inside a download until Zig's own content hash
                 # matches the pinned one; a mismatch is a failure, not a fetch.
                 if computed != dep.hash:
-                    failed[dep.hash] = f"{dep.url}: zig computed {computed or 'no hash'}"
+                    failed[dep.hash] = (
+                        f"{dep.url}: expected {dep.hash}, zig computed "
+                        f"{computed or 'no hash'} (via {route}); the mismatched copy "
+                        "is cached under its own hash and never used"
+                    )
                     continue
                 source = cached_archive(cache, dep.hash)
                 if source is None:
@@ -278,7 +318,10 @@ def main() -> int:
             if zon:
                 queue.extend(parse_dependencies(zon))
     for digest, reason in failed.items():
-        print(f"FAILED {digest} ({reason})", file=sys.stderr)
+        # URLs and stderr lines come from downloaded content; escape control
+        # characters so a hostile one cannot rewrite the terminal.
+        safe = reason.encode("unicode_escape", "backslashreplace").decode("ascii")
+        print(f"FAILED {digest} ({safe})", file=sys.stderr)
     print(f"{len(seen)} dependencies, {fetched} fetched, {len(failed)} failed; cache at {cache}")
     return 1 if failed else 0
 

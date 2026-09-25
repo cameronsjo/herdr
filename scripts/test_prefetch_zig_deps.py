@@ -7,6 +7,7 @@ from scripts.prefetch_zig_deps import (
     archive_suffix,
     git_source,
     parse_dependencies,
+    process_output,
     unsafe_reason,
 )
 
@@ -58,6 +59,18 @@ class ArchiveSuffixTest(unittest.TestCase):
         self.assertEqual(archive_suffix("https://x/themes.tgz"), ".tgz")
         self.assertEqual(archive_suffix("https://x/pkg.tar.gz?download=1"), ".tar.gz")
         self.assertEqual(archive_suffix("https://x/no-extension"), ".tar.gz")
+
+
+class ProcessOutputTest(unittest.TestCase):
+    def test_prefers_the_error_line_over_trailing_notes(self) -> None:
+        import subprocess
+
+        err = subprocess.CalledProcessError(
+            1, ["zig", "fetch"], stderr="error: hash mismatch\nnote: expected .hash = x\n"
+        )
+        self.assertEqual(process_output(err), "error: hash mismatch")
+        quiet = subprocess.CalledProcessError(22, ["curl"], stderr="")
+        self.assertEqual(process_output(quiet), "exit status 22")
 
 
 class UnsafeReasonTest(unittest.TestCase):
