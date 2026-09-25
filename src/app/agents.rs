@@ -4,6 +4,7 @@ use bytes::Bytes;
 
 use super::{terminal_targets::TerminalTargetError, App};
 use crate::api::schema::AgentStartParams;
+use crate::label::valid_agent_name;
 
 const DEFAULT_AGENT_START_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -11,21 +12,6 @@ pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
-
-/// Whether `name` is usable as an agent routing key.
-///
-/// Applied by `TerminalState::set_agent_name` to the *raw* input, before any
-/// sanitizing runs: `crate::label::sanitize_label` strips zero-width format
-/// characters, so validating the sanitized form would accept a stored
-/// `rev\u{200b}iewer` as `reviewer` and let one pane impersonate another.
-///
-/// The length bound is in bytes, not chars, so a short multibyte name fails.
-pub(crate) fn valid_agent_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('a'..='z'))
-        && name.len() <= 32
-        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
-}
 
 impl App {
     pub(super) fn collect_agent_infos(&self) -> Vec<crate::api::schema::AgentInfo> {
@@ -478,28 +464,4 @@ pub(super) enum AgentRenameError {
         name: String,
         candidates: Vec<crate::api::schema::AgentInfo>,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_agent_name;
-
-    #[test]
-    fn agent_names_use_a_small_cli_safe_grammar() {
-        for name in ["a", "reviewer-one", "reviewer_2", &"a".repeat(32)] {
-            assert!(valid_agent_name(name), "expected {name:?} to be valid");
-        }
-        for name in [
-            "",
-            " reviewer",
-            "reviewer ",
-            "reviewer one",
-            "Reviewer",
-            "1reviewer",
-            "reviewer.one",
-            &"a".repeat(33),
-        ] {
-            assert!(!valid_agent_name(name), "expected {name:?} to be invalid");
-        }
-    }
 }

@@ -67,7 +67,7 @@ type RestoreFailures<T> = (T, usize);
 /// agent name is the routing key for `agent.prompt`, `agent.read`, and
 /// `agent.send-keys`. Two rules apply, both absent before:
 ///
-/// - The name must satisfy `crate::app::valid_agent_name`, the same rule
+/// - The name must satisfy `crate::label::valid_agent_name`, the same rule
 ///   `agent.start` and `agent.rename` enforce. `TerminalState::set_agent_name`
 ///   is the enforcing boundary; this ledger only reports what it dropped.
 /// - The first pane to claim a name keeps it. `valid_agent_name` says nothing
@@ -92,7 +92,7 @@ impl AgentNameLedger {
     /// reason this rejects is that the stored name is untrusted, and a raw one
     /// carries control characters straight into the log.
     fn accept(&mut self, name: String) -> Option<String> {
-        if !crate::app::valid_agent_name(&name) {
+        if !crate::label::valid_agent_name(&name) {
             self.dropped_invalid += 1;
             warn!(
                 name = %name.escape_debug(),
@@ -150,7 +150,7 @@ fn drop_cold_agent_name_into_label(terminal: &mut TerminalState, agent_name: Str
         name = %agent_name.escape_debug(),
         "dropped a stored agent name: this pane restored through a fresh shell with no agent"
     );
-    if terminal.manual_label.is_none() && crate::app::valid_agent_name(&agent_name) {
+    if terminal.manual_label.is_none() && crate::label::valid_agent_name(&agent_name) {
         terminal.set_manual_label(agent_name);
     }
 }

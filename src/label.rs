@@ -89,9 +89,24 @@ pub(crate) fn is_format_char(ch: char) -> bool {
     )
 }
 
+/// Whether `name` is usable as an agent routing key.
+///
+/// Applied by `TerminalState::set_agent_name` to the *raw* input, before any
+/// sanitizing runs: `sanitize_label` strips zero-width format
+/// characters, so validating the sanitized form would accept a stored
+/// `rev\u{200b}iewer` as `reviewer` and let one pane impersonate another.
+///
+/// The length bound is in bytes, not chars, so a short multibyte name fails.
+pub(crate) fn valid_agent_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && name.len() <= 32
+        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_label, sanitize_label_borrowed, MAX_LABEL_CHARS};
+    use super::{sanitize_label, sanitize_label_borrowed, valid_agent_name, MAX_LABEL_CHARS};
 
     #[test]
     fn strips_control_characters() {
@@ -154,5 +169,24 @@ mod tests {
     fn leaves_ordinary_labels_alone() {
         assert_eq!(sanitize_label("main"), "main");
         assert_eq!(sanitize_label(""), "");
+    }
+
+    #[test]
+    fn agent_names_use_a_small_cli_safe_grammar() {
+        for name in ["a", "reviewer-one", "reviewer_2", &"a".repeat(32)] {
+            assert!(valid_agent_name(name), "expected {name:?} to be valid");
+        }
+        for name in [
+            "",
+            " reviewer",
+            "reviewer ",
+            "reviewer one",
+            "Reviewer",
+            "1reviewer",
+            "reviewer.one",
+            &"a".repeat(33),
+        ] {
+            assert!(!valid_agent_name(name), "expected {name:?} to be invalid");
+        }
     }
 }

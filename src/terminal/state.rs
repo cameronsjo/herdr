@@ -1976,7 +1976,7 @@ impl TerminalState {
     /// dropped the same way, so a caller cannot store a name it could not
     /// have set through `agent.start` or `agent.rename`.
     pub fn set_agent_name(&mut self, name: String) {
-        let name = if name.is_empty() || crate::app::valid_agent_name(&name) {
+        let name = if name.is_empty() || crate::label::valid_agent_name(&name) {
             // Redundant by construction — a valid name is already lowercase
             // ASCII — but kept so the setter stays safe if the rule widens.
             crate::label::sanitize_label(name).trim().to_string()
