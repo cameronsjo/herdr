@@ -55,8 +55,25 @@ jobs:
             echo "Scanning pushed commits in $BEFORE..$AFTER for refs #<issue> lines."
           fi
 
+          # On a fork, commits that arrive through an upstream sync carry
+          # upstream's `refs #N`, which name upstream's issues. Once the fork's
+          # own numbers climb into upstream's range they collide, and the wrong
+          # issue gets labelled and later closed. Scan only commits upstream
+          # does not have. Fail loudly rather than fall back to the full range.
+          UPSTREAM_REPOSITORY="herdrdev/herdr"
+          EXCLUDE_ARGS=()
+          if [ "$GITHUB_REPOSITORY" != "$UPSTREAM_REPOSITORY" ]; then
+            if ! git fetch --quiet --no-tags "https://github.com/${UPSTREAM_REPOSITORY}.git" \
+              "+refs/heads/master:refs/remotes/upstream/master"; then
+              echo "::error::Could not fetch ${UPSTREAM_REPOSITORY} master to exclude synced commits."
+              exit 1
+            fi
+            EXCLUDE_ARGS=(--not refs/remotes/upstream/master)
+            echo "Excluding commits reachable from ${UPSTREAM_REPOSITORY} master."
+          fi
+
           mapfile -t ISSUES < <(
-            git log --format=%b "${RANGE_ARGS[@]}" \
+            git log --format=%b "${RANGE_ARGS[@]}" "${EXCLUDE_ARGS[@]}" \
               | perl -ne 'print "$1\n" if /^\s*refs\s+#([0-9]+)\s*$/i' \
               | sort -nu
           )
