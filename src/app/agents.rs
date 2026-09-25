@@ -4,6 +4,7 @@ use bytes::Bytes;
 
 use super::{terminal_targets::TerminalTargetError, App};
 use crate::api::schema::AgentStartParams;
+use crate::label::valid_agent_name;
 
 const DEFAULT_AGENT_START_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -11,21 +12,6 @@ pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
-
-/// Whether `name` is usable as an agent routing key.
-///
-/// Applied by `TerminalState::set_agent_name` to the *raw* input, before any
-/// sanitizing runs: `crate::label::sanitize_label` strips zero-width format
-/// characters, so validating the sanitized form would accept a stored
-/// `rev\u{200b}iewer` as `reviewer` and let one pane impersonate another.
-///
-/// The length bound is in bytes, not chars, so a short multibyte name fails.
-pub(crate) fn valid_agent_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('a'..='z'))
-        && name.len() <= 32
-        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
-}
 
 impl App {
     pub(super) fn collect_agent_infos(&self) -> Vec<crate::api::schema::AgentInfo> {
@@ -307,6 +293,27 @@ impl App {
                 code: "agent_not_found".into(),
                 message: format!("agent target {target} not found"),
             },
+            // Same code as not-found so existing callers keep working; the
+            // message carries the reason and the next step.
+            TerminalTargetError::NameNotLive { target, pane_ids } => {
+                let panes = format!(
+                    "{} {}",
+                    if pane_ids.len() == 1 { "pane" } else { "panes" },
+                    pane_ids.join(", ")
+                );
+                crate::api::schema::ErrorBody {
+                    code: "agent_not_found".into(),
+                    message: format!(
+                        "agent name {target} belongs to {panes}, but herdr detects no agent \
+                         there; wait for a just-started agent to be detected{explain}, or \
+                         target a running agent",
+                        explain = pane_ids
+                            .first()
+                            .map(|pane| format!(", check with `herdr agent explain {pane}`"))
+                            .unwrap_or_default()
+                    ),
+                }
+            }
             TerminalTargetError::Ambiguous { target, candidates } => {
                 crate::api::schema::ErrorBody {
                     code: "agent_target_ambiguous".into(),
@@ -403,6 +410,7 @@ impl App {
             launch_pending: terminal.managed_agent_launch_pending(),
             interactive_ready: terminal.managed_agent_interactive_ready(),
             state_change_seq: terminal.last_agent_state_change_seq.unwrap_or(0),
+            completion_seq: terminal.last_agent_completion_seq,
             cwd: pane.cwd,
             foreground_cwd: pane.foreground_cwd,
             revision: pane.revision,
@@ -477,28 +485,4 @@ pub(super) enum AgentRenameError {
         name: String,
         candidates: Vec<crate::api::schema::AgentInfo>,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_agent_name;
-
-    #[test]
-    fn agent_names_use_a_small_cli_safe_grammar() {
-        for name in ["a", "reviewer-one", "reviewer_2", &"a".repeat(32)] {
-            assert!(valid_agent_name(name), "expected {name:?} to be valid");
-        }
-        for name in [
-            "",
-            " reviewer",
-            "reviewer ",
-            "reviewer one",
-            "Reviewer",
-            "1reviewer",
-            "reviewer.one",
-            &"a".repeat(33),
-        ] {
-            assert!(!valid_agent_name(name), "expected {name:?} to be invalid");
-        }
-    }
 }

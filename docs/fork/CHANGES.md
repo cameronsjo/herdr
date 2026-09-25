@@ -11,6 +11,7 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
+- `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
 - `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
 - `e563360d` PR [#57](https://github.com/cameronsjo/herdr/pull/57) (2026-09-08) — merge upstream through `9e01168b`
 - `e839cf59` PR [#56](https://github.com/cameronsjo/herdr/pull/56) (2026-09-07) — sync upstream master into the fork
@@ -23,6 +24,159 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-09-25 sync: conflict resolutions (`38b3ac7`)
+
+Sixteen files conflicted. The decisions that change behavior, and where the
+next sync is likely to conflict again:
+
+- **Navigator pickers** (`src/client/shell/{overlays,overlay_input,navigator_moves,state}.rs`):
+  upstream replaced the Go-to tree with a flat list and removed the `Tab`
+  target and workspace expand/collapse. The fork's pane/tab move and merge
+  pickers now sit on that list; tab destinations resolve through pane rows.
+  **Collision:** upstream edits to `aggregate_navigation::navigator_rows`,
+  the navigator footer, or `move_navigator_workspace` conflict here.
+- **Sidebar row colors** (`src/client/shell/{sidebar,endpoint_sidebar}.rs`):
+  both sides added `workspace_selection_background`. Upstream's keeps the
+  name; the fork's drop-target variant is `workspace_highlight_background`.
+  **Collision:** `render_workspace_rows`' signature.
+- **Worktree lookup** (`src/app/api/worktrees.rs`): the fork's
+  focused-space preference (`preferred_workspace_idx`) kept, with upstream's
+  "explicit worktree provenance wins" applied inside its filter. Upstream
+  removed `list_source_workspace_idx_for_space`; the fork dropped it too.
+- **Tab close** (`src/client/shell/actions.rs`): upstream's last-tab
+  confirmation owns `CloseTab`; the fork's action-table arm was removed.
+- **Compile follow-ups:** `ClearPane` palette id `core:clear-pane`;
+  `stream_active` removed with upstream's graphics API; the `close_tab`
+  test finds the Close row by label because the fork's tab menu is longer.
+- **Build:** this session's `cargo build` needed the Zig dependencies
+  prefetched (`just zig-prefetch`); see that entry below.
+
+## Fork issue fixes riding the 2026-09-25 upstream sync
+
+### Review-panel fixes on PR #87 (2026-09-25)
+
+A six-seat cadence panel (code ×2, security, operability, developer and user
+experience) reviewed the sync resolution and fork commits. Fixes:
+
+- **Accept loop** (`src/api/server.rs`, #71): accept errors back off 10 ms→1 s
+  and keep accepting instead of ending the loop; errors log kind and OS code;
+  refused connection threads are counted. **Regression check:**
+  `cargo nextest run -E 'test(accept_backoff_grows_to_a_cap_and_resets_on_success) + test(a_refused_connection_thread_drops_only_that_connection)'`.
+- **Stale agent name** (`src/app/terminal_targets.rs`, #73): refusal keeps
+  `agent_not_found` but names the pane and the next step; comments now name
+  the handlers' own live-agent checks as the control.
+- **Logs and ids** (#80, #44): restore and handoff escape untrusted strings;
+  restore names new id, index, label and reason; `public_workspace_id` logs
+  its caller; restored ids are capped at `u32::MAX`; the command-target check
+  uses `try_public_workspace_id`. **Regression check:**
+  `cargo nextest run -E 'test(canonical_workspace_ids) + test(distribution_change)'`.
+- **Pickers** (`src/client/shell/`): mode titles, split chooser names its
+  tab and pane, ←→ steps between spaces, merge footer and no source row.
+  **Regression check:**
+  `cargo nextest run -E 'test(left_and_right_step_between_spaces) + test(a_pane_row_destination_asks) + test(the_merge_picker_does_not_offer_the_source_space)'`.
+- **Label workflow** logs the upstream refs it ignored.
+- **Round 2** (fix-delta panel, 2026-09-25): the prefetch refuses any
+  dependency whose hash or URL could inject git options or escape the work
+  directory, and trusts a download (and its nested `build.zig.zon`) only
+  once `zig fetch` computes the pinned hash; failures carry Zig's own error.
+  The merge picker with no other space says so; spaces-only pickers search
+  and count spaces; `←→` also stops on "new space"; the split chooser names
+  the space and the row's label. The accept loop logs recovery, rate-limits
+  dropped-connection warnings, and tests the every-50th log rule. The stale
+  name refusal lists every holding pane and says "detects", not "running".
+  **Regression check:**
+  `python3 -m unittest scripts.test_prefetch_zig_deps` (includes the
+  `git+--upload-pack` and `../` hash cases) and
+  `cargo nextest run -E 'test(a_merge_picker_with_no_other_space_says_so)'`.
+  Proven from an empty Zig cache 2026-09-25: 39 fetched, all hash-verified.
+- **Round 3** (2026-09-25): prefetch failures keep curl's error when the
+  git fallback also fails, name the failing git step and the route, label
+  expected against computed hashes, and escape control characters; curl
+  also pins redirects to https. Dropped connection threads are counted per
+  episode, so a later episode is never silent. Recovery lines log only when
+  a streak hid failures. A status filter that empties the merge picker reads
+  "No matching spaces". A stale name held by several panes names each.
+  **Regression check:**
+  `cargo nextest run -E 'test(a_refused_connection_thread_drops_only_that_connection) + test(a_stale_name_on_several_panes_names_each_of_them) + test(a_filter_that_empties_the_merge_picker_is_not_called_no_other_space)'` and
+  `python3 -m unittest scripts.test_prefetch_zig_deps`.
+- **Round 4** (2026-09-25): the prefetch's error chain, git step naming,
+  output escaping (now `format_failure`) and missing-binary handling are
+  tested; each was confirmed red with its fix reverted. Accept and spawn
+  recovery share `streak_hid_failures`, tested at streaks 0, 1 and 2, and a
+  shutdown mid-streak logs the hidden count. Temp-repo tests in
+  `test_preview.py` and `test_release.py` disable git auto-maintenance,
+  which raced their cleanup in CI. **Regression check:**
+  `python3 -m unittest scripts.test_prefetch_zig_deps scripts.test_preview scripts.test_release`
+  and `cargo nextest run -E 'test(only_a_streak_that_hid_failures_gets_a_recovery_line)'`.
+- **Zig prefetch** (`scripts/prefetch_zig_deps.py`, `just zig-prefetch`):
+  fills the Zig cache when `build.rs` fails on a `build.zig.zon` fetch, as it
+  did behind this session's proxy; also named in `sync-upstream.sh`'s next
+  steps. **Regression check:** `python3 -m unittest scripts.test_prefetch_zig_deps`.
+
+### test: share one env lock across every test that mutates the environment (#74, #36)
+
+- **Files:** `src/config.rs` (`test_config_env_lock`), the test `env_lock()` in `src/{api/server,client/tests/mod,platform/linux,product_announcements,server/autodetect,session,update}.rs`
+- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. Upstream adding a new private `env_lock()` will reintroduce the race; route it through the shared one.
+- **Regression check:** `just test-single-process` (five single-process `cargo test --bin herdr` runs; each must reach `test result: ok`). `just test` cannot show this race: nextest runs every test in its own process. 3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25. The follow-up sweep also moved `remote/attach.rs`'s `TMPDIR` lock and `integration_env_lock` onto the shared lock.
+
+### test: point the hot-path architecture guard at the client shell (#40)
+
+- **Files:** `scripts/test_ui_hot_path_architecture.py`
+- **Regression check:** `python3 -m unittest scripts.test_ui_hot_path_architecture`. Staged break confirmed 2026-09-25: an `input_state` call appended to `src/client/shell/composition.rs` reddens it.
+
+### test: guard palette plugin rows against stray bold cells (#62)
+
+- **Files:** `src/client/shell/tests/palette.rs`
+- **Replaces:** Nothing; a guard only. The report did not reproduce on the current tree.
+- **Regression check:** `cargo nextest run -E 'test(an_unselected_plugin_row_name_carries_no_bold_cells)'`. Making unselected rows bold reddens it.
+
+### fix: warn when a live handoff crosses between upstream and fork builds (#44)
+
+- **Files:** `src/server/handoff.rs`
+- **Replaces:** Upstream writes `source_protocol` and never reads it. The fork logs it on every accepted handoff and warns when `is_fork_protocol` differs between source and receiver. It does not refuse: protocols differ on every in-place upgrade.
+- **Regression check:** `cargo nextest run -E 'test(handoff)'`. The warning itself has no test.
+
+### fix: refuse to type into a pane whose agent name has no live agent (#73)
+
+- **Files:** `src/app/terminal_targets.rs` (`resolve_agent_input_target`), `src/terminal/state.rs` (`agent_name_routes`), `src/app/api/agents.rs`
+- **Replaces:** Upstream resolves `agent.prompt`, `send_keys` and `type_submit` names with no liveness gate. The fork requires a detected or reported agent, or a managed launch in flight. Read and wait paths are unchanged. Upstream edits to `resolve_agent_target` or those three handlers will conflict here.
+- **Regression check:** `cargo nextest run -E 'test(agent_name_stops_routing_once_no_agent_backs_it) + test(agent_wait_tolerates_detection_uncertainty_and_pane_target_rename)'`. Staged break confirmed 2026-09-25: dropping the gate reddens the first.
+
+### fix: stop public_workspace_id panicking and validate restored ids (#80)
+
+- **Files:** `src/app/ids.rs`, `src/workspace.rs` (`is_canonical_workspace_id`, `reserve_workspace_id_strs`), `src/persist/restore.rs` (`restored_workspace_id`)
+- **Replaces:** Upstream's `public_workspace_id` indexes bare and restore keeps any stored id. The fork adds `try_public_workspace_id`, makes the infallible form log and return an empty id, and replaces malformed or duplicate restored ids after reserving every canonical one.
+- **Regression check:** `cargo nextest run -E 'test(restored_workspace_ids) + test(canonical_workspace_ids)'`. Staged break confirmed 2026-09-25: dropping the canonical check reddens it.
+
+### fix: close the global menu when a snapshot changes its rows (#72)
+
+- **Files:** `src/client/shell/global_menu.rs` (`reconcile_global_menu`), `src/client/shell/state.rs`, `src/client/shell/tests/startup_overlays.rs`
+- **Replaces:** Upstream dispatches a global-menu click by index against the current snapshot while the rows were drawn from an earlier one. The fork closes the menu in the snapshot path when the item list would change, as `reconcile_context_menu` does.
+- **Regression check:** `cargo nextest run -E 'test(global_menu_closes_when_an_update_row_arrives_under_it)'`. Staged break confirmed 2026-09-25: commenting out the `reconcile_global_menu` call reddens it.
+
+### fix: keep the api accept loop alive when a connection thread fails (#71, partial)
+
+- **Files:** `src/api/server.rs`
+- **Replaces:** Upstream spawns each API connection with `std::thread::spawn`, which panics inside the accept loop on thread exhaustion, and logs the loop's exit at `debug`. The fork uses `thread::Builder` and drops only the failed connection, and warns when the loop exits while the server runs. The root mechanism in #71 is still open.
+- **Regression check:** `cargo nextest run -E 'test(/api::/)'`. No test forces a thread-spawn failure.
+
+### refactor: move valid_agent_name beside sanitize_label (#34)
+
+- **Files:** `src/label.rs`, `src/app/{agents,mod}.rs`, `src/terminal/state.rs`, `src/persist/restore.rs`
+- **Replaces:** Upstream has no `valid_agent_name`; it is the fork's (#18). It moved from `src/app/agents.rs` to `src/label.rs`. Upstream edits near either spot may conflict.
+- **Regression check:** `cargo nextest run -E 'test(agent_names_use_a_small_cli_safe_grammar)'`.
+
+### ci: skip upstream-synced commits when labelling fork issues (#60)
+
+- **Files:** `.github/workflows/label-next-release-issues.yml`
+- **Replaces:** Upstream scans every pushed commit. On the fork, the scan now excludes commits reachable from `herdrdev/herdr` `master` (fetched read-only).
+- **Regression check:** `actionlint .github/workflows/label-next-release-issues.yml`; `git log --format=%b <before>..<after> --not upstream/master` over a sync range yields only fork refs (34 refs down to `#42` for the 2026-09-25 sync).
+
+### docs: ja and zh-cn rows_by_agent wording (#42)
+
+- **Files:** `docs/next/website/src/content/docs/{ja,zh-cn}/configuration.mdx`
+- **Regression check:** manual read — neither locale claims `rows_by_agent` wins while grouped.
 
 ## Agents group by a project token, blocked agents lead, and agent views clear from the TUI (PR [#86](https://github.com/cameronsjo/herdr/pull/86))
 
@@ -231,7 +385,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#50](https://github.com/cameronsjo/herdr/pull/50)
 - **Files:** `docs/next/api/herdr-api.schema.json`, `src/cli/*`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx` (en/ja/zh-cn), `docs/next/website/src/data/config-reference.json`
 - **Replaces:** Upstream has no `workspace.merge` verb; this fork adds it gated behind an explicit group-close intent to avoid silent data loss on merge.
-- **Regression check:** `herdr workspace merge --help` lists the command; `cargo test workspace::merge`.
+- **Regression check:** `herdr workspace merge --help` lists the command; `cargo nextest run -E 'test(/workspace_merge|merge_workspace/)'` (13 tests; the old `cargo test workspace::merge` matched none).
 
 ### feat(mouse): reach every move and reorder from the menus and the mouse
 
@@ -252,7 +406,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#26](https://github.com/cameronsjo/herdr/pull/26)
 - **Files:** `src/agent_resume.rs`, `src/app/actions.rs`, `src/integration/{mod.rs,config_edit.rs}`, `src/integration/assets/codex/herdr-agent-state.{sh,ps1}`, `docs/next/website/src/content/docs/{agents,integrations}.mdx`
 - **Replaces:** Upstream's Codex integration lacks the fork's pane-title and lifecycle-resume handling.
-- **Regression check:** launch a Codex agent pane and confirm the title reflects live state; `cargo test integration::codex`.
+- **Regression check:** launch a Codex agent pane and confirm the title reflects live state; `cargo nextest run -E 'test(/integration::tests::.*codex|agent_resume::tests::codex|codex_hook/)'` (15 tests; the old `cargo test integration::codex` matched none).
 
 ### fix(cli): register live-handoff in the server command spec
 
@@ -280,7 +434,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#32](https://github.com/cameronsjo/herdr/pull/32) (issue #23)
 - **Files:** `src/config/sidebar.rs`
 - **Replaces:** Upstream has no grouped-sidebar concept (fork-only feature from PR #11); this fixes a precedence bug where a per-agent override silently defeated grouping.
-- **Regression check:** `cargo test config::sidebar::grouped_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/grouped_rows/)'` (3 tests; the old `cargo test config::sidebar::grouped_rows` matched none).
 
 ### ci: give the issue-closing workflow a usable token
 

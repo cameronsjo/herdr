@@ -72,6 +72,33 @@ impl ClientShellState {
         }
     }
 
+    /// Closes the open global menu when the just-applied snapshot would change
+    /// its item list. Runs in the snapshot path before `self.snapshot` is
+    /// replaced, so the old list is still the one on screen.
+    ///
+    /// The rows are drawn from one snapshot and a click is dispatched by index
+    /// against the current one. The "update ready" / "what's new" and "clear
+    /// agent view" rows come and go with the snapshot, so without this an
+    /// update landing between draw and click shifts every row below it: a
+    /// click on "detach" fires "what's new". Same reconcile as the context
+    /// menu's (`reconcile_context_menu`).
+    pub(super) fn reconcile_global_menu(&mut self, snapshot: &ClientShellSnapshot) {
+        if !matches!(self.overlay, Some(ClientShellOverlay::GlobalMenu(_))) {
+            return;
+        }
+        // Compare actions only: a label flip ("what's new" to "update
+        // ready") moves no row, so it must not close the menu under the user.
+        let actions = |snapshot: &ClientShellSnapshot| {
+            global_menu_items(snapshot)
+                .into_iter()
+                .map(|(_, action)| action)
+                .collect::<Vec<_>>()
+        };
+        if self.snapshot.as_deref().map(actions) != Some(actions(snapshot)) {
+            self.overlay = None;
+        }
+    }
+
     pub(super) fn move_global_menu_selection(&mut self, delta: isize) {
         let item_count = self
             .snapshot

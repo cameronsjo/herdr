@@ -293,6 +293,14 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
 /// 2. If no server → spawn server daemon → wait for socket readiness
 /// 3. Run the thin client (which connects to the server)
 pub fn auto_detect_launch(saved_federation: bool) -> io::Result<()> {
+    // The client requires terminal geometry before it can attach. Reject an
+    // unusable terminal before socket lookup creates directories or starts a daemon.
+    crate::platform::terminal_grid_size().map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("cannot attach without a usable terminal: {err}; run inside a terminal"),
+        )
+    })?;
     let socket_path = client_socket_path();
     info!(path = %socket_path.display(), "auto-detect launch starting");
 
@@ -329,11 +337,9 @@ mod tests {
     use std::ffi::OsStr;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
-    use std::sync::{Mutex, OnceLock};
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        crate::config::test_config_env_lock()
     }
 
     fn unique_test_dir(name: &str) -> std::path::PathBuf {

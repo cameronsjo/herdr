@@ -94,6 +94,8 @@ fi
 
 echo
 echo "Next steps:"
+echo "  0. If a local cargo build fails in build.rs with an HTTP or git error from"
+echo "     build.zig.zon (a proxy refusing Zig's fetches), run: just zig-prefetch"
 echo "  1. (cd $WORKTREE_DIR && ./scripts/docker-check.sh)"
 echo "     Run it from the worktree: the script mounts the tree it lives in, so the"
 echo "     primary checkout's copy would test the PRE-merge tree and still print PASS."

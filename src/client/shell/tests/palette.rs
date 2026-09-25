@@ -313,6 +313,16 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
         "a tab destination is a split, so the direction is asked rather than guessed"
     );
     assert!(endpoint_methods(&outcome).is_empty(), "nothing moves yet");
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => assert!(
+            chooser.title.starts_with("split beside ")
+                && chooser.title.contains(" / tab ")
+                && !chooser.title.contains("pane_1"),
+            "the chooser names where the pane lands, got {:?}",
+            chooser.title
+        ),
+        other => panic!("expected the split chooser, got {other:?}"),
+    }
 
     state.compose(106, 24).expect("composed frame");
     let confirmed = press(&mut state, KeyCode::Char('h'));
@@ -1019,7 +1029,62 @@ fn the_merge_action_arms_the_navigator_and_a_workspace_row_asks_first() {
 }
 
 #[test]
-fn picking_the_source_row_leaves_the_merge_armed() {
+fn left_and_right_step_between_spaces_in_a_destination_picker() {
+    let mut state = shell_with_second_workspace();
+    state.open_navigator_overlay_for_move(None, Some("tab_1".into()));
+    state.compose(106, 24).expect("composed frame");
+    let selected_space = |state: &ClientShellState| match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Navigator(navigator)) => match &navigator.selected {
+            Some(ClientNavigatorTarget::Workspace { workspace_id, .. }) => {
+                Some(workspace_id.clone())
+            }
+            _ => None,
+        },
+        _ => panic!("navigator should stay open"),
+    };
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::NewWorkspace);
+    }
+    press(&mut state, KeyCode::Right);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_1"));
+    press(&mut state, KeyCode::Right);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_2"));
+    press(&mut state, KeyCode::Left);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_1"));
+}
+
+#[test]
+fn a_merge_picker_with_no_other_space_says_so() {
+    let mut state = shell();
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    let frame = state.compose(106, 24).expect("composed frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("No other space to merge into"), "{text}");
+    assert!(
+        !text.contains("0 terminals"),
+        "a spaces-only picker counts no terminals"
+    );
+    assert!(text.contains("search spaces"), "{text}");
+}
+
+#[test]
+fn a_filter_that_empties_the_merge_picker_is_not_called_no_other_space() {
+    let mut state = shell_with_second_workspace();
+    state.open_navigator_overlay_for_merge("ws_1".into());
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.filter = Some(ClientNavigatorFilter::Done);
+    }
+    let frame = state.compose(106, 24).expect("composed frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("No matching spaces"), "{text}");
+    assert!(
+        !text.contains("No other space"),
+        "ws_2 exists; the filter hid it"
+    );
+}
+
+#[test]
+fn the_merge_picker_does_not_offer_the_source_space() {
     let mut state = shell_with_second_workspace();
     state.open_navigator_overlay_for_merge("ws_1".into());
     state.compose(106, 24).expect("composed frame");
@@ -1031,21 +1096,16 @@ fn picking_the_source_row_leaves_the_merge_armed() {
             _ => panic!("navigator should be open"),
         },
     );
-    let own_row = rows
-        .iter()
-        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_1"))
-        .expect("a row for the armed workspace");
-    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = Some(rows[own_row].target.clone());
-    }
-
-    let mut outcome = ClientShellInput::default();
-    state.accept_navigator_selection(&mut outcome);
-    assert!(
-        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
-        "a workspace cannot merge into itself, so the picker stays armed"
-    );
-    assert!(endpoint_methods(&outcome).is_empty());
+    // A space cannot merge into itself; picking it used to do nothing
+    // silently, so it is not offered at all.
+    assert!(!rows.iter().any(|row| matches!(
+        &row.target,
+        ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_1"
+    )));
+    assert!(rows.iter().any(|row| matches!(
+        &row.target,
+        ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_2"
+    )));
 }
 
 #[test]
@@ -1155,4 +1215,48 @@ fn destination_moves_are_not_sent_to_a_server_that_only_supports_reordering() {
             }
         ))
     );
+}
+
+/// An unselected plugin row paints its name in one plain style: no bold cell
+/// may arrive with the row text. Guards the render half of the stray-bold
+/// report; the ANSI encoder resets SGR on every style change, so bold cannot
+/// leak between cells there either.
+#[test]
+fn an_unselected_plugin_row_name_carries_no_bold_cells() {
+    let mut state =
+        shell_with_a_destructive_plugin_row_titled("Uninstall web bridge (remove service)");
+    for _ in 0.."uninstall".len() {
+        press(&mut state, KeyCode::Backspace);
+    }
+    press(&mut state, KeyCode::Char('c'));
+    let rows = state.filtered_palette_commands();
+    let index = rows
+        .iter()
+        .position(|row| row.command.destructive)
+        .expect("the plugin row matches");
+    assert_ne!(index, 0, "the plugin row must not be the selected one");
+    let name = format!(" {}", rows[index].command.name);
+    for (width, height) in [(106, 24), (140, 40)] {
+        let frame = state.compose(width, height).expect("composed frame");
+        let rect = state
+            .hits
+            .palette_rows
+            .iter()
+            .find(|(_, row)| *row == index)
+            .map(|(rect, _)| *rect)
+            .expect("the plugin row is visible");
+        let buffer = frame.to_ratatui_buffer().expect("buffer reconstructs");
+        let bold: String = (rect.x..rect.x + super::super::render::display_width(&name))
+            .filter(|x| {
+                buffer[(*x, rect.y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            })
+            .map(|x| buffer[(x, rect.y)].symbol().to_string())
+            .collect();
+        assert!(
+            bold.is_empty(),
+            "{width}x{height}: bold {bold:?} in {name:?}"
+        );
+    }
 }

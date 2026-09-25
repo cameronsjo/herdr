@@ -148,10 +148,34 @@ pub(crate) fn public_tab_id_for_number(workspace_id: &str, tab_number: usize) ->
     format!("{workspace_id}:t{}", encode_public_number(tab_number))
 }
 
+/// Whether `id` has the exact shape `generate_workspace_id` produces: `w`
+/// plus a canonical public number. Restore uses it to refuse ids that
+/// `public_workspace_number` cannot read, since `reserve_workspace_ids` would
+/// skip them and a later generated id could collide.
+///
+/// The number is capped far below the counter's range: an id near
+/// `u64::MAX` would make reservation overflow or wrap the counter back to
+/// ids already in use.
+pub(crate) fn is_canonical_workspace_id(id: &str) -> bool {
+    public_workspace_number(id).is_some_and(|number| {
+        (1..=MAX_CANONICAL_WORKSPACE_NUMBER).contains(&number)
+            && id.strip_prefix('w') == Some(encode_public_number(number).as_str())
+    })
+}
+
+/// Largest public number a restored workspace id may carry.
+const MAX_CANONICAL_WORKSPACE_NUMBER: usize = u32::MAX as usize;
+
 pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
-    let Some(next) = workspaces
-        .iter()
-        .filter_map(|workspace| public_workspace_number(&workspace.id))
+    reserve_workspace_id_strs(workspaces.iter().map(|workspace| workspace.id.as_str()));
+}
+
+/// Advances the id counter past every canonical id in `ids`, so no later
+/// `generate_workspace_id` call can hand one of them out again.
+pub(crate) fn reserve_workspace_id_strs<'a>(ids: impl IntoIterator<Item = &'a str>) {
+    let Some(next) = ids
+        .into_iter()
+        .filter_map(public_workspace_number)
         .max()
         .and_then(|max| u64::try_from(max.checked_add(1)?).ok())
     else {
@@ -1582,6 +1606,33 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_workspace_ids_round_trip_the_public_number() {
+        let generated = generate_workspace_id();
+        assert!(is_canonical_workspace_id(&generated), "{generated}");
+        for id in ["w1", "wZ", "w0", "w11"] {
+            assert!(is_canonical_workspace_id(id), "{id}");
+        }
+        for id in ["", "w", "1", "w_1", "wi", "W1", "w1 ", "ws_1", "w\u{200b}1"] {
+            assert!(!is_canonical_workspace_id(id), "{id:?}");
+        }
+        // Past the cap: would overflow reservation or wrap the id counter.
+        // `checked_add`: on a 32-bit target the cap is already usize::MAX.
+        for number in [
+            MAX_CANONICAL_WORKSPACE_NUMBER.checked_add(1),
+            Some(usize::MAX),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|number| *number > MAX_CANONICAL_WORKSPACE_NUMBER)
+        {
+            let id = format!("w{}", encode_public_number(number));
+            assert!(!is_canonical_workspace_id(&id), "{id}");
+        }
+        let at_cap = format!("w{}", encode_public_number(MAX_CANONICAL_WORKSPACE_NUMBER));
+        assert!(is_canonical_workspace_id(&at_cap), "{at_cap}");
+    }
 
     #[test]
     fn branch_label_strips_format_characters_but_branch_stays_raw() {

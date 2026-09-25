@@ -12,8 +12,33 @@ impl App {
             .find_map(|(ws_idx, ws)| ws.pane_state(pane_id).map(|pane| (ws_idx, pane)))
     }
 
+    /// The public id of the workspace at `ws_idx`, or `None` when the index
+    /// is out of range. Prefer this in new code.
+    pub(crate) fn try_public_workspace_id(&self, ws_idx: usize) -> Option<String> {
+        self.state
+            .workspaces
+            .get(ws_idx)
+            .map(|workspace| workspace.id.clone())
+    }
+
+    /// Infallible form for the many callers that already hold a validated
+    /// index. An out-of-range index is a bug, but it must not panic the server
+    /// from one socket request: it logs, trips in debug builds, and yields an
+    /// empty id that matches no workspace.
+    #[track_caller]
     pub(crate) fn public_workspace_id(&self, ws_idx: usize) -> String {
-        self.state.workspaces[ws_idx].id.clone()
+        // Captured here: `#[track_caller]` does not reach into the closure.
+        let caller = std::panic::Location::caller();
+        self.try_public_workspace_id(ws_idx).unwrap_or_else(|| {
+            tracing::error!(
+                ws_idx,
+                caller = %caller,
+                workspace_count = self.state.workspaces.len(),
+                "public_workspace_id called with an out-of-range index"
+            );
+            debug_assert!(false, "public_workspace_id: index {ws_idx} out of range");
+            String::new()
+        })
     }
 
     pub(crate) fn public_tab_id(&self, ws_idx: usize, tab_idx: usize) -> Option<String> {

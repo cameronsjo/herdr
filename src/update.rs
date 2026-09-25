@@ -2404,12 +2404,10 @@ mod tests {
         atomic::{AtomicBool, Ordering},
         Arc,
     };
-    use std::sync::{Mutex, OnceLock};
     use std::thread;
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        crate::config::test_config_env_lock()
     }
 
     fn unique_test_socket_path(name: &str) -> std::path::PathBuf {
@@ -2853,6 +2851,7 @@ mod tests {
                 ),
                 surface_interest: true,
                 health_check: true,
+                ssh_agent_registration: false,
             }),
         };
         let missing_baseline = crate::api::RuntimeStatus {
@@ -2927,6 +2926,7 @@ mod tests {
                     ),
                     surface_interest: true,
                     health_check: true,
+                    ssh_agent_registration: false,
                 }),
             },
         };
@@ -3185,6 +3185,7 @@ mod tests {
                     ),
                     surface_interest: true,
                     health_check: true,
+                    ssh_agent_registration: false,
                 }),
             },
         };

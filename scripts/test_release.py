@@ -37,7 +37,13 @@ class ReleaseTests(unittest.TestCase):
         self.git("update-ref", "refs/remotes/origin/master", "HEAD")
 
     def git(self, *args):
-        return subprocess.check_output(["git", *args], text=True, stderr=subprocess.STDOUT).strip()
+        # No background auto-maintenance writing into the temp repo while
+        # it is removed; see test_preview's git helper.
+        return subprocess.check_output(
+            ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
 
     def put(self, path, text):
         target = Path(path)

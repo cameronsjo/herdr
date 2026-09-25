@@ -136,6 +136,13 @@ An existing SDK can be selected with `LIBGHOSTTY_VT_WINDOWS_LIBC`, pointing to i
 Zig libc configuration file. Ordinary native Linux/macOS builds do not need this
 setup. Native Windows builds use the SDK installed with Visual Studio Build Tools.
 
+The build runs `zig build` for the vendored libghostty-vt, and Zig fetches its
+package dependencies itself. If `cargo build` fails in `build.rs` with an HTTP
+or git error pointing at a `build.zig.zon` (for example behind a proxy that
+resets Zig's own connections), run `just zig-prefetch` once and build again. It
+downloads the missing packages with `curl` or `git`, checks each against its
+pinned hash, and fills the Zig cache.
+
 ### Handle documentation correctly
 
 For normal code changes, do not edit the root `README.md`, root `CHANGELOG.md`, `docs/preview/`, `docs/versions/`, or release payloads under `distribution/`.

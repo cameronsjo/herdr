@@ -370,6 +370,7 @@ pub(crate) fn keybind_help_groups(
                     &["send pane to new tab"],
                 ),
                 entry(binding_label(&keybinds.edit_scrollback), "edit scrollback"),
+                entry(binding_label(&keybinds.clear_pane), "clear pane"),
                 entry(binding_label(&keybinds.copy_mode), "copy mode"),
                 action_entry(
                     binding_label(&keybinds.zoom),

@@ -85,9 +85,18 @@ pub(crate) fn app_dir_name() -> &'static str {
 }
 
 #[cfg(test)]
+/// The one lock for tests that change process-wide environment variables.
+///
+/// Every module's test `env_lock()` returns this. Separate per-module locks
+/// did not exclude each other, so a test pointing `PATH` or `XDG_CONFIG_HOME`
+/// at a temp dir raced unrelated tests in a single-process `cargo test` run.
+/// Poison is cleared on each call so one panicking test does not fail every
+/// other env test after it.
 pub(crate) fn test_config_env_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    let lock = LOCK.get_or_init(|| std::sync::Mutex::new(()));
+    lock.clear_poison();
+    lock
 }
 
 impl Config {

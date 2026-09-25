@@ -1294,3 +1294,36 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
         })) if integration_messages == &["installed codex"]
     ));
 }
+
+#[test]
+fn global_menu_closes_when_an_update_row_arrives_under_it() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("initial shell");
+    // Index 3 is "detach" while no update row is present.
+    state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
+        highlighted: 3,
+    }));
+
+    let mut unrelated = snapshot();
+    unrelated.revision += 1;
+    state.set_snapshot(Box::new(unrelated));
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::GlobalMenu(_))),
+        "a snapshot that leaves the item list alone keeps the menu open"
+    );
+
+    let mut updated = snapshot();
+    updated.revision += 2;
+    updated.update_available = Some("0.9.9".into());
+    state.set_snapshot(Box::new(updated));
+    assert!(state.overlay.is_none(), "the row under the cursor shifted");
+
+    let pressed = state.handle_input_bytes(b"\r");
+    assert!(!pressed.detach);
+    assert!(!matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ReleaseNotes(_))
+    ));
+}

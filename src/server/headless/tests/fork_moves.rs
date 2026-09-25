@@ -56,7 +56,6 @@ async fn structural_moves_reconcile_every_client_and_remove_stale_geometry_contr
                 },
                 respond_to,
                 response_write_complete: None,
-                stream_active: None,
             };
             if public {
                 server.handle_api_request_with_shutdown_check(message);

@@ -262,6 +262,28 @@ pub(crate) fn receive(socket_path: &Path, token: &str) -> io::Result<ReceivedHan
             crate::build_info::version()
         )));
     }
+    // Protocol versions differ on every in-place upgrade, so a mismatch alone
+    // is not a reason to refuse. Crossing between an upstream build and this
+    // fork is different: each side may carry state the other does not model.
+    // Say so, since nothing else would.
+    if handoff_crosses_distribution(manifest.source_protocol, crate::protocol::PROTOCOL_VERSION) {
+        warn!(
+            source_protocol = manifest.source_protocol,
+            source_version = %manifest.source_version.escape_debug(),
+            protocol = crate::protocol::PROTOCOL_VERSION,
+            version = %crate::build_info::version(),
+            "live handoff crosses between an upstream herdr build and a fork build; \
+             state only the source build models may not carry over"
+        );
+    } else {
+        info!(
+            source_protocol = manifest.source_protocol,
+            source_version = %manifest.source_version.escape_debug(),
+            protocol = crate::protocol::PROTOCOL_VERSION,
+            version = %crate::build_info::version(),
+            "accepting live handoff"
+        );
+    }
     stream.write_all(b"validated\n")?;
     stream.flush()?;
     let fds = recv_fds(&stream, manifest.panes.len())?;
@@ -270,6 +292,15 @@ pub(crate) fn receive(socket_path: &Path, token: &str) -> io::Result<ReceivedHan
         fds,
         stream,
     })
+}
+
+#[cfg(unix)]
+/// Whether a handoff moves between an upstream herdr build and this fork.
+/// Protocol numbers alone differ on every upgrade; only the distribution
+/// split is worth a warning.
+fn handoff_crosses_distribution(source_protocol: u32, receiver_protocol: u32) -> bool {
+    crate::protocol::is_fork_protocol(source_protocol)
+        != crate::protocol::is_fork_protocol(receiver_protocol)
 }
 
 #[cfg(unix)]
@@ -573,5 +604,22 @@ mod tests {
             serde_json::from_value(value).expect("an older manifest should still load");
 
         assert!(older.api_window_title.is_none());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod distribution_tests {
+    #[test]
+    fn only_an_upstream_fork_crossing_counts_as_a_distribution_change() {
+        let fork = crate::protocol::PROTOCOL_VERSION;
+        let upstream = crate::protocol::UPSTREAM_PROTOCOL_VERSION;
+        assert!(!super::handoff_crosses_distribution(fork, fork));
+        assert!(
+            !super::handoff_crosses_distribution(fork - 10, fork),
+            "a fork upgrade"
+        );
+        assert!(!super::handoff_crosses_distribution(upstream - 1, upstream));
+        assert!(super::handoff_crosses_distribution(upstream, fork));
+        assert!(super::handoff_crosses_distribution(fork, upstream));
     }
 }

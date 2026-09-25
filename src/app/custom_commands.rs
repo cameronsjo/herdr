@@ -197,11 +197,11 @@ impl App {
         params: &crate::api::schema::CommandInvokeParams,
         workspace_index: usize,
     ) -> Result<(), (&'static str, String)> {
-        if params
-            .workspace_id
-            .as_deref()
-            .is_some_and(|workspace_id| workspace_id != self.public_workspace_id(workspace_index))
-        {
+        if params.workspace_id.as_deref().is_some_and(|workspace_id| {
+            // An out-of-range index has no id; treat it as a mismatch
+            // rather than comparing against an empty sentinel.
+            self.try_public_workspace_id(workspace_index).as_deref() != Some(workspace_id)
+        }) {
             return Err((
                 "command_target_mismatch",
                 "command target does not belong to the requested workspace".to_owned(),

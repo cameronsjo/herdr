@@ -1,3 +1,6 @@
+mod native_image_sources;
+pub(crate) use native_image_sources::clone_native_image_source;
+
 use std::{
     collections::{HashSet, VecDeque},
     io::{Read, Write},
@@ -25,6 +28,9 @@ pub(crate) use super::unix_common::{
 
 #[cfg(test)]
 mod config_file_tests;
+
+mod shutdown;
+pub(crate) use shutdown::monitor_host_shutdown;
 
 const WSL_MARKER_ENV_VARS: &[&str] = &["WSL_DISTRO_NAME", "WSL_INTEROP"];
 const PROCESS_DETECTION_ENV_VAR: &str = "HERDR_PROCESS_DETECTION";
@@ -1158,12 +1164,10 @@ fn process_session_id(pid: u32) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
     use std::{cell::RefCell, collections::HashMap};
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        crate::config::test_config_env_lock()
     }
 
     #[test]
@@ -1868,6 +1872,9 @@ mod tests {
 
     #[test]
     fn finite_clipboard_commands_report_exit_status() {
+        // Sibling tests point PATH at a temp dir under this lock; spawning `sh`
+        // without it fails whenever one of them runs concurrently.
+        let _guard = env_lock().lock().unwrap();
         let success = ClipboardCommand {
             program: "sh",
             args: &["-c", "cat >/dev/null"],
