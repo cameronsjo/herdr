@@ -27,6 +27,41 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
 ## Fork issue fixes riding the 2026-09-25 upstream sync
 
+### test: share one env lock across every test that mutates the environment (#74, #36)
+
+- **Files:** `src/config.rs` (`test_config_env_lock`), the test `env_lock()` in `src/{api/server,client/tests/mod,platform/linux,product_announcements,server/autodetect,session,update}.rs`
+- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. Upstream adding a new private `env_lock()` will reintroduce the race; route it through the shared one.
+- **Regression check:** `cargo test --locked --bin herdr` run several times reaches `test result: ok` each time (3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25).
+
+### test: point the hot-path architecture guard at the client shell (#40)
+
+- **Files:** `scripts/test_ui_hot_path_architecture.py`
+- **Regression check:** `python3 -m unittest scripts.test_ui_hot_path_architecture`. Staged break confirmed 2026-09-25: an `input_state` call appended to `src/client/shell/composition.rs` reddens it.
+
+### test: guard palette plugin rows against stray bold cells (#62)
+
+- **Files:** `src/client/shell/tests/palette.rs`
+- **Replaces:** Nothing; a guard only. The report did not reproduce on the current tree.
+- **Regression check:** `cargo nextest run -E 'test(an_unselected_plugin_row_name_carries_no_bold_cells)'`. Making unselected rows bold reddens it.
+
+### fix: warn when a live handoff crosses between upstream and fork builds (#44)
+
+- **Files:** `src/server/handoff.rs`
+- **Replaces:** Upstream writes `source_protocol` and never reads it. The fork logs it on every accepted handoff and warns when `is_fork_protocol` differs between source and receiver. It does not refuse: protocols differ on every in-place upgrade.
+- **Regression check:** `cargo nextest run -E 'test(handoff)'`. The warning itself has no test.
+
+### fix: refuse to type into a pane whose agent name has no live agent (#73)
+
+- **Files:** `src/app/terminal_targets.rs` (`resolve_agent_input_target`), `src/terminal/state.rs` (`agent_name_routes`), `src/app/api/agents.rs`
+- **Replaces:** Upstream resolves `agent.prompt`, `send_keys` and `type_submit` names with no liveness gate. The fork requires a detected or reported agent, or a managed launch in flight. Read and wait paths are unchanged. Upstream edits to `resolve_agent_target` or those three handlers will conflict here.
+- **Regression check:** `cargo nextest run -E 'test(agent_name_stops_routing_once_no_agent_backs_it) + test(agent_wait_tolerates_detection_uncertainty_and_pane_target_rename)'`. Staged break confirmed 2026-09-25: dropping the gate reddens the first.
+
+### fix: stop public_workspace_id panicking and validate restored ids (#80)
+
+- **Files:** `src/app/ids.rs`, `src/workspace.rs` (`is_canonical_workspace_id`, `reserve_workspace_id_strs`), `src/persist/restore.rs` (`restored_workspace_id`)
+- **Replaces:** Upstream's `public_workspace_id` indexes bare and restore keeps any stored id. The fork adds `try_public_workspace_id`, makes the infallible form log and return an empty id, and replaces malformed or duplicate restored ids after reserving every canonical one.
+- **Regression check:** `cargo nextest run -E 'test(restored_workspace_ids) + test(canonical_workspace_ids)'`. Staged break confirmed 2026-09-25: dropping the canonical check reddens it.
+
 ### fix: close the global menu when a snapshot changes its rows (#72)
 
 - **Files:** `src/client/shell/global_menu.rs` (`reconcile_global_menu`), `src/client/shell/state.rs`, `src/client/shell/tests/startup_overlays.rs`
@@ -263,7 +298,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#50](https://github.com/cameronsjo/herdr/pull/50)
 - **Files:** `docs/next/api/herdr-api.schema.json`, `src/cli/*`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx` (en/ja/zh-cn), `docs/next/website/src/data/config-reference.json`
 - **Replaces:** Upstream has no `workspace.merge` verb; this fork adds it gated behind an explicit group-close intent to avoid silent data loss on merge.
-- **Regression check:** `herdr workspace merge --help` lists the command; `cargo test workspace::merge`.
+- **Regression check:** `herdr workspace merge --help` lists the command; `cargo nextest run -E 'test(/workspace_merge|merge_workspace/)'` (13 tests; the old `cargo test workspace::merge` matched none).
 
 ### feat(mouse): reach every move and reorder from the menus and the mouse
 
@@ -284,7 +319,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#26](https://github.com/cameronsjo/herdr/pull/26)
 - **Files:** `src/agent_resume.rs`, `src/app/actions.rs`, `src/integration/{mod.rs,config_edit.rs}`, `src/integration/assets/codex/herdr-agent-state.{sh,ps1}`, `docs/next/website/src/content/docs/{agents,integrations}.mdx`
 - **Replaces:** Upstream's Codex integration lacks the fork's pane-title and lifecycle-resume handling.
-- **Regression check:** launch a Codex agent pane and confirm the title reflects live state; `cargo test integration::codex`.
+- **Regression check:** launch a Codex agent pane and confirm the title reflects live state; `cargo nextest run -E 'test(/integration::tests::.*codex|agent_resume::tests::codex|codex_hook/)'` (15 tests; the old `cargo test integration::codex` matched none).
 
 ### fix(cli): register live-handoff in the server command spec
 
@@ -312,7 +347,7 @@ regression check.
 - **PR:** [cameronsjo/herdr#32](https://github.com/cameronsjo/herdr/pull/32) (issue #23)
 - **Files:** `src/config/sidebar.rs`
 - **Replaces:** Upstream has no grouped-sidebar concept (fork-only feature from PR #11); this fixes a precedence bug where a per-agent override silently defeated grouping.
-- **Regression check:** `cargo test config::sidebar::grouped_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/grouped_rows/)'` (3 tests; the old `cargo test config::sidebar::grouped_rows` matched none).
 
 ### ci: give the issue-closing workflow a usable token
 
