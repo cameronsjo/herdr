@@ -90,6 +90,15 @@ experience) reviewed the sync resolution and fork commits. Fixes:
   `git+--upload-pack` and `../` hash cases) and
   `cargo nextest run -E 'test(a_merge_picker_with_no_other_space_says_so)'`.
   Proven from an empty Zig cache 2026-09-25: 39 fetched, all hash-verified.
+- **Round 3** (2026-09-25): prefetch failures keep curl's error when the
+  git fallback also fails, name the failing git step and the route, label
+  expected against computed hashes, and escape control characters; curl
+  also pins redirects to https. Dropped connection threads are counted per
+  episode, so a later episode is never silent. Recovery lines log only when
+  a streak hid failures. A status filter that empties the merge picker reads
+  "No matching spaces". A stale name held by several panes names each.
+  **Regression check:**
+  `cargo nextest run -E 'test(a_refused_connection_thread_drops_only_that_connection) + test(a_stale_name_on_several_panes_names_each_of_them) + test(a_filter_that_empties_the_merge_picker_is_not_called_no_other_space)'`.
 - **Zig prefetch** (`scripts/prefetch_zig_deps.py`, `just zig-prefetch`):
   fills the Zig cache when `build.rs` fails on a `build.zig.zon` fetch, as it
   did behind this session's proxy; also named in `sync-upstream.sh`'s next
