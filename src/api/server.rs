@@ -128,20 +128,29 @@ fn start_server_inner(
                     let connection_running = Arc::clone(&listener_running);
                     #[cfg(unix)]
                     let ssh_agents = ssh_agents.clone();
-                    std::thread::spawn(move || {
-                        if let Err(err) = handle_connection_with_stop(
-                            stream,
-                            &api_tx,
-                            &event_hub,
-                            &connection_running,
-                            capabilities,
-                            server_stop.as_ref(),
-                            #[cfg(unix)]
-                            ssh_agents.as_ref(),
-                        ) {
-                            warn!(err = %err, "api connection failed");
-                        }
-                    });
+                    // `std::thread::spawn` panics when the OS refuses a thread,
+                    // and a panic here ends the accept loop with only a stderr
+                    // line: the socket file stays, and every later connect is
+                    // refused. Drop this one connection instead.
+                    let spawned = std::thread::Builder::new()
+                        .name("herdr-api-conn".into())
+                        .spawn(move || {
+                            if let Err(err) = handle_connection_with_stop(
+                                stream,
+                                &api_tx,
+                                &event_hub,
+                                &connection_running,
+                                capabilities,
+                                server_stop.as_ref(),
+                                #[cfg(unix)]
+                                ssh_agents.as_ref(),
+                            ) {
+                                warn!(err = %err, "api connection failed");
+                            }
+                        });
+                    if let Err(err) = spawned {
+                        warn!(err = %err, "api connection dropped: could not start its thread");
+                    }
                 }
                 Err(err) => {
                     error!(err = %err, "api listener accept failed");
@@ -149,7 +158,13 @@ fn start_server_inner(
                 }
             }
         }
-        debug!("api server thread exiting");
+        // Nothing restarts this thread, so its exit means the API socket stops
+        // answering while the server stays up. Say so at a visible level.
+        if listener_running.load(Ordering::Relaxed) {
+            warn!("api server stopped accepting connections; the api socket is now unresponsive");
+        } else {
+            debug!("api server thread exiting");
+        }
     });
 
     Ok(ServerHandle {
