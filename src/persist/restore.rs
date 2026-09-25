@@ -387,7 +387,12 @@ fn restore_with_imports_and_failures(
     );
     let mut restored_ids = HashSet::new();
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
-        let workspace_id = restored_workspace_id(ws_snap.id.as_deref(), &mut restored_ids);
+        let workspace_id = restored_workspace_id(
+            ws_snap.id.as_deref(),
+            idx,
+            ws_snap.custom_name.as_deref(),
+            &mut restored_ids,
+        );
         let runtime_context = RestoreRuntimeContext {
             scrollback_limit_bytes,
             shell_config,
@@ -425,7 +430,12 @@ fn restore_with_imports_and_failures(
 /// canonical and not already taken by an earlier workspace in the same
 /// snapshot; anything else gets a fresh id. Public ids are the identity every
 /// API caller addresses, so a malformed or duplicated one must not survive.
-fn restored_workspace_id(stored: Option<&str>, restored_ids: &mut HashSet<String>) -> String {
+fn restored_workspace_id(
+    stored: Option<&str>,
+    workspace_index: usize,
+    label: Option<&str>,
+    restored_ids: &mut HashSet<String>,
+) -> String {
     let id = match stored {
         Some(id)
             if crate::workspace::is_canonical_workspace_id(id) && !restored_ids.contains(id) =>
@@ -433,8 +443,23 @@ fn restored_workspace_id(stored: Option<&str>, restored_ids: &mut HashSet<String
             id.to_owned()
         }
         Some(id) => {
-            tracing::warn!(stored_id = %id, "replacing malformed or duplicate restored workspace id");
-            crate::workspace::generate_workspace_id()
+            let reason = if crate::workspace::is_canonical_workspace_id(id) {
+                "duplicate"
+            } else {
+                "malformed"
+            };
+            let new_id = crate::workspace::generate_workspace_id();
+            // The stored id comes from a file on disk; escape it like the
+            // agent names this module logs, so it cannot forge log lines.
+            tracing::warn!(
+                stored_id = %id.escape_debug(),
+                new_id = %new_id,
+                workspace_index,
+                label = %label.unwrap_or_default().escape_debug(),
+                reason,
+                "replacing restored workspace id; its tab and pane ids change with it"
+            );
+            new_id
         }
         None => crate::workspace::generate_workspace_id(),
     };
@@ -1120,13 +1145,16 @@ mod tests {
     #[test]
     fn restored_workspace_ids_replace_malformed_and_duplicate_ids() {
         let mut taken = HashSet::new();
-        assert_eq!(super::restored_workspace_id(Some("w5"), &mut taken), "w5");
-        let duplicate = super::restored_workspace_id(Some("w5"), &mut taken);
+        assert_eq!(
+            super::restored_workspace_id(Some("w5"), 0, None, &mut taken),
+            "w5"
+        );
+        let duplicate = super::restored_workspace_id(Some("w5"), 0, None, &mut taken);
         assert_ne!(duplicate, "w5");
         assert!(crate::workspace::is_canonical_workspace_id(&duplicate));
-        let malformed = super::restored_workspace_id(Some("not-an-id"), &mut taken);
+        let malformed = super::restored_workspace_id(Some("not-an-id"), 2, None, &mut taken);
         assert!(crate::workspace::is_canonical_workspace_id(&malformed));
-        let missing = super::restored_workspace_id(None, &mut taken);
+        let missing = super::restored_workspace_id(None, 3, None, &mut taken);
         assert!(crate::workspace::is_canonical_workspace_id(&missing));
         assert_eq!(taken.len(), 4, "every id handed out is unique");
     }
