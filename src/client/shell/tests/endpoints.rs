@@ -2619,7 +2619,9 @@ fn move_and_merge_pickers_only_offer_destinations_on_the_active_machine() {
             match kind {
                 0 => state.open_navigator_overlay_for_move(Some("pane_1".into()), None),
                 1 => state.open_navigator_overlay_for_move(None, Some("tab_1".into())),
-                _ => state.open_navigator_overlay_for_merge("ws_1".into()),
+                // The source space is never offered, so merge from one the
+                // fixture does not list and keep ws_1 as a destination.
+                _ => state.open_navigator_overlay_for_merge("ws_elsewhere".into()),
             }
             let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
                 panic!("destination picker");

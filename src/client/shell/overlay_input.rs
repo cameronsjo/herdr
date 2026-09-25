@@ -270,8 +270,25 @@ impl ClientShellState {
                 split,
             },
         };
+        // Name the landing spot: the navigator row that led here showed an
+        // agent or cwd label, not which tab or pane the split joins.
+        let snapshot = self.snapshot.as_deref();
+        let tab_label = snapshot
+            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
+            .map(|tab| tab.label.clone())
+            .unwrap_or_else(|| tab_id.clone());
+        let title = match target_pane_id.as_deref() {
+            Some(target) => {
+                let pane_label = snapshot
+                    .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == target))
+                    .and_then(|pane| pane.label.clone())
+                    .unwrap_or_else(|| target.to_owned());
+                format!("split beside {pane_label} in tab {tab_label}")
+            }
+            None => format!("split into tab {tab_label}"),
+        };
         self.open_chooser_overlay(
-            "split into tab".to_owned(),
+            title,
             vec![
                 split_choice(vertical_label, SplitDirection::Right),
                 split_choice(horizontal_label, SplitDirection::Down),
@@ -600,6 +617,23 @@ impl ClientShellState {
         else {
             return;
         };
+        // A destination picker steps between spaces themselves: the tab-move
+        // and merge pickers list no panes, and in a pane move the space row
+        // (a new tab there) is a destination of its own.
+        if navigator.move_armed() || navigator.pending_workspace_merge.is_some() {
+            let is_space = |row: &ClientNavigatorRow| {
+                matches!(row.target, ClientNavigatorTarget::Workspace { .. })
+            };
+            let destination = if forward {
+                rows.iter().skip(selected + 1).find(|row| is_space(row))
+            } else {
+                rows[..selected].iter().rev().find(|row| is_space(row))
+            };
+            if let Some(row) = destination {
+                navigator.selected = Some(row.target.clone());
+            }
+            return;
+        }
         let section = rows[..=selected]
             .iter()
             .rposition(|row| !matches!(row.target, ClientNavigatorTarget::Pane { .. }))

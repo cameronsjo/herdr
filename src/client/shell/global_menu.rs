@@ -86,8 +86,15 @@ impl ClientShellState {
         if !matches!(self.overlay, Some(ClientShellOverlay::GlobalMenu(_))) {
             return;
         }
-        let shown = self.snapshot.as_deref().map(global_menu_items);
-        if shown.as_ref() != Some(&global_menu_items(snapshot)) {
+        // Compare actions only: a label flip ("what's new" to "update
+        // ready") moves no row, so it must not close the menu under the user.
+        let actions = |snapshot: &ClientShellSnapshot| {
+            global_menu_items(snapshot)
+                .into_iter()
+                .map(|(_, action)| action)
+                .collect::<Vec<_>>()
+        };
+        if self.snapshot.as_deref().map(actions) != Some(actions(snapshot)) {
             self.overlay = None;
         }
     }

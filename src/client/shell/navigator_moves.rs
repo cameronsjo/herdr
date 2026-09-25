@@ -17,8 +17,14 @@ pub(super) fn navigator_rows(
     let workspace_only =
         navigator.pending_tab_move.is_some() || navigator.pending_workspace_merge.is_some();
     rows.retain(|row| match &row.target {
-        ClientNavigatorTarget::Workspace { endpoint_id, .. } => {
-            endpoint_id == active_endpoint_id && !row.stale
+        ClientNavigatorTarget::Workspace {
+            endpoint_id,
+            workspace_id,
+        } => {
+            endpoint_id == active_endpoint_id
+                && !row.stale
+                // Merging a space into itself is refused; do not offer it.
+                && navigator.pending_workspace_merge.as_deref() != Some(workspace_id.as_str())
         }
         ClientNavigatorTarget::Pane { endpoint_id, .. } => {
             !workspace_only && endpoint_id == active_endpoint_id && !row.stale
@@ -36,7 +42,7 @@ pub(super) fn navigator_rows(
             ClientNavigatorRow {
                 depth: 0,
                 label: "new space".to_owned(),
-                meta: "move into a space created for it".to_owned(),
+                meta: String::new(),
                 detail: String::new(),
                 agent: None,
                 status: None,

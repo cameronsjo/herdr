@@ -721,7 +721,15 @@ fn render_navigator_overlay(
         q.x + 2,
         q.y,
         q.width.saturating_sub(4),
-        " Go to ",
+        if n.pending_workspace_merge.is_some() {
+            " Merge space into "
+        } else if n.pending_tab_move.is_some() {
+            " Move tab to "
+        } else if n.pending_pane_move.is_some() {
+            " Move pane to "
+        } else {
+            " Go to "
+        },
         Style::default().fg(p.accent).bg(p.panel_bg),
     );
     let rows = super::navigator_moves::navigator_rows(endpoints, active_endpoint_id, n);
@@ -1002,10 +1010,7 @@ fn render_navigator_overlay(
         // it does, and nothing else on screen says which destination a depth
         // implies.
         let detail = if n.pending_workspace_merge.is_some() {
-            match r.target {
-                ClientNavigatorTarget::NewWorkspace => " pick an existing space".to_owned(),
-                _ => " merges this space into here".to_owned(),
-            }
+            " merges this space into here".to_owned()
         } else if n.pending_tab_move.is_some() {
             match r.target {
                 ClientNavigatorTarget::NewWorkspace => " moves this tab to a new space".to_owned(),
@@ -1015,10 +1020,12 @@ fn render_navigator_overlay(
             match r.target {
                 ClientNavigatorTarget::NewWorkspace => " moves this pane to a new space".to_owned(),
                 ClientNavigatorTarget::Workspace { .. } => {
-                    " moves this pane to a new tab here".to_owned()
+                    " moves this pane to a new tab in this space".to_owned()
                 }
+                // Name the tab and pane the split lands beside; the row label
+                // is an agent or cwd, not the tab.
                 ClientNavigatorTarget::Pane { .. } | ClientNavigatorTarget::Machine { .. } => {
-                    " splits this pane into this tab".to_owned()
+                    format!(" splits beside this pane · {}", r.detail)
                 }
             }
         } else {
@@ -1043,9 +1050,14 @@ fn render_navigator_overlay(
     }
     // Enter relocates instead of switching while a move is armed, so the
     // footer has to say which one it is.
-    let footer = match (n.move_armed(), n.search_focused) {
-        (true, true) => " search type · move ↑↓/ctrl+n/p · move here enter · cancel esc",
-        (true, false) => " ↑↓/j/k rows · ←→ workspace · / search · enter move here · esc cancel",
+    let merging = n.pending_workspace_merge.is_some();
+    let footer = match (n.move_armed() || merging, n.search_focused) {
+        (true, true) if merging => " ↑↓/ctrl+n/p rows · enter merge here · esc back",
+        (true, true) => " ↑↓/ctrl+n/p rows · enter move here · esc back",
+        (true, false) if merging => {
+            " ↑↓/j/k rows · ←→ space · / search · enter merge here · esc cancel"
+        }
+        (true, false) => " ↑↓/j/k rows · ←→ space · / search · enter move here · esc cancel",
         (false, true) => " search type · move ↑↓/ctrl+n/p · open enter · back esc",
         (false, false) => {
             " ↑↓/j/k rows · ←→ workspace · / search · a/b/w/i/d filter · enter open · esc close"

@@ -313,6 +313,14 @@ fn a_pane_row_destination_asks_which_way_the_pane_splits() {
         "a tab destination is a split, so the direction is asked rather than guessed"
     );
     assert!(endpoint_methods(&outcome).is_empty(), "nothing moves yet");
+    match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Chooser(chooser)) => assert!(
+            chooser.title.starts_with("split beside ") && chooser.title.contains(" in tab "),
+            "the chooser names where the pane lands, got {:?}",
+            chooser.title
+        ),
+        other => panic!("expected the split chooser, got {other:?}"),
+    }
 
     state.compose(106, 24).expect("composed frame");
     let confirmed = press(&mut state, KeyCode::Char('h'));
@@ -1019,7 +1027,32 @@ fn the_merge_action_arms_the_navigator_and_a_workspace_row_asks_first() {
 }
 
 #[test]
-fn picking_the_source_row_leaves_the_merge_armed() {
+fn left_and_right_step_between_spaces_in_a_destination_picker() {
+    let mut state = shell_with_second_workspace();
+    state.open_navigator_overlay_for_move(None, Some("tab_1".into()));
+    state.compose(106, 24).expect("composed frame");
+    let selected_space = |state: &ClientShellState| match state.overlay.as_ref() {
+        Some(ClientShellOverlay::Navigator(navigator)) => match &navigator.selected {
+            Some(ClientNavigatorTarget::Workspace { workspace_id, .. }) => {
+                Some(workspace_id.clone())
+            }
+            _ => None,
+        },
+        _ => panic!("navigator should stay open"),
+    };
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::NewWorkspace);
+    }
+    press(&mut state, KeyCode::Right);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_1"));
+    press(&mut state, KeyCode::Right);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_2"));
+    press(&mut state, KeyCode::Left);
+    assert_eq!(selected_space(&state).as_deref(), Some("ws_1"));
+}
+
+#[test]
+fn the_merge_picker_does_not_offer_the_source_space() {
     let mut state = shell_with_second_workspace();
     state.open_navigator_overlay_for_merge("ws_1".into());
     state.compose(106, 24).expect("composed frame");
@@ -1031,21 +1064,16 @@ fn picking_the_source_row_leaves_the_merge_armed() {
             _ => panic!("navigator should be open"),
         },
     );
-    let own_row = rows
-        .iter()
-        .position(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_1"))
-        .expect("a row for the armed workspace");
-    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
-        navigator.selected = Some(rows[own_row].target.clone());
-    }
-
-    let mut outcome = ClientShellInput::default();
-    state.accept_navigator_selection(&mut outcome);
-    assert!(
-        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
-        "a workspace cannot merge into itself, so the picker stays armed"
-    );
-    assert!(endpoint_methods(&outcome).is_empty());
+    // A space cannot merge into itself; picking it used to do nothing
+    // silently, so it is not offered at all.
+    assert!(!rows.iter().any(|row| matches!(
+        &row.target,
+        ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_1"
+    )));
+    assert!(rows.iter().any(|row| matches!(
+        &row.target,
+        ClientNavigatorTarget::Workspace { workspace_id: id, .. } if id == "ws_2"
+    )));
 }
 
 #[test]
