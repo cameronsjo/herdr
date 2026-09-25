@@ -126,6 +126,14 @@ fn start_server_inner(
             }
             match stream {
                 Ok(stream) => {
+                    if backoff.consecutive() > 0 {
+                        // Close the streak in the log: with errors logged only
+                        // every 50th time, silence alone cannot mean recovery.
+                        info!(
+                            failed_accepts = backoff.consecutive(),
+                            "api listener accepting again"
+                        );
+                    }
                     backoff.reset();
                     let api_tx = api_tx.clone();
                     let event_hub = event_hub.clone();
@@ -178,8 +186,11 @@ fn start_server_inner(
                 }
             }
         }
-        // Only shutdown ends the loop now, but say so loudly if the listener
-        // ever stops without it: nothing restarts this thread.
+        // The loop ends only when an accept returns after shutdown cleared
+        // `listener_running`; a healthy loop parked in accept never exits, and
+        // the thread is never joined. `incoming()` does not end on its own, so
+        // this warning guards a future change that lets it: nothing restarts
+        // this thread.
         if listener_running.load(Ordering::Relaxed) {
             warn!("api server stopped accepting connections; the api socket is now unresponsive");
         } else {
@@ -228,8 +239,9 @@ impl AcceptBackoff {
 }
 
 /// Handles the result of starting a connection's thread. A refused thread
-/// drops only that connection, counted so a thread-exhaustion episode reads as
-/// one growing number rather than a wall of identical lines.
+/// drops only that connection. Drops are counted and logged on the first and
+/// every 50th, so a thread-exhaustion episode reads as one growing number
+/// rather than a wall of identical lines.
 fn record_connection_spawn<T>(
     spawned: io::Result<T>,
     dropped: &std::sync::atomic::AtomicU64,
@@ -238,11 +250,13 @@ fn record_connection_spawn<T>(
         Ok(_) => true,
         Err(err) => {
             let dropped_total = dropped.fetch_add(1, Ordering::Relaxed) + 1;
-            warn!(
-                err = %err,
-                dropped_total,
-                "api connection dropped: could not start its thread"
-            );
+            if dropped_total == 1 || dropped_total.is_multiple_of(50) {
+                warn!(
+                    err = %err,
+                    dropped_total,
+                    "api connection dropped: could not start its thread"
+                );
+            }
             false
         }
     }
@@ -1108,6 +1122,15 @@ fn accept_backoff_grows_to_a_cap_and_resets_on_success() {
     assert!(backoff.should_log(), "the first failure of a streak logs");
     backoff.next_delay();
     assert!(!backoff.should_log(), "the second does not");
+    while backoff.consecutive() < 49 {
+        backoff.next_delay();
+    }
+    assert!(!backoff.should_log(), "the 49th does not");
+    backoff.next_delay();
+    assert!(
+        backoff.should_log(),
+        "the 50th does, so a stuck listener stays visible"
+    );
 }
 
 #[cfg(test)]
