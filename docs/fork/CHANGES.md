@@ -178,6 +178,15 @@ experience) reviewed the sync resolution and fork commits. Fixes:
 - **Files:** `docs/next/website/src/content/docs/{ja,zh-cn}/configuration.mdx`
 - **Regression check:** manual read — neither locale claims `rows_by_agent` wins while grouped.
 
+## Fork working notes for agent sessions
+
+### docs(agents): record fork gotchas that cost sessions a CI cycle
+
+- **PR:** see the PR that adds this entry
+- **Files:** `AGENTS.md` (new `### Fork working notes` under the fork operating rule)
+- **Replaces:** Nothing upstream. Fork-only guidance, kept inside the fork section so upstream syncs of `AGENTS.md` don't conflict with it.
+- **Regression check:** manual read. After a sync, `AGENTS.md` still has the `### Fork working notes` list, and the commands it names (`just zig-prefetch`, `just test-single-process`, `config::test_config_env_lock()`, `ALLOWED_TYPES`) still exist.
+
 ## Agents group by a project token, blocked agents lead, and agent views clear from the TUI (PR [#86](https://github.com/cameronsjo/herdr/pull/86))
 
 ### feat(sidebar): group agents by a pane metadata token
