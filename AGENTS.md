@@ -18,12 +18,14 @@ and every upstream sync re-runs the regression checks listed there.
 Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
 
 - In a claude.ai cloud session the clone's `origin` is the fork
-  (`cameronsjo/herdr`), not `herdrdev/herdr`. Add the canonical repo as a
-  read-only `upstream` remote (`git remote set-url --push upstream DISABLED`),
-  and the never-write rule above applies to `upstream` there.
+  (`cameronsjo/herdr`), not `herdrdev/herdr`, so routine pushes and PRs go to
+  `origin` there. Add the canonical repo as a read-only `upstream` remote
+  (`git remote add upstream https://github.com/herdrdev/herdr.git`, then
+  `git remote set-url --push upstream DISABLED`); the never-write rule above
+  applies to `upstream` there.
 - Merge upstream-sync PRs with a merge commit, never squash or rebase, or the
   next sync hits every conflict again.
-- Stage `docs/fork/CHANGES.md` with `git add -f`. The `docs/fork` ignore rule
+- Stage `docs/fork/CHANGES.md` with `git add -f`. The `/docs/*` ignore rule
   makes a plain `git add` exit non-zero and skip the rest of an `&&` chain.
 - Commit subjects and PR titles must use a type from `ALLOWED_TYPES` in
   `scripts/conventional_commits.py` (there is no `build:`). CI does not re-run
