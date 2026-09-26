@@ -13,6 +13,36 @@ anything elsewhere in this file that assumes contributing back upstream is
 the default path. Every fork PR adds its entry to `docs/fork/CHANGES.md`,
 and every upstream sync re-runs the regression checks listed there.
 
+### Fork working notes
+
+Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
+
+- In a claude.ai cloud session the clone's `origin` is the fork
+  (`cameronsjo/herdr`), not `herdrdev/herdr`, so routine pushes and PRs go to
+  `origin` there. Add the canonical repo as a read-only `upstream` remote
+  (`git remote add upstream https://github.com/herdrdev/herdr.git`, then
+  `git remote set-url --push upstream DISABLED`); the never-write rule above
+  applies to `upstream` there.
+- Merge upstream-sync PRs with a merge commit, never squash or rebase, or the
+  next sync hits every conflict again.
+- Stage `docs/fork/CHANGES.md` with `git add -f`. The `/docs/*` ignore rule
+  makes a plain `git add` exit non-zero and skip the rest of an `&&` chain.
+- Commit subjects and PR titles must use a type from `ALLOWED_TYPES` in
+  `scripts/conventional_commits.py` (there is no `build:`). CI does not re-run
+  on a title edit, so get the title right before opening the PR.
+- Run `cargo fmt` after the last edit, tests included. CI's `just lint` fails
+  on formatting before any test runs.
+- `just test` (nextest) runs tests in separate processes, so it cannot catch
+  env-var races between tests. Run `just test-single-process` for those, and
+  route any test that changes env vars through `config::test_config_env_lock()`.
+- If `build.rs` fails with an HTTP or git error from a `build.zig.zon`, run
+  `just zig-prefetch` and rebuild. A plain retry fails the same way.
+- Temp-repo git helpers in `scripts/test_*.py` pass
+  `-c maintenance.auto=false -c gc.auto=0`, or background git maintenance
+  races the temp-directory cleanup.
+- CodeRabbit is capped at one review per hour on the fork. Do not wait on it
+  as a review gate, and never tick its paid on-demand review box.
+
 ## Scope and Audience
 
 These instructions are layered.
