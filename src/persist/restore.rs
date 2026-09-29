@@ -1739,6 +1739,7 @@ mod tests {
                 kind: crate::agent_resume::AgentSessionRefKind::Path,
                 value: test_session_path(session_file),
             }),
+            agent_resume: None,
             launch_argv: None,
         }
     }
@@ -1834,6 +1835,7 @@ mod tests {
                     agent_name: Some("reviewer".into()),
                     managed_agent_kind: Some("opencode".into()),
                     agent_session: None,
+                    agent_resume: None,
                     launch_argv: None,
                 },
             )]),
@@ -1889,6 +1891,7 @@ mod tests {
                     agent_name: Some("reviewer".into()),
                     managed_agent_kind: None,
                     agent_session: None,
+                    agent_resume: None,
                     launch_argv: None,
                 },
             )]),
@@ -1936,6 +1939,7 @@ mod tests {
                     agent_name: Some("reviewer".into()),
                     managed_agent_kind: Some("opencode".into()),
                     agent_session: None,
+                    agent_resume: None,
                     launch_argv: None,
                 },
             )]),
