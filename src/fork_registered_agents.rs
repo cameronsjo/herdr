@@ -193,9 +193,14 @@ fn check_text(
             "{field} must be at most {max_bytes} bytes"
         )));
     }
-    if value.chars().any(char::is_control) {
+    // Format characters (bidi overrides, zero-width) are refused with control
+    // characters: these values are drawn in the panel beside real agents.
+    if value
+        .chars()
+        .any(|ch| ch.is_control() || crate::label::is_format_char(ch))
+    {
         return Err(RegisterError::invalid(format!(
-            "{field} must not contain control characters"
+            "{field} must not contain control or format characters"
         )));
     }
     Ok(())
@@ -316,6 +321,9 @@ mod tests {
         let mut control = params("a");
         control.cwd = Some("/tmp/\u{1b}[2J".into());
         assert!(registry.register(control, now).is_err());
+        let mut bidi = params("a");
+        bidi.name = "evil\u{202e}gnp.exe".into();
+        assert!(registry.register(bidi, now).is_err());
         assert!(registry.list().is_empty());
     }
 
