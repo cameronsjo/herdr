@@ -133,6 +133,7 @@ impl ClientShellState {
             endpoint.agent_view_projection = None;
             endpoint.pending_agent_view_projection = None;
             endpoint.agent_view_projection_supported = false;
+            endpoint.registered_agents.clear();
         }
     }
 
