@@ -20,6 +20,9 @@ pub(crate) const DEFAULT_TTL_MS: u64 = 60_000;
 pub(crate) const MIN_TTL_MS: u64 = 1_000;
 pub(crate) const MAX_TTL_MS: u64 = 86_400_000;
 pub(crate) const MAX_ENTRIES: usize = 256;
+/// Budget for the whole registry as JSON. The endpoint control carries all of
+/// it in one frame, so it must stay well under `MAX_FRAME_SIZE`.
+const MAX_ENCODED_BYTES: usize = 512 * 1024;
 const MAX_ID_BYTES: usize = 128;
 const MAX_AGENT_BYTES: usize = 64;
 const MAX_CWD_BYTES: usize = 4096;
@@ -53,6 +56,7 @@ impl RegisterError {
 struct Entry {
     info: RegisteredAgentInfo,
     expires_at: Instant,
+    encoded_len: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -79,6 +83,19 @@ impl RegisteredAgents {
                 message: format!("at most {MAX_ENTRIES} agents can be registered"),
             });
         }
+        let encoded_len = serde_json::to_vec(&info).map_or(usize::MAX, |bytes| bytes.len());
+        let others = self
+            .entries
+            .iter()
+            .filter(|(existing, _)| **existing != key)
+            .map(|(_, entry)| entry.encoded_len)
+            .sum::<usize>();
+        if others.saturating_add(encoded_len) > MAX_ENCODED_BYTES {
+            return Err(RegisterError {
+                code: "registered_agent_limit",
+                message: format!("registered agents may total at most {MAX_ENCODED_BYTES} bytes"),
+            });
+        }
         let expires_at = now + Duration::from_millis(info.ttl_ms);
         let changed = self
             .entries
@@ -89,6 +106,7 @@ impl RegisteredAgents {
             Entry {
                 info: info.clone(),
                 expires_at,
+                encoded_len,
             },
         );
         if changed {
@@ -146,6 +164,11 @@ fn validate(params: AgentRegisterParams) -> Result<RegisteredAgentInfo, Register
         ttl_ms,
     } = params;
     check_text("source", &source, MAX_ID_BYTES, false)?;
+    // Clients key rows as `registered:<source>/<name>`, so a slash in the
+    // source would let two records share a row id.
+    if source.contains('/') {
+        return Err(RegisterError::invalid("source must not contain '/'"));
+    }
     check_text("name", &name, MAX_ID_BYTES, false)?;
     if let Some(agent) = &agent {
         check_text("agent", agent, MAX_AGENT_BYTES, false)?;
@@ -243,6 +266,34 @@ pub(crate) fn client_update(
     })
 }
 
+/// Decodes the `fork.registered-agents.v1` payload on the client.
+///
+/// A remote endpoint is not trusted to keep the server's rules, and a newer
+/// one may send a status this client does not know. An unknown status reads
+/// as `unknown`, a malformed record is dropped, the list is capped, and a
+/// payload that does not parse at all clears the list rather than leaving
+/// stale rows behind.
+pub(crate) fn decode_endpoint_agents(data: &str) -> Vec<RegisteredAgentInfo> {
+    let Ok(serde_json::Value::Object(mut payload)) = serde_json::from_str(data) else {
+        return Vec::new();
+    };
+    let Some(serde_json::Value::Array(agents)) = payload.remove("agents") else {
+        return Vec::new();
+    };
+    agents
+        .into_iter()
+        .filter_map(|mut agent| {
+            if let Some(status) = agent.get_mut("status") {
+                if serde_json::from_value::<AgentStatus>(status.clone()).is_err() {
+                    *status = serde_json::Value::String("unknown".into());
+                }
+            }
+            serde_json::from_value(agent).ok()
+        })
+        .take(MAX_ENTRIES)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +385,41 @@ mod tests {
     }
 
     #[test]
+    fn registry_size_is_budgeted() {
+        let mut registry = RegisteredAgents::default();
+        let now = Instant::now();
+        let fat = |name: &str| {
+            let mut params = params(name);
+            params.cwd = Some("x".repeat(MAX_CWD_BYTES));
+            params
+        };
+        let mut accepted = 0;
+        while registry.register(fat(&accepted.to_string()), now).is_ok() {
+            accepted += 1;
+        }
+        assert!(accepted < MAX_ENTRIES);
+        assert_eq!(
+            registry.register(fat("over"), now).unwrap_err().code,
+            "registered_agent_limit"
+        );
+        // Refreshing an existing record does not count it twice.
+        registry.register(fat("0"), now).unwrap();
+        let encoded = serde_json::to_vec(&EndpointRegisteredAgents {
+            agents: registry.list(),
+        })
+        .unwrap();
+        assert!(encoded.len() < crate::protocol::MAX_FRAME_SIZE);
+    }
+
+    #[test]
+    fn source_may_not_contain_a_slash() {
+        let mut registry = RegisteredAgents::default();
+        let mut slashed = params("c");
+        slashed.source = "a/b".into();
+        assert!(registry.register(slashed, Instant::now()).is_err());
+    }
+
+    #[test]
     fn registry_is_capped() {
         let mut registry = RegisteredAgents::default();
         let now = Instant::now();
@@ -371,6 +457,20 @@ mod tests {
         };
         let decoded: EndpointRegisteredAgents = serde_json::from_str(&data).unwrap();
         assert!(decoded.agents.is_empty());
+    }
+
+    #[test]
+    fn client_decode_tolerates_new_statuses_and_bad_records() {
+        let data = r#"{"agents":[
+            {"source":"s","name":"a","status":"thinking","ttl_ms":1000},
+            {"source":"s","name":"b","status":"idle","ttl_ms":1000},
+            {"name":"missing-source","status":"idle","ttl_ms":1000}
+        ]}"#;
+        let agents = decode_endpoint_agents(data);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].status, AgentStatus::Unknown);
+        assert_eq!(agents[1].status, AgentStatus::Idle);
+        assert!(decode_endpoint_agents("not json").is_empty());
     }
 
     #[test]

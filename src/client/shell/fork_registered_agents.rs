@@ -199,10 +199,14 @@ mod tests {
             panic!("expected decoded registered agents");
         };
         assert_eq!(agents, registry.list());
-        assert!(matches!(
-            crate::client::endpoint::decode_endpoint_control(&kind, "not json").unwrap(),
-            crate::client::endpoint::EndpointControlMessage::Ignored
-        ));
+        // A payload that no longer parses clears the list instead of keeping
+        // rows the server can no longer vouch for.
+        let crate::client::endpoint::EndpointControlMessage::RegisteredAgents(agents) =
+            crate::client::endpoint::decode_endpoint_control(&kind, "not json").unwrap()
+        else {
+            panic!("expected decoded registered agents");
+        };
+        assert!(agents.is_empty());
     }
 
     #[test]

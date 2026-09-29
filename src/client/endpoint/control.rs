@@ -29,11 +29,9 @@ pub(crate) fn decode_endpoint_control(
             .unwrap_or(EndpointControlMessage::Ignored));
     }
     if kind == crate::fork_registered_agents::ENDPOINT_KIND {
-        return Ok(
-            serde_json::from_str::<crate::fork_registered_agents::EndpointRegisteredAgents>(data)
-                .map(|projection| EndpointControlMessage::RegisteredAgents(projection.agents))
-                .unwrap_or(EndpointControlMessage::Ignored),
-        );
+        return Ok(EndpointControlMessage::RegisteredAgents(
+            crate::fork_registered_agents::decode_endpoint_agents(data),
+        ));
     }
     if kind == crate::protocol::endpoint::AGENT_VIEW_PROJECTION_KIND {
         let Ok(projection): Result<crate::protocol::endpoint::EndpointAgentViewProjection, _> =

@@ -161,6 +161,9 @@ impl ClientShellState {
 
     pub(crate) fn mark_endpoint_disconnected(&mut self, endpoint_id: &ClientEndpointId) {
         self.set_endpoint_status(endpoint_id, ClientEndpointStatus::Reconnecting);
+        // Fork: a reconnect resends the registry only when it is non-empty,
+        // so rows from the old connection must not outlive it.
+        self.set_endpoint_registered_agents(endpoint_id, Vec::new());
         if endpoint_id == &self.active_endpoint_id {
             let pending = self.pending_requests.keys().cloned().collect::<Vec<_>>();
             for request_id in pending {

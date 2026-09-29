@@ -2039,8 +2039,16 @@ async fn run_client_loop(
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::RegisteredAgents(agents)) => {
-                                if let Some(shell) = state.shell.as_mut() {
+                                // No snapshot follows this control, so the active
+                                // endpoint redraws here or the rows go stale.
+                                let (cols, rows) = state.reported_size;
+                                let active = write_stream.active_id() == &endpoint_id;
+                                let frame = state.shell.as_mut().and_then(|shell| {
                                     shell.set_endpoint_registered_agents(&endpoint_id, agents);
+                                    active.then(|| shell.compose(cols, rows)).flatten()
+                                });
+                                if let Some(frame) = frame {
+                                    state.present_frozen_chrome(frame);
                                 }
                                 continue;
                             }

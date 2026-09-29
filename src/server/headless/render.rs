@@ -662,13 +662,22 @@ impl HeadlessServer {
                     &self.app.state.registered_agents,
                     &mut client.shell_registered_agents_revision,
                 ) {
-                    let sent = Self::frame_server_message(&message)
-                        .ok()
-                        .zip(client.writer.as_ref())
-                        .is_some_and(|(framed, writer)| writer.control.send(framed).is_ok());
-                    if !sent {
-                        broken_clients.push(client_id);
-                        continue;
+                    // An optional control never costs a client its connection:
+                    // a message too large to frame is skipped, not fatal.
+                    match Self::frame_server_message(&message) {
+                        Ok(framed) => {
+                            if client
+                                .writer
+                                .as_ref()
+                                .is_none_or(|writer| writer.control.send(framed).is_err())
+                            {
+                                broken_clients.push(client_id);
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            warn!(client_id, err = %err, "skipped registered agents control");
+                        }
                     }
                 }
                 shell_projection_revision = client.shell_projection_revision;
