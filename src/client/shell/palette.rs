@@ -527,7 +527,7 @@ pub(crate) fn palette_commands(
     snapshot: &ClientShellSnapshot,
 ) -> Vec<PaletteCommand> {
     let mut commands: Vec<PaletteCommand> =
-        crate::input::keybind_help_groups(&keybinds.keybinds, keybinds.prefix)
+        crate::input::keybind_help_groups(&keybinds.keybinds, &keybinds.prefix)
             .into_iter()
             .flat_map(|(_, entries)| entries)
             .filter_map(|entry| {

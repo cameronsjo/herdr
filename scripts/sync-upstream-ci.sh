@@ -88,7 +88,7 @@ echo "==> merged upstream through $upstream_sha"
 # Upstream changes under these paths execute on push to master, and a clean
 # merge gives the reviewer no signal that they moved. Surface them by name so a
 # sync that touches CI never reads like ordinary source churn.
-sensitive=$(git diff --name-only HEAD^1 HEAD -- '.github/**' 'scripts/**' 'build.rs' || true)
+sensitive=$(git diff --name-only HEAD^1 HEAD -- '.github/**' 'scripts/**' 'build.rs' 'crates/*/build.rs' || true)
 if [[ -n $sensitive ]]; then
   echo "==> this sync changes CI or build tooling:"
   echo "${sensitive//$'\n'/$'\n    '}" | sed '1s/^/    /'

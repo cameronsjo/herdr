@@ -11,6 +11,7 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
+- (pending) PR — merge upstream through `d5680d8` (27 commits); conflict record below
 - `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
 - `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
 - `e563360d` PR [#57](https://github.com/cameronsjo/herdr/pull/57) (2026-09-08) — merge upstream through `9e01168b`
@@ -24,6 +25,30 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-09-29 sync: conflict resolutions
+
+Six files conflicted; two were the fork-owned `README.md` and
+`.github/workflows/release.yml`, kept as the fork's. The rest:
+
+- **libghostty-vt build** (`build.rs` → `crates/ghostty-vt/build.rs`):
+  upstream moved the zig build into a `ghostty-vt` workspace crate that links
+  from `OUT_DIR`. The fork's macOS `libtool` realign now writes the aligned
+  archive straight into that crate's static-only link directory; the root
+  `build.rs` is upstream's. `scripts/docker-check.sh` now touches the crate's
+  build script to force the warm-up zig build.
+- **API accept loop** (`src/api/server.rs`): upstream fixed the same bug as
+  fork #71 with a fixed 50 ms `run_accept_loop`. The fork's `AcceptBackoff` /
+  `SpawnDrops` loop is kept and upstream's function, constant and its two
+  tests are dropped. **Collision:** any upstream edit to the accept loop.
+- **Named terminal lookup** (`src/app/terminal_targets.rs`): upstream's keyed
+  `terminals.get(id)` combined with the fork's live-name gate, and applied to
+  the fork's stale-name path too.
+- **Multiple prefix keys** (`src/input/keybind_help.rs`,
+  `src/client/shell/palette.rs`): `keybind_help_groups` takes a prefix slice
+  now; the palette passes `&keybinds.prefix` and upstream's
+  `help_lists_every_configured_prefix` test reads the fork's entry struct.
+- **Headless tests** (`src/server/headless/tests/mod.rs`): both modules kept.
 
 ### 2026-09-25 sync: conflict resolutions (`38b3ac7`)
 
