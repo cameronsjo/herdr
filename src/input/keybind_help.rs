@@ -109,13 +109,16 @@ fn indexed_range_prefix(bindings: &[IndexedKeybind]) -> Option<&str> {
 
 pub(crate) fn keybind_help_groups(
     keybinds: &Keybinds,
-    prefix: (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    prefixes: &[crate::config::KeyCombo],
 ) -> Vec<KeybindHelpGroup> {
     let mut groups = vec![
         (
             "global",
             vec![
-                entry(Some(crate::config::format_key_combo(prefix)), "prefix mode"),
+                entry(
+                    Some(crate::config::format_prefix_combos(prefixes)),
+                    "prefix mode",
+                ),
                 entry(binding_label(&keybinds.help), "keybinds"),
                 action_entry(
                     binding_label(&keybinds.settings),
@@ -588,7 +591,7 @@ mod tests {
     #[test]
     fn every_help_action_has_a_stable_palette_id_except_the_palette_itself() {
         let keybinds = Keybinds::default();
-        for entry in keybind_help_groups(&keybinds, (KeyCode::Char(' '), KeyModifiers::CONTROL))
+        for entry in keybind_help_groups(&keybinds, &[(KeyCode::Char(' '), KeyModifiers::CONTROL)])
             .into_iter()
             .flat_map(|(_, entries)| entries)
         {
@@ -600,5 +603,19 @@ mod tests {
                 "help action {action:?} needs a stable palette id"
             );
         }
+    }
+
+    #[test]
+    fn help_lists_every_configured_prefix() {
+        let groups = keybind_help_groups(
+            &Keybinds::default(),
+            &[
+                (KeyCode::Char(' '), KeyModifiers::CONTROL),
+                (KeyCode::Char('s'), KeyModifiers::CONTROL),
+            ],
+        );
+        let global = &groups[0].1;
+        assert_eq!(global[0].key.as_deref(), Some("ctrl+space / ctrl+s"));
+        assert_eq!(global[0].label, "prefix mode");
     }
 }
