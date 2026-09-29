@@ -312,6 +312,7 @@ pub(super) fn render_agent_panel(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
+    registered: &[crate::api::schema::RegisteredAgentInfo],
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
@@ -326,7 +327,10 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let mut rows = agent_rows(snapshot, config, None);
+    rows.extend(super::fork_registered_agents::registered_agent_rows(
+        snapshot, registered, config,
+    ));
     render_agent_list(
         buffer,
         area,
@@ -341,7 +345,9 @@ pub(super) fn render_agent_panel(
         AgentRow::row_lines,
         |row, next| row.gap_after(next, config.agents.row_gap),
         |buffer, rect, row, hits| {
-            hits.agents.push((rect, row.pane_id.clone()));
+            if !super::fork_registered_agents::is_registered_row(&row.pane_id) {
+                hits.agents.push((rect, row.pane_id.clone()));
+            }
             render_agent_row(buffer, rect, row, config);
         },
     );

@@ -1353,6 +1353,64 @@
           ],
           "type": "object"
         },
+        "AgentRegisterParams": {
+          "description": "`agent.register` params. Registering an existing `(source, name)` again is\nthe heartbeat: it replaces the record and restarts its TTL.",
+          "properties": {
+            "agent": {
+              "description": "Agent kind, such as `claude`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "description": "Unique within `source`.",
+              "type": "string"
+            },
+            "source": {
+              "description": "Namespace of the reporter, such as `cadence.herdr-bridge`.",
+              "type": "string"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/request/$defs/AgentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Defaults to `unknown`."
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Free-form labels, drawn by the agents panel's token formats.",
+              "type": "object"
+            },
+            "ttl_ms": {
+              "description": "Milliseconds until the record expires without another register.\nDefaults to 60000.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "name"
+          ],
+          "type": "object"
+        },
         "AgentRenameParams": {
           "properties": {
             "name": {
@@ -1455,6 +1513,22 @@
           "required": [
             "target",
             "text"
+          ],
+          "type": "object"
+        },
+        "AgentUnregisterParams": {
+          "description": "`agent.unregister` params.",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "name"
           ],
           "type": "object"
         },
@@ -5532,6 +5606,54 @@
         {
           "properties": {
             "method": {
+              "const": "agent.register",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentRegisterParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.unregister",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentUnregisterParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.registered",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "agent.get",
               "type": "string"
             },
@@ -9507,6 +9629,50 @@
           ],
           "type": "string"
         },
+        "RegisteredAgentInfo": {
+          "description": "One registered agent, as `agent.register` and `agent.registered` return it.",
+          "properties": {
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/schemas/success_response/$defs/AgentStatus"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "ttl_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "source",
+            "name",
+            "status",
+            "ttl_ms"
+          ],
+          "type": "object"
+        },
         "ResponseResult": {
           "oneOf": [
             {
@@ -9894,6 +10060,57 @@
               "required": [
                 "type",
                 "agents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "registered_agent": {
+                  "$ref": "#/schemas/success_response/$defs/RegisteredAgentInfo"
+                },
+                "type": {
+                  "const": "registered_agent",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "registered_agent"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "registered_agents": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/RegisteredAgentInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "registered_agent_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "registered_agents"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "removed": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "registered_agent_removed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "removed"
               ],
               "type": "object"
             },

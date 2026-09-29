@@ -658,6 +658,19 @@ impl HeadlessServer {
                     client.shell_agent_completions = Some(completions);
                     client.shell_agent_view = agent_view;
                 }
+                if let Some(message) = crate::fork_registered_agents::client_update(
+                    &self.app.state.registered_agents,
+                    &mut client.shell_registered_agents_revision,
+                ) {
+                    let sent = Self::frame_server_message(&message)
+                        .ok()
+                        .zip(client.writer.as_ref())
+                        .is_some_and(|(framed, writer)| writer.control.send(framed).is_ok());
+                    if !sent {
+                        broken_clients.push(client_id);
+                        continue;
+                    }
+                }
                 shell_projection_revision = client.shell_projection_revision;
                 if !client.shell_surface_active {
                     client.clear_deferred_render();

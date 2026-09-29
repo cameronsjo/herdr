@@ -23,6 +23,7 @@ mod config;
 mod copy_mode;
 mod detect;
 mod events;
+mod fork_registered_agents;
 mod ghostty;
 mod handoff_runtime;
 mod input;

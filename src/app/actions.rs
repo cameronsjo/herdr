@@ -297,6 +297,7 @@ impl AppState {
                     .iter()
                     .filter_map(|workspace| workspace.metadata_tokens.next_expiry()),
             )
+            .chain(self.registered_agents.next_expiry())
             .min()
     }
 
