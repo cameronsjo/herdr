@@ -221,6 +221,12 @@ pub(crate) fn client_update(
     if *sent_revision == Some(registry.revision()) {
         return None;
     }
+    // A client that has never seen a registered agent needs no empty list, so
+    // a server with none sends nothing and old message sequences stay intact.
+    if sent_revision.is_none() && registry.entries.is_empty() {
+        *sent_revision = Some(registry.revision());
+        return None;
+    }
     let data = match serde_json::to_string(&EndpointRegisteredAgents {
         agents: registry.list(),
     }) {
@@ -345,7 +351,7 @@ mod tests {
     fn client_update_sends_once_per_revision() {
         let mut registry = RegisteredAgents::default();
         let mut sent = None;
-        assert!(client_update(&registry, &mut sent).is_some());
+        assert!(client_update(&registry, &mut sent).is_none());
         assert!(client_update(&registry, &mut sent).is_none());
         registry.register(params("a"), Instant::now()).unwrap();
         let Some(crate::protocol::ServerMessage::EndpointControl { kind, data }) =
@@ -356,5 +362,21 @@ mod tests {
         assert_eq!(kind, ENDPOINT_KIND);
         let decoded: EndpointRegisteredAgents = serde_json::from_str(&data).unwrap();
         assert_eq!(decoded.agents, registry.list());
+        assert!(client_update(&registry, &mut sent).is_none());
+        assert!(registry.unregister("test", "a"));
+        let Some(crate::protocol::ServerMessage::EndpointControl { data, .. }) =
+            client_update(&registry, &mut sent)
+        else {
+            panic!("a client that saw agents must hear the list emptied");
+        };
+        let decoded: EndpointRegisteredAgents = serde_json::from_str(&data).unwrap();
+        assert!(decoded.agents.is_empty());
+    }
+
+    #[test]
+    fn a_new_client_gets_the_current_list_when_agents_exist() {
+        let mut registry = RegisteredAgents::default();
+        registry.register(params("a"), Instant::now()).unwrap();
+        assert!(client_update(&registry, &mut None).is_some());
     }
 }
