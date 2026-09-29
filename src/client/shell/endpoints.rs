@@ -22,6 +22,8 @@ pub(crate) struct ClientShellEndpoint {
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
+    /// Fork: agents this endpoint reports as running outside any pane.
+    pub(crate) registered_agents: Vec<crate::api::schema::RegisteredAgentInfo>,
 }
 
 pub(super) struct MachineHit {
@@ -83,6 +85,9 @@ impl ClientShellState {
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                registered_agents: previous
+                    .map(|endpoint| endpoint.registered_agents.clone())
+                    .unwrap_or_default(),
             });
         }
 
@@ -128,6 +133,7 @@ impl ClientShellState {
             endpoint.agent_view_projection = None;
             endpoint.pending_agent_view_projection = None;
             endpoint.agent_view_projection_supported = false;
+            endpoint.registered_agents.clear();
         }
     }
 
@@ -156,6 +162,9 @@ impl ClientShellState {
 
     pub(crate) fn mark_endpoint_disconnected(&mut self, endpoint_id: &ClientEndpointId) {
         self.set_endpoint_status(endpoint_id, ClientEndpointStatus::Reconnecting);
+        // Fork: a reconnect resends the registry only when it is non-empty,
+        // so rows from the old connection must not outlive it.
+        self.set_endpoint_registered_agents(endpoint_id, Vec::new());
         if endpoint_id == &self.active_endpoint_id {
             let pending = self.pending_requests.keys().cloned().collect::<Vec<_>>();
             for request_id in pending {
@@ -315,6 +324,20 @@ impl ClientShellState {
             .snapshot
             .as_deref()
             .map(|snapshot| (snapshot.boot_id.as_str(), snapshot.revision))
+    }
+
+    pub(crate) fn set_endpoint_registered_agents(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        agents: Vec<crate::api::schema::RegisteredAgentInfo>,
+    ) {
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        {
+            endpoint.registered_agents = agents;
+        }
     }
 
     pub(crate) fn set_endpoint_agent_completions(
@@ -737,5 +760,6 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
         methods: None,
+        registered_agents: Vec::new(),
     }
 }

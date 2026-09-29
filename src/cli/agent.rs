@@ -29,6 +29,9 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
         "explain" => agent_explain(&args[1..]),
+        "register" => super::fork_registered_agents::agent_register(&args[1..]),
+        "unregister" => super::fork_registered_agents::agent_unregister(&args[1..]),
+        "registered" => super::fork_registered_agents::agent_registered(&args[1..]),
         "help" | "--help" | "-h" => {
             print_agent_help();
             Ok(0)
@@ -965,6 +968,9 @@ fn print_agent_help() {
     eprintln!(
         "  herdr agent explain --file PATH --agent LABEL [--json|--format text|json] [--verbose]"
     );
+    eprintln!("  {}", super::fork_registered_agents::REGISTER_USAGE);
+    eprintln!("  {}", super::fork_registered_agents::UNREGISTER_USAGE);
+    eprintln!("  {}", super::fork_registered_agents::REGISTERED_USAGE);
     eprintln!("  targets accept unique agent names and pane ids that currently host agents");
     eprintln!("  kinds: {}", super::spec::agent_kind_values().join("|"));
 }

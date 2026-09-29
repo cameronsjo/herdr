@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 mod agent_view;
 mod agents;
 mod env;
+mod fork_registered_agents;
 mod integrations;
 mod layouts;
 mod panes;
@@ -1095,6 +1096,13 @@ impl App {
             }
             Method::TabClose(target) => return self.handle_tab_close(request.id, target),
             Method::AgentList(_) => return self.handle_agent_list(request.id),
+            Method::AgentRegister(params) => {
+                return self.handle_agent_register(request.id, params);
+            }
+            Method::AgentUnregister(params) => {
+                return self.handle_agent_unregister(request.id, params);
+            }
+            Method::AgentRegistered(_) => return self.handle_agent_registered(request.id),
             Method::AgentGet(target) => return self.handle_agent_get(request.id, target),
             Method::AgentFocus(target) => return self.handle_agent_focus(request.id, target),
             Method::AgentRename(params) => return self.handle_agent_rename(request.id, params),

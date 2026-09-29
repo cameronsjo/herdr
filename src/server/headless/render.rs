@@ -658,6 +658,28 @@ impl HeadlessServer {
                     client.shell_agent_completions = Some(completions);
                     client.shell_agent_view = agent_view;
                 }
+                if let Some(message) = crate::fork_registered_agents::client_update(
+                    &self.app.state.registered_agents,
+                    &mut client.shell_registered_agents_revision,
+                ) {
+                    // An optional control never costs a client its connection:
+                    // a message too large to frame is skipped, not fatal.
+                    match Self::frame_server_message(&message) {
+                        Ok(framed) => {
+                            if client
+                                .writer
+                                .as_ref()
+                                .is_none_or(|writer| writer.control.send(framed).is_err())
+                            {
+                                broken_clients.push(client_id);
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            warn!(client_id, err = %err, "skipped registered agents control");
+                        }
+                    }
+                }
                 shell_projection_revision = client.shell_projection_revision;
                 if !client.shell_surface_active {
                     client.clear_deferred_render();

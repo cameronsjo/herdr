@@ -16,6 +16,7 @@ mod endpoint_navigation;
 mod endpoint_notices;
 mod endpoint_sidebar;
 mod endpoints;
+mod fork_registered_agents;
 mod navigator_moves;
 pub(super) use endpoints::*;
 mod global_menu;

@@ -10,6 +10,8 @@ pub(crate) enum EndpointControlMessage {
     HealthPong,
     AgentViewProjection(DecodedAgentViewProjection),
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
+    /// Fork: agents registered outside any pane on this endpoint.
+    RegisteredAgents(Vec<crate::api::schema::RegisteredAgentInfo>),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
     Ignored,
 }
@@ -25,6 +27,11 @@ pub(crate) fn decode_endpoint_control(
         return Ok(serde_json::from_str(data)
             .map(EndpointControlMessage::AgentCompletions)
             .unwrap_or(EndpointControlMessage::Ignored));
+    }
+    if kind == crate::fork_registered_agents::ENDPOINT_KIND {
+        return Ok(EndpointControlMessage::RegisteredAgents(
+            crate::fork_registered_agents::decode_endpoint_agents(data),
+        ));
     }
     if kind == crate::protocol::endpoint::AGENT_VIEW_PROJECTION_KIND {
         let Ok(projection): Result<crate::protocol::endpoint::EndpointAgentViewProjection, _> =

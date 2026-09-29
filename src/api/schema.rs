@@ -4,6 +4,7 @@ pub mod agents;
 pub mod commands;
 pub mod common;
 pub mod events;
+pub mod fork_registered_agents;
 pub mod integrations;
 pub mod panes;
 pub mod plugins;
@@ -18,6 +19,7 @@ pub use agents::*;
 pub use commands::*;
 pub use common::*;
 pub use events::*;
+pub use fork_registered_agents::*;
 pub use integrations::*;
 pub use panes::*;
 pub use plugins::*;
@@ -123,6 +125,12 @@ pub enum Method {
     TabClose(TabTarget),
     #[serde(rename = "agent.list")]
     AgentList(EmptyParams),
+    #[serde(rename = "agent.register")]
+    AgentRegister(AgentRegisterParams),
+    #[serde(rename = "agent.unregister")]
+    AgentUnregister(AgentUnregisterParams),
+    #[serde(rename = "agent.registered")]
+    AgentRegistered(EmptyParams),
     #[serde(rename = "agent.get")]
     AgentGet(AgentTarget),
     #[serde(rename = "agent.read")]

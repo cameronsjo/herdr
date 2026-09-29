@@ -369,6 +369,26 @@ fn agent_command() -> Command {
     Command::new("agent")
         .about("Control and inspect agent panes")
         .subcommand(Command::new("list").about("List agents"))
+        .subcommand(
+            Command::new("register")
+                .about("Register or refresh an agent that runs outside any pane")
+                .arg(required("name", "NAME"))
+                .arg(option("source", "ID"))
+                .arg(option("agent", "LABEL"))
+                .arg(option("status", "STATUS").value_parser(["idle", "working", "blocked", "done", "unknown"]))
+                .arg(path_option("cwd", "PATH"))
+                .arg(repeatable_option("token", "KEY=VALUE"))
+                .arg(option("ttl-ms", "N")),
+        )
+        .subcommand(
+            Command::new("unregister")
+                .about("Remove an agent registered outside any pane")
+                .arg(required("name", "NAME"))
+                .arg(option("source", "ID")),
+        )
+        .subcommand(
+            Command::new("registered").about("List agents registered outside any pane"),
+        )
         .subcommand(id_command("get", "target", "Show an agent"))
         .subcommand(
             Command::new("read")

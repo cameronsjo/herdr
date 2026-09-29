@@ -1296,6 +1296,9 @@ async fn run_client_loop(
                         crate::protocol::endpoint::AGENT_VIEW_PROJECTION_CAPABILITY,
                     );
                     let frame = state.shell.as_mut().and_then(|shell| {
+                        // A new connection starts with no registered agents; the
+                        // server sends its list only when it has one.
+                        shell.set_endpoint_registered_agents(&endpoint_id, Vec::new());
                         shell.set_endpoint_methods_for(&endpoint_id, Some(negotiation.methods()));
                         shell.set_endpoint_agent_view_projection_supported(
                             &endpoint_id,
@@ -2035,6 +2038,20 @@ async fn run_client_loop(
                                         generation,
                                         projection,
                                     );
+                                }
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::RegisteredAgents(agents)) => {
+                                // No snapshot follows this control, so the active
+                                // endpoint redraws here or the rows go stale.
+                                let (cols, rows) = state.reported_size;
+                                let active = write_stream.active_id() == &endpoint_id;
+                                let frame = state.shell.as_mut().and_then(|shell| {
+                                    shell.set_endpoint_registered_agents(&endpoint_id, agents);
+                                    active.then(|| shell.compose(cols, rows)).flatten()
+                                });
+                                if let Some(frame) = frame {
+                                    state.present_frozen_chrome(frame);
                                 }
                                 continue;
                             }

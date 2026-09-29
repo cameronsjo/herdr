@@ -117,6 +117,15 @@ pub enum ResponseResult {
     AgentList {
         agents: Vec<AgentInfo>,
     },
+    RegisteredAgent {
+        registered_agent: super::fork_registered_agents::RegisteredAgentInfo,
+    },
+    RegisteredAgentList {
+        registered_agents: Vec<super::fork_registered_agents::RegisteredAgentInfo>,
+    },
+    RegisteredAgentRemoved {
+        removed: bool,
+    },
     AgentView {
         active: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]

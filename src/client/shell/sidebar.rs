@@ -425,10 +425,16 @@ pub(crate) fn render_sidebar(
         }
     }
 
+    let registered_agents = state
+        .endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
+        .map_or(&[][..], |endpoint| endpoint.registered_agents.as_slice());
     super::render_agent_panel(
         buffer,
         detail_area,
         snapshot,
+        registered_agents,
         config,
         state.agent_scroll,
         hits,
