@@ -63,7 +63,8 @@ Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
   hook that reports `idle` and requires a transcript only on `SessionStart`.
   The fork's richer hook (working/blocked/idle/metadata and titles) is kept
   with both of those added. `CODEX_INTEGRATION_VERSION` goes to 10 so
-  installs from either side's v9 reinstall. **Collision:** the codex hook
+  installs from either side's v9 reinstall; `codex_v2_integration_status_is_outdated`
+  now reads the constant instead of a literal 9. **Collision:** the codex hook
   scripts and `CODEX_STATE_HOOK_EVENTS`.
 - **Server probe** (`src/server/autodetect.rs`): upstream made
   `is_server_listening_at` return `io::Result<bool>`. It stays `pub(crate)`
