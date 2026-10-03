@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `d5680d8` (27 commits); conflict record below
+- (pending) PR — merge upstream through `5da0a01` (29 commits); conflict record below
+- `3f910b3` PR [#90](https://github.com/cameronsjo/herdr/pull/90) (2026-09-29) — merge upstream through `d5680d8` (27 commits); conflict record below
 - `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
 - `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
 - `e563360d` PR [#57](https://github.com/cameronsjo/herdr/pull/57) (2026-09-08) — merge upstream through `9e01168b`
@@ -25,6 +26,63 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-10-03 sync: conflict resolutions
+
+Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
+
+- **Worktree groups** (`src/client/shell/{sidebar,context_menu,overlay_input,mouse}.rs`):
+  upstream fixed the same "repository parent counted as a worktree child"
+  bug as fork #64 with its own grouping code, plus a `close_group` flag on
+  workspace close. The fork's `group_parent_index` / `group_child_indices`
+  grouping is kept. Upstream's `workspace_close_is_group` now answers
+  through the fork's `parent_group_key_ref`, so its context-menu label
+  ("Close group" vs "Close") and close requests use the fork's scope. An
+  explicit single close (`close_group: Some(false)`) closes one space. The
+  fork's merge confirmation and upstream's `request_workspace_close` both
+  stay. Dragging a group onto one of its own members is now a no-op
+  (upstream's guard on the fork's member list). **Collision:**
+  `workspace_entries`, `displayed_workspace_status`, `open_close_confirmation`.
+  Server side, `workspace_group_close_indices` keeps the fork's scope (first
+  non-linked space plus its linked worktrees), so upstream's
+  `duplicate_repo_parents_close_independently_unless_group_is_explicit` is
+  rewritten to the fork's outcomes: the duplicate always closes alone, a
+  group close on the parent leaves the duplicate open, and an implicit close
+  of the parent is still refused. Upstream's two client tests from the same
+  change (`duplicate_repo_parents_remain_visible_and_focusable_when_collapsed`,
+  `duplicate_repo_parent_drag_does_not_target_its_own_move_block`) are
+  adapted the same way: the duplicate has no group toggle, Close is found by
+  action because the fork's menus carry move items, a menu whose target
+  changes group shape closes instead of acting, and dragging the parent
+  before the duplicate moves the parent alone. The duplicate-root section
+  upstream added to `workspace_drag_moves_parent_worktree_as_one_block_and_rejects_child`
+  now expects the duplicate to move alone (`["ws_duplicate"]`), not as part of
+  the parent's block.
+- **Codex hooks** (`src/integration/{mod,targets,tests}.rs`,
+  `assets/codex/herdr-agent-state.{sh,ps1}`): upstream added an `Interrupt`
+  hook that reports `idle` and requires a transcript only on `SessionStart`.
+  The fork's richer hook (working/blocked/idle/metadata and titles) is kept
+  with both of those added. `CODEX_INTEGRATION_VERSION` goes to 10 so
+  installs from either side's v9 reinstall; `codex_v2_integration_status_is_outdated`
+  now reads the constant instead of a literal 9. **Collision:** the codex hook
+  scripts and `CODEX_STATE_HOOK_EVENTS`.
+- **Server probe** (`src/server/autodetect.rs`): upstream made
+  `is_server_listening_at` return `io::Result<bool>`. It stays `pub(crate)`
+  for the fork's `server_not_running` split (`src/cli.rs`,
+  `src/cli/status.rs`), which treats an error as "not listening" and logs it,
+  as before.
+- **Env locks** (`src/session.rs`, `src/update.rs`): upstream's new tests
+  kept; `update.rs`'s private `env_lock` routed back through
+  `test_config_env_lock`.
+- **Flaky upstream test** (`src/app/custom_commands.rs`):
+  `shell_command_invocation_executes_endpoint_owned_definition` polled for
+  the file to exist, but the shell's `>` creates it empty before `printf`
+  writes, so CI read `""`. It now waits for the content.
+- **Docs** (`docs/next/website/.../{agents,integrations}.mdx`): upstream's
+  rewritten agent table and status text, plus the fork's Codex hybrid
+  paragraph. `skills/herdr/SKILL.md` keeps the fork's split skill; upstream's
+  0.9.3 skill text (machine forwarding, agent start guidance) is **not yet**
+  ported into the fork's `references/`.
 
 ### 2026-09-29 sync: conflict resolutions
 

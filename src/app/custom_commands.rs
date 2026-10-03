@@ -369,9 +369,9 @@ impl App {
             return Err(std::io::Error::other("no active workspace"));
         };
         let previous_focus_target = self.state.current_pane_focus_target();
-        let (rows, cols) = self.state.estimate_pane_size();
-        let new_rows = rows.max(4);
-        let new_cols = cols.max(10);
+        let (rows, cols) = self
+            .state
+            .new_pane_size(crate::ui::NewPanePlacement::ZoomedOverlay);
         let (env, _) = self.custom_command_env();
 
         let ws = self
@@ -393,8 +393,8 @@ impl App {
         });
         let new_pane = ws.split_focused_command(
             Direction::Horizontal,
-            new_rows,
-            new_cols,
+            rows,
+            cols,
             cwd,
             command,
             env,
@@ -448,9 +448,9 @@ impl App {
             return Err(std::io::Error::other("no active workspace"));
         };
         let previous_focus_target = self.state.current_pane_focus_target();
-        let (rows, cols) = self.state.estimate_pane_size();
-        let new_rows = rows.max(4);
-        let new_cols = cols.max(10);
+        let (rows, cols) = self
+            .state
+            .new_pane_size(crate::ui::NewPanePlacement::ZoomedOverlay);
 
         let ws = self
             .state
@@ -480,8 +480,8 @@ impl App {
             let result = ws.split_pane_argv_command(
                 previous_focus,
                 Direction::Horizontal,
-                new_rows,
-                new_cols,
+                rows,
+                cols,
                 cwd,
                 argv,
                 extra_env,
@@ -759,7 +759,11 @@ mod tests {
         let success: crate::api::schema::SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(success.result, crate::api::schema::ResponseResult::Ok {});
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while !path.exists() && std::time::Instant::now() < deadline {
+        // The shell's `>` creates the file before `printf` writes to it, so
+        // wait for the content rather than the path.
+        while std::fs::read_to_string(&path).ok().as_deref() != Some("invoked")
+            && std::time::Instant::now() < deadline
+        {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "invoked");

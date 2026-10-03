@@ -203,7 +203,12 @@ fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
             let socket_path = client.socket_path();
             let client_socket =
                 crate::server::socket_paths::derive_client_socket_from_api_socket(&socket_path);
-            if crate::server::autodetect::is_server_listening_at(&client_socket) {
+            if crate::server::autodetect::is_server_listening_at(&client_socket).unwrap_or_else(
+                |err| {
+                    tracing::warn!(err = %err, "unexpected error checking server socket");
+                    false
+                },
+            ) {
                 Ok(ServerRuntimeStatus::NotAccepting)
             } else {
                 Ok(ServerRuntimeStatus::NotRunning)

@@ -677,7 +677,11 @@ impl App {
         if self.state.workspaces.get(index).is_none() {
             return workspace_not_found(id, &params.workspace_id);
         }
-        let close_indices = self.state.workspace_close_indices(index);
+        let close_indices = if params.close_group {
+            self.state.workspace_group_close_indices(index)
+        } else {
+            self.state.workspace_close_indices(index)
+        };
         if close_indices.len() >= 2 && !params.close_group {
             return encode_error(
                 id,
@@ -695,7 +699,7 @@ impl App {
             })
             .collect::<Vec<_>>();
         self.state.selected = index;
-        self.state.close_selected_workspace();
+        self.state.close_workspaces(close_indices);
         self.shutdown_detached_terminal_runtimes();
         for (workspace_id, workspace) in closed_workspaces {
             self.emit_event(EventEnvelope {
@@ -1170,6 +1174,105 @@ mod tests {
                     .collect::<Vec<_>>(),
                 workspace_ids
             );
+        }
+    }
+
+    #[test]
+    fn duplicate_repo_parents_close_independently_unless_group_is_explicit() {
+        // Fork semantics (#64): the group is the FIRST non-linked space plus its
+        // linked worktrees. A duplicate space on the same checkout (index 3) is
+        // nobody's member, so it always closes alone, and an explicit group close
+        // on the parent (index 1) never takes it along. The parent still owns its
+        // linked worktree, so an implicit close of it is refused, as for any group.
+        for method in ["workspace.close", "pane.close", "tab.close", "group"] {
+            for target_index in [1, 3] {
+                let mut app = app_with_worktree_group();
+                let parent = app.state.workspaces.remove(0);
+                let linked = app.state.workspaces.remove(0);
+                let mut duplicate = Workspace::test_new("duplicate");
+                duplicate.worktree_space = parent.worktree_space.clone();
+                app.state = crate::app::state::AppState::test_with_adversarial_identity_state();
+                let focused_id = app.state.workspaces[0].id.clone();
+                app.state.workspaces.extend([parent, linked, duplicate]);
+                app.state.ensure_test_terminals();
+                app.state.assert_invariants_for_test();
+                let target_id = app.public_workspace_id(target_index);
+                let target_pane = app.state.workspaces[target_index].tabs[0].root_pane;
+                let target_terminal = app
+                    .state
+                    .terminal_id_for_pane(target_index, target_pane)
+                    .unwrap();
+                let refusal = match (target_index, method) {
+                    (1, "workspace.close") => Some("workspace_group_close_required"),
+                    (1, "pane.close" | "tab.close") => Some("confirmation_required"),
+                    _ => None,
+                };
+                let closed_indices = match (target_index, method, refusal) {
+                    (_, _, Some(_)) => vec![],
+                    (1, "group", None) => vec![1, 2],
+                    _ => vec![target_index],
+                };
+                let closed_ids = closed_indices
+                    .iter()
+                    .map(|index| app.public_workspace_id(*index))
+                    .collect::<Vec<_>>();
+                let surviving_ids = app
+                    .state
+                    .workspaces
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| !closed_indices.contains(index))
+                    .map(|(_, workspace)| workspace.id.clone())
+                    .collect::<Vec<_>>();
+                let request = serde_json::json!({
+                    "id": "req",
+                    "method": if method == "group" { "workspace.close" } else { method },
+                    "params": match method {
+                        "pane.close" => serde_json::json!({"pane_id": app.public_pane_id(target_index, target_pane).unwrap()}),
+                        "tab.close" => serde_json::json!({"tab_id": app.public_tab_id(target_index, 0).unwrap()}),
+                        _ => serde_json::json!({"workspace_id": target_id, "close_group": method == "group"}),
+                    }
+                });
+
+                let response = app.handle_api_request(serde_json::from_value(request).unwrap());
+                if let Some(code) = refusal {
+                    let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+                    assert_eq!(
+                        response["error"]["code"], code,
+                        "{method} on {target_index}"
+                    );
+                } else {
+                    let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+                }
+
+                assert_eq!(
+                    app.state
+                        .workspaces
+                        .iter()
+                        .map(|workspace| workspace.id.clone())
+                        .collect::<Vec<_>>(),
+                    surviving_ids
+                );
+                assert_eq!(
+                    app.state.workspaces[app.state.active.unwrap()].id,
+                    focused_id
+                );
+                assert_eq!(
+                    app.state.terminals.contains_key(&target_terminal),
+                    refusal.is_some()
+                );
+                app.state.assert_invariants_for_test();
+                let closed_events = app
+                    .event_hub
+                    .events_after(0)
+                    .into_iter()
+                    .filter_map(|(_, event)| match event.data {
+                        EventData::WorkspaceClosed { workspace_id, .. } => Some(workspace_id),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(closed_events, closed_ids);
+            }
         }
     }
 

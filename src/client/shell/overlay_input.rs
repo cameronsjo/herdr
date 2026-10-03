@@ -1541,6 +1541,33 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    pub(super) fn request_workspace_close(
+        &mut self,
+        workspace_id: String,
+        close_group: Option<bool>,
+        outcome: &mut ClientShellInput,
+    ) {
+        if self.config.confirm_close {
+            self.open_close_confirmation(workspace_id, None, close_group);
+            return;
+        }
+        let close_group = close_group.unwrap_or_else(|| {
+            self.snapshot.as_deref().is_some_and(|snapshot| {
+                snapshot.workspaces.iter().any(|workspace| {
+                    workspace.workspace_id == workspace_id
+                        && super::sidebar::workspace_close_is_group(snapshot, workspace)
+                })
+            })
+        });
+        self.push_endpoint_method(
+            crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
+                workspace_id,
+                close_group,
+            }),
+            outcome,
+        );
+    }
+
     pub(super) fn request_tab_close(&mut self, tab_id: String, outcome: &mut ClientShellInput) {
         let workspace_id = self.snapshot.as_deref().and_then(|snapshot| {
             let target = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)?;
@@ -1552,7 +1579,7 @@ impl ClientShellState {
             .then(|| target.workspace_id.clone())
         });
         if let Some(workspace_id) = workspace_id {
-            if self.open_close_confirmation(workspace_id, Some(tab_id.clone())) {
+            if self.open_close_confirmation(workspace_id, Some(tab_id.clone()), None) {
                 outcome.repaint = true;
                 return;
             }
@@ -1589,17 +1616,22 @@ impl ClientShellState {
         } else {
             crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
                 workspace_id: confirm.workspace_id,
-                close_group: true,
+                close_group: confirm.close_group,
             })
         };
         self.push_endpoint_method(method, outcome);
     }
 
     pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {
-        self.open_close_confirmation(workspace_id, None);
+        self.open_close_confirmation(workspace_id, None, None);
     }
 
-    fn open_close_confirmation(&mut self, workspace_id: String, tab_id: Option<String>) -> bool {
+    fn open_close_confirmation(
+        &mut self,
+        workspace_id: String,
+        tab_id: Option<String>,
+        close_group: Option<bool>,
+    ) -> bool {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
@@ -1610,7 +1642,13 @@ impl ClientShellState {
         else {
             return false;
         };
-        let group = super::sidebar::workspace_group_members(snapshot, &workspace_id);
+        // An explicit single close stays single; otherwise the fork's group
+        // scope decides, so a duplicate space on an owned checkout closes alone.
+        let group = if close_group == Some(false) {
+            vec![workspace]
+        } else {
+            super::sidebar::workspace_group_members(snapshot, &workspace_id)
+        };
         let closes_group = group.len() > 1;
         // Keep parent-group tab closes on the existing server confirmation path.
         if tab_id.is_some() && closes_group {
@@ -1648,6 +1686,7 @@ impl ClientShellState {
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
                 workspace_id,
+                close_group: closes_group,
                 tab_target,
                 title: if closes_group {
                     "Close worktree group?".to_owned()
