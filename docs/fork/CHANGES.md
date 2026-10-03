@@ -43,6 +43,12 @@ Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
   stay. Dragging a group onto one of its own members is now a no-op
   (upstream's guard on the fork's member list). **Collision:**
   `workspace_entries`, `displayed_workspace_status`, `open_close_confirmation`.
+  Server side, `workspace_group_close_indices` keeps the fork's scope (first
+  non-linked space plus its linked worktrees), so upstream's
+  `duplicate_repo_parents_close_independently_unless_group_is_explicit` is
+  rewritten to the fork's outcomes: the duplicate always closes alone, a
+  group close on the parent leaves the duplicate open, and an implicit close
+  of the parent is still refused.
 - **Codex hooks** (`src/integration/{mod,targets,tests}.rs`,
   `assets/codex/herdr-agent-state.{sh,ps1}`): upstream added an `Interrupt`
   hook that reports `idle` and requires a transcript only on `SessionStart`.

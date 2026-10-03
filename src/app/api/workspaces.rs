@@ -1179,6 +1179,11 @@ mod tests {
 
     #[test]
     fn duplicate_repo_parents_close_independently_unless_group_is_explicit() {
+        // Fork semantics (#64): the group is the FIRST non-linked space plus its
+        // linked worktrees. A duplicate space on the same checkout (index 3) is
+        // nobody's member, so it always closes alone, and an explicit group close
+        // on the parent (index 1) never takes it along. The parent still owns its
+        // linked worktree, so an implicit close of it is refused, as for any group.
         for method in ["workspace.close", "pane.close", "tab.close", "group"] {
             for target_index in [1, 3] {
                 let mut app = app_with_worktree_group();
@@ -1197,10 +1202,15 @@ mod tests {
                     .state
                     .terminal_id_for_pane(target_index, target_pane)
                     .unwrap();
-                let closed_indices = if method == "group" {
-                    vec![1, 2, 3]
-                } else {
-                    vec![target_index]
+                let refusal = match (target_index, method) {
+                    (1, "workspace.close") => Some("workspace_group_close_required"),
+                    (1, "pane.close" | "tab.close") => Some("confirmation_required"),
+                    _ => None,
+                };
+                let closed_indices = match (target_index, method, refusal) {
+                    (_, _, Some(_)) => vec![],
+                    (1, "group", None) => vec![1, 2],
+                    _ => vec![target_index],
                 };
                 let closed_ids = closed_indices
                     .iter()
@@ -1225,7 +1235,15 @@ mod tests {
                 });
 
                 let response = app.handle_api_request(serde_json::from_value(request).unwrap());
-                let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+                if let Some(code) = refusal {
+                    let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+                    assert_eq!(
+                        response["error"]["code"], code,
+                        "{method} on {target_index}"
+                    );
+                } else {
+                    let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+                }
 
                 assert_eq!(
                     app.state
@@ -1239,7 +1257,10 @@ mod tests {
                     app.state.workspaces[app.state.active.unwrap()].id,
                     focused_id
                 );
-                assert!(!app.state.terminals.contains_key(&target_terminal));
+                assert_eq!(
+                    app.state.terminals.contains_key(&target_terminal),
+                    refusal.is_some()
+                );
                 app.state.assert_invariants_for_test();
                 let closed_events = app
                     .event_hub
