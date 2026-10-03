@@ -54,7 +54,10 @@ Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
   adapted the same way: the duplicate has no group toggle, Close is found by
   action because the fork's menus carry move items, a menu whose target
   changes group shape closes instead of acting, and dragging the parent
-  before the duplicate moves the parent alone.
+  before the duplicate moves the parent alone. The duplicate-root section
+  upstream added to `workspace_drag_moves_parent_worktree_as_one_block_and_rejects_child`
+  now expects the duplicate to move alone (`["ws_duplicate"]`), not as part of
+  the parent's block.
 - **Codex hooks** (`src/integration/{mod,targets,tests}.rs`,
   `assets/codex/herdr-agent-state.{sh,ps1}`): upstream added an `Interrupt`
   hook that reports `idle` and requires a transcript only on `SessionStart`.

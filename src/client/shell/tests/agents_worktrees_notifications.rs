@@ -603,11 +603,23 @@ fn workspace_drag_moves_parent_worktree_as_one_block_and_rejects_child() {
     state
         .compose(106, 24)
         .expect("repository block with duplicate root");
-    let duplicate = state.hits.workspaces[1].rect;
-    let other = state.hits.workspaces[3].rect;
+    // Fork (#64): the duplicate is a row of its own after the group, not a
+    // member of the parent's move block, so it moves alone.
+    let hit_rect = |state: &ClientShellState, id: &str| {
+        state
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| hit.workspace_id == id)
+            .expect("workspace row")
+            .rect
+    };
+    let parent = hit_rect(&state, "ws_1");
+    let duplicate = hit_rect(&state, "ws_duplicate");
+    let other = hit_rect(&state, "ws_other");
     for (source, target_row, moving_duplicate) in [
-        (other, duplicate.y.saturating_sub(1), false),
-        (duplicate, other.bottom(), true),
+        (other, parent.y.saturating_sub(1), false),
+        (duplicate, other.y.saturating_sub(1), true),
     ] {
         state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -631,7 +643,8 @@ fn workspace_drag_moves_parent_worktree_as_one_block_and_rejects_child() {
             assert!(matches!(moved.actions.as_slice(),
                 [ClientShellAction::Endpoint { request, .. }]
                     if matches!(&request.method, crate::api::schema::Method::WorkspaceMoveBlock(params)
-                        if params.workspace_ids == ["ws_duplicate", "ws_1", "ws_child"] && params.before_workspace_id.is_none())));
+                        if params.workspace_ids == ["ws_duplicate"]
+                            && params.before_workspace_id.as_deref() == Some("ws_other"))));
         } else {
             assert!(matches!(moved.actions.as_slice(),
                 [ClientShellAction::Endpoint { request, .. }]
