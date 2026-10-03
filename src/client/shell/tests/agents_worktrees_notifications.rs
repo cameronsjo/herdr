@@ -266,7 +266,12 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
                     .find(|hit| hit.workspace_id == workspace_id)
                     .expect("repository parent remains visible");
                 assert!(!hit.indented);
-                assert_eq!(hit.group_toggle.is_some(), linked_child);
+                // Fork (#64): only the first parent owns the group, so the
+                // duplicate never carries a group toggle.
+                assert_eq!(
+                    hit.group_toggle.is_some(),
+                    linked_child && workspace_id == "ws_1"
+                );
             }
             let parent = state.hits.workspaces[0].rect;
             let status_cell =
@@ -283,7 +288,13 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
                     .any(|hit| hit.workspace_id == "ws_child" && hit.indented),
                 linked_child && !collapsed
             );
-            let duplicate = state.hits.workspaces[1].rect;
+            let duplicate = state
+                .hits
+                .workspaces
+                .iter()
+                .find(|hit| hit.workspace_id == "ws_duplicate")
+                .expect("duplicate row")
+                .rect;
             state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: duplicate.x + 2,
@@ -311,7 +322,13 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
             let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
                 panic!("repository workspace context menu");
             };
-            assert_eq!(menu.items()[1].label, "Close");
+            // The fork's menus carry move items, so find Close by its action.
+            let close_index = menu
+                .items()
+                .iter()
+                .position(|item| matches!(item.action, ClientContextMenuAction::Close))
+                .expect("close item");
+            assert_eq!(menu.items()[close_index].label, "Close");
             assert_eq!(
                 menu.items()
                     .iter()
@@ -325,9 +342,14 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
                     .workspaces
                     .retain(|workspace| workspace.workspace_id != "ws_1");
                 state.set_snapshot(Box::new(replacement));
+                // With the first parent gone the duplicate owns the group, so
+                // its menu changes shape and the fork's reconcile closes it
+                // rather than act on a stale single-close target.
+                assert!(state.overlay.is_none());
+                continue;
             }
             let mut close = ClientShellInput::default();
-            state.activate_context_menu_item(1, &mut close);
+            state.activate_context_menu_item(close_index, &mut close);
             if confirm_close {
                 assert!(close.actions.is_empty());
                 assert!(matches!(state.overlay.as_ref(),
@@ -480,7 +502,13 @@ fn duplicate_repo_parent_drag_does_not_target_its_own_move_block() {
         row: target.y.saturating_sub(1),
         modifiers: KeyModifiers::empty(),
     })]);
-    assert!(drop.actions.is_empty());
+    // Fork (#64): the duplicate is not in the parent's move block, so dropping
+    // the parent before it is a real move of the parent alone.
+    assert!(matches!(drop.actions.as_slice(),
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, crate::api::schema::Method::WorkspaceMoveBlock(params)
+                if params.workspace_ids == ["ws_1"]
+                    && params.before_workspace_id.as_deref() == Some("ws_duplicate"))));
 }
 
 #[test]

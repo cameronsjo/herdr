@@ -48,7 +48,13 @@ Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
   `duplicate_repo_parents_close_independently_unless_group_is_explicit` is
   rewritten to the fork's outcomes: the duplicate always closes alone, a
   group close on the parent leaves the duplicate open, and an implicit close
-  of the parent is still refused.
+  of the parent is still refused. Upstream's two client tests from the same
+  change (`duplicate_repo_parents_remain_visible_and_focusable_when_collapsed`,
+  `duplicate_repo_parent_drag_does_not_target_its_own_move_block`) are
+  adapted the same way: the duplicate has no group toggle, Close is found by
+  action because the fork's menus carry move items, a menu whose target
+  changes group shape closes instead of acting, and dragging the parent
+  before the duplicate moves the parent alone.
 - **Codex hooks** (`src/integration/{mod,targets,tests}.rs`,
   `assets/codex/herdr-agent-state.{sh,ps1}`): upstream added an `Interrupt`
   hook that reports `idle` and requires a transcript only on `SessionStart`.
