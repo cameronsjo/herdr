@@ -1342,6 +1342,7 @@ fn install_codex_writes_hook_and_updates_hooks_and_config() {
         ("PermissionRequest", &["blocked"][..]),
         ("PostToolUse", &["working"][..]),
         ("Stop", &["idle", "metadata"][..]),
+        ("Interrupt", &["idle"][..]),
     ] {
         let entries = hooks["hooks"][event].as_array().unwrap();
         let commands: Vec<&str> = entries
@@ -1426,6 +1427,7 @@ fn install_codex_is_idempotent_for_hook_entries_and_feature_flag() {
     );
     assert_eq!(hooks["hooks"]["PostToolUse"].as_array().unwrap().len(), 1);
     assert_eq!(hooks["hooks"]["Stop"].as_array().unwrap().len(), 2);
+    assert_eq!(hooks["hooks"]["Interrupt"].as_array().unwrap().len(), 1);
     assert_eq!(config.matches("hooks = true").count(), 1);
     assert!(!config.contains("codex_hooks"));
     assert!(config.contains("other = true"));
@@ -1485,7 +1487,8 @@ fn uninstall_codex_removes_herdr_hooks_and_leaves_config_alone() {
             "Stop": [{"hooks": [
                 {"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10},
                 {"type": "command", "command": format!("bash '{}' metadata", hook_path.display()), "timeout": 10, "async": true}
-            ]}]
+            ]}],
+            "Interrupt": [{"hooks": [{"type": "command", "command": format!("bash '{}' idle", hook_path.display()), "timeout": 10}]}]
         }
     });
     fs::write(
@@ -1513,6 +1516,7 @@ fn uninstall_codex_removes_herdr_hooks_and_leaves_config_alone() {
     assert!(hooks["hooks"].get("PermissionRequest").is_none());
     assert!(hooks["hooks"].get("PostToolUse").is_none());
     assert!(hooks["hooks"].get("Stop").is_none());
+    assert!(hooks["hooks"].get("Interrupt").is_none());
     assert_eq!(
         hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
             .as_array()

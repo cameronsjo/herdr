@@ -2,7 +2,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=codex
-# HERDR_INTEGRATION_VERSION=9
+# HERDR_INTEGRATION_VERSION=10
 
 param([string]$Action = "")
 
@@ -10,7 +10,7 @@ $expectedEvents = @{
     session = @("SessionStart")
     working = @("UserPromptSubmit", "PreToolUse", "PostToolUse")
     blocked = @("PermissionRequest")
-    idle = @("Stop")
+    idle = @("Stop", "Interrupt")
     metadata = @("SessionStart", "UserPromptSubmit", "Stop")
 }
 
@@ -30,7 +30,8 @@ if ($expectedEvents[$Action] -notcontains $hookEventName) { exit 0 }
 
 $sessionId = [string]$payload.session_id
 if ([string]::IsNullOrWhiteSpace($sessionId)) { exit 0 }
-if ([string]::IsNullOrWhiteSpace([string]$payload.transcript_path)) { exit 0 }
+# Only SessionStart needs a transcript; Stop and Interrupt payloads may omit it.
+if ($Action -eq "session" -and [string]::IsNullOrWhiteSpace([string]$payload.transcript_path)) { exit 0 }
 if (-not [string]::IsNullOrWhiteSpace($env:CODEX_THREAD_ID) -and $env:CODEX_THREAD_ID -ne $sessionId) { exit 0 }
 
 $seq = [DateTime]::UtcNow.Ticks

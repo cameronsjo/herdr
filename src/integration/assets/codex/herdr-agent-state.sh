@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=codex
-# HERDR_INTEGRATION_VERSION=9
+# HERDR_INTEGRATION_VERSION=10
 
 set -eu
 
@@ -40,7 +40,7 @@ EXPECTED_EVENTS = {
     "session": {"SessionStart"},
     "working": {"UserPromptSubmit", "PreToolUse", "PostToolUse"},
     "blocked": {"PermissionRequest"},
-    "idle": {"Stop"},
+    "idle": {"Stop", "Interrupt"},
     "metadata": {"SessionStart", "UserPromptSubmit", "Stop"},
 }
 
@@ -179,7 +179,8 @@ session_id = hook_input.get("session_id")
 transcript_path = hook_input.get("transcript_path")
 if not isinstance(session_id, str) or not session_id:
     raise SystemExit(0)
-if not isinstance(transcript_path, str) or not transcript_path.strip():
+# Only SessionStart needs a transcript; Stop and Interrupt payloads may omit it.
+if action == "session" and (not isinstance(transcript_path, str) or not transcript_path.strip()):
     raise SystemExit(0)
 inherited_session_id = os.environ.get("CODEX_THREAD_ID")
 if inherited_session_id and inherited_session_id != session_id:

@@ -600,6 +600,19 @@ fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<Stri
     parent_group_key_ref(snapshot, index).map(str::to_owned)
 }
 
+pub(in crate::client::shell) fn workspace_close_is_group(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+) -> bool {
+    // Same scope as `group_member_indices`: only the row that owns a group
+    // closes it, and a duplicate space on an owned checkout closes alone.
+    snapshot
+        .workspaces
+        .iter()
+        .position(|candidate| candidate.workspace_id == workspace.workspace_id)
+        .is_some_and(|index| parent_group_key_ref(snapshot, index).is_some())
+}
+
 pub(in crate::client::shell) fn render_parent_group_toggle(
     buffer: &mut Buffer,
     workspace_rect: Rect,

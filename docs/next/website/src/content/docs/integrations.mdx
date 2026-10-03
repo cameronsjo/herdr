@@ -3,7 +3,7 @@ title: Integrations
 description: Install Herdr integrations for Pi, OMP, Claude Code, Codex, GitHub Copilot CLI, Devin CLI, Droid, Kimi Code CLI, OpenCode, Kilo Code CLI, Hermes Agent, Qoder CLI, Qwen Code, Letta Code, Cursor Agent CLI, MastraCode, Antigravity CLI, and Grok CLI.
 ---
 
-Herdr detects supported agents automatically. Install official integrations when you want native agent session restore, direct lifecycle reports, or both. See [Agents](/docs/agents/) for the full status authority model.
+Herdr detects the agents it supports automatically. Install an agent's integration so Herdr can resume the same session after a server restart. Some integrations also report the agent's state directly. See [Agents](/docs/agents/) for which agents Herdr supports and which support Herdr themselves.
 
 ## Install integrations
 
@@ -57,17 +57,9 @@ Herdr saves integration configs atomically on Linux/macOS and for new files; exi
 
 ## How Herdr uses integrations
 
-Herdr uses integrations in two ways:
+Every integration tells Herdr which session the agent is in, so Herdr can resume it after a server restart. Turn this off with `[session] resume_agents_on_restore = false`.
 
-| Integration type | Agents | Effect |
-| --- | --- | --- |
-| Lifecycle authority | Pi, OMP, Kimi Code CLI, OpenCode, Kilo Code CLI, MastraCode | When installed and actively reporting for the pane, hook or plugin events author `idle`, `working`, and `blocked`. Herdr does not also use screen manifest fallback for that same lifecycle authority. |
-| Screen-assisted lifecycle | Codex | Hook events report state and native session identity. Strong, newer visible screen evidence corrects gaps caused by concurrent stop hooks and permission flows. |
-| Session identity | Claude Code, GitHub Copilot CLI, Devin CLI, Droid, Qoder CLI, Qwen Code, Letta Code, Cursor Agent CLI, Hermes Agent, Antigravity CLI, Grok CLI | The integration reports native session references for restore. State still comes from Herdr's screen manifest detection. |
-
-Custom integrations can also report state that is not visible in the native terminal UI. They do not need to be built into Herdr or use a recognized agent executable.
-
-Some integrations report native agent session references. Herdr uses official session references to resume Claude Code, Codex, Devin CLI, Droid, Kimi Code CLI, Qoder CLI, Qwen Code, Letta Code, Cursor Agent CLI, Grok CLI, GitHub Copilot CLI, Pi, OMP, Hermes Agent, OpenCode, Kilo Code CLI, MastraCode, and Antigravity CLI panes after a Herdr server restart unless `[session] resume_agents_on_restore = false` disables it.
+The Pi, OMP, Kimi Code CLI, OpenCode, Kilo Code CLI, and MastraCode integrations also report the agent's state. While they report, Herdr uses them instead of reading the screen. Codex reports turn state when run with `--no-daemon`; screen detection still handles its visible blockers. Other integrations leave state to screen detection.
 
 Native session restore requires current Herdr integrations: Pi integration version `2`, OMP version `3`, Claude Code version `6`, Codex version `5`, GitHub Copilot CLI version `2`, Devin CLI version `2`, Droid version `2`, Kimi Code CLI version `3`, Qoder CLI version `2`, Qwen Code version `1`, Letta Code version `1`, Cursor Agent CLI version `1`, Grok CLI version `2`, OpenCode version `5`, Kilo Code CLI version `1`, Hermes Agent version `5`, MastraCode version `1`, or Antigravity CLI version `1`. Check installed versions with `herdr integration status`.
 
@@ -131,9 +123,11 @@ Install the Codex hook:
 herdr integration install codex
 ```
 
-The Codex hook reports session identity and lifecycle state through the local Herdr socket. `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` report `working`; `PermissionRequest` reports `blocked`; and `Stop` reports `idle`. Codex runs hook handlers concurrently and does not emit an approval-resolved hook, so Herdr keeps screen detection active: a newer strong visible-working signal can correct a stale `Stop` or permission report, and a visible blocker can correct a stale working report.
+The Codex hook reports session identity and lifecycle state through the local Herdr socket. `UserPromptSubmit`, `PreToolUse`, and `PostToolUse` report `working`; `PermissionRequest` reports `blocked`; and `Stop` and `Interrupt` report `idle`. Codex runs hook handlers concurrently and does not emit an approval-resolved hook, so Herdr keeps screen detection active: a newer strong visible-working signal can correct a stale `Stop` or permission report, and a visible blocker can correct a stale working report.
 
 The hook also reports a presentation title without changing Codex's native thread id. It reads the thread's `/rename` name or preview through Codex's public app-server protocol, then falls back to the submitted prompt when that metadata is unavailable.
+
+A shared Codex daemon can route hooks to the wrong pane, so use `--no-daemon` for reliable reports; disabling daemon auto-start alone does not stop an existing daemon.
 
 Herdr uses `~/.codex` by default, or `CODEX_HOME` when set. The Codex config directory must already exist. Install writes `herdr-agent-state.sh`, updates `hooks.json`, and ensures `[features] hooks = true` in `config.toml`. It also removes the deprecated top-level `codex_hooks` flag when present. Uninstall removes Herdr entries from `hooks.json` and deletes the hook script, but leaves `config.toml` unchanged.
 

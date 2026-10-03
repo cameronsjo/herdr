@@ -851,7 +851,12 @@ fn map_server_not_running_or_io(
             let socket_path = client.socket_path();
             let client_socket =
                 crate::server::socket_paths::derive_client_socket_from_api_socket(&socket_path);
-            if crate::server::autodetect::is_server_listening_at(&client_socket) {
+            if crate::server::autodetect::is_server_listening_at(&client_socket).unwrap_or_else(
+                |err| {
+                    tracing::warn!(err = %err, "unexpected error checking server socket");
+                    false
+                },
+            ) {
                 server_not_running::reported_error(server_not_running::not_accepting_response(
                     request_id,
                     &socket_path,
@@ -1049,7 +1054,9 @@ fn print_session_table(sessions: &[crate::session::SessionInfo]) {
         println!(
             "{:<20} {:<8} {:<48} {}",
             session.name,
-            if session.running {
+            if session.connection_error.is_some() {
+                "unavailable"
+            } else if session.running {
                 "running"
             } else {
                 "stopped"
@@ -1057,6 +1064,9 @@ fn print_session_table(sessions: &[crate::session::SessionInfo]) {
             session.session_dir,
             session.socket_path
         );
+        if let Some(error) = &session.connection_error {
+            println!("  {error}");
+        }
     }
 }
 
