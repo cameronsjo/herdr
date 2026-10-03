@@ -64,6 +64,10 @@ Sixteen files conflicted; `README.md` is fork-owned and kept. The rest:
 - **Env locks** (`src/session.rs`, `src/update.rs`): upstream's new tests
   kept; `update.rs`'s private `env_lock` routed back through
   `test_config_env_lock`.
+- **Flaky upstream test** (`src/app/custom_commands.rs`):
+  `shell_command_invocation_executes_endpoint_owned_definition` polled for
+  the file to exist, but the shell's `>` creates it empty before `printf`
+  writes, so CI read `""`. It now waits for the content.
 - **Docs** (`docs/next/website/.../{agents,integrations}.mdx`): upstream's
   rewritten agent table and status text, plus the fork's Codex hybrid
   paragraph. `skills/herdr/SKILL.md` keeps the fork's split skill; upstream's
