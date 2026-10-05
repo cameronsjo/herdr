@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `5da0a01` (29 commits); conflict record below
+- (pending) PR — merge upstream through `e35f393` (2 commits); merged cleanly, no conflicts
+- `97dcb16` PR [#92](https://github.com/cameronsjo/herdr/pull/92) (2026-10-03) — merge upstream through `5da0a01` (29 commits); conflict record below
 - `3f910b3` PR [#90](https://github.com/cameronsjo/herdr/pull/90) (2026-09-29) — merge upstream through `d5680d8` (27 commits); conflict record below
 - `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
 - `7c571fbd` PR [#84](https://github.com/cameronsjo/herdr/pull/84) (2026-09-17) — merge upstream through `101ccc20`
