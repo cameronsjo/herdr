@@ -21,13 +21,14 @@ pub(super) fn is_registered_row(pane_id: &str) -> bool {
 }
 
 /// Rows for `registered`, drawn after the pane rows. An active agent view
-/// filters panes only, so registered agents are hidden while one is set.
+/// stays out of them: the server evaluates a view against panes and sends the
+/// client only its label, so these rows keep their own "elsewhere" group
+/// below whatever the view shows.
 pub(super) fn registered_agent_rows(
-    snapshot: &ClientShellSnapshot,
     registered: &[RegisteredAgentInfo],
     config: &ClientShellConfig,
 ) -> Vec<AgentRow> {
-    if registered.is_empty() || snapshot.agent_view_label.is_some() {
+    if registered.is_empty() {
         return Vec::new();
     }
     agent_rows(&registered_snapshot(registered), config, None)
@@ -142,6 +143,13 @@ mod tests {
     ) -> (String, super::super::ShellHitMap) {
         let mut snapshot = registered_snapshot(&[]);
         snapshot.agent_view_label = agent_view_label.map(str::to_owned);
+        render_snapshot(&snapshot, registered)
+    }
+
+    fn render_snapshot(
+        snapshot: &ClientShellSnapshot,
+        registered: &[RegisteredAgentInfo],
+    ) -> (String, super::super::ShellHitMap) {
         let config = ClientShellConfig::from_config(&crate::config::Config::default());
         let area = ratatui::layout::Rect::new(0, 0, 40, 12);
         let mut buffer = ratatui::buffer::Buffer::empty(area);
@@ -150,7 +158,7 @@ mod tests {
         super::super::agent_sidebar::render_agent_panel(
             &mut buffer,
             area,
-            &snapshot,
+            snapshot,
             registered,
             &config,
             &mut scroll,
@@ -210,8 +218,23 @@ mod tests {
     }
 
     #[test]
-    fn active_agent_view_hides_registered_agents() {
-        let (text, _) = render_panel(&[info("remote-one", None)], Some("focus"));
-        assert!(!text.contains("remote-one"), "{text}");
+    fn active_agent_view_keeps_registered_agents() {
+        let (text, hits) = render_panel(&[info("remote-one", None)], Some("pinned"));
+        assert!(text.contains("remote-one"), "{text}");
+        assert!(!text.contains("no matching agents"), "{text}");
+        assert!(hits.agents.is_empty());
+    }
+
+    #[test]
+    fn active_agent_view_draws_registered_agents_after_its_own_rows() {
+        let mut snapshot = registered_snapshot(&[info("pane-one", None)]);
+        snapshot.agents[0].pane_id = "w1:p1".into();
+        snapshot.agent_order = vec!["w1:p1".into()];
+        snapshot.agent_view_label = Some("pinned".into());
+        let (text, hits) = render_snapshot(&snapshot, &[info("remote-one", None)]);
+        let pane = text.find("pane-one").expect("view row drawn");
+        let registered = text.find("remote-one").expect("registered row drawn");
+        assert!(pane < registered, "{text}");
+        assert_eq!(hits.agents.len(), 1);
     }
 }
