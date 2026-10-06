@@ -120,6 +120,11 @@ async fn out_of_range_positional_workspace_ids_are_not_found_on_every_path() {
     }
 
     assert_eq!(server.app.state.workspaces.len(), 2);
+    assert_eq!(
+        server.app.state.active,
+        Some(0),
+        "a rejected focus moved the app"
+    );
     for workspace in &server.app.state.workspaces {
         assert_eq!(workspace.tabs.len(), 1, "a rejected request added a tab");
     }
@@ -136,32 +141,58 @@ async fn in_range_positional_workspace_ids_still_focus_on_every_path() {
     use crate::api::schema::{Method, WorkspaceTarget};
 
     let mut server = two_workspace_server();
-    let first_tab = server.app.public_tab_id(0, 0).expect("first tab id");
-    let second_tab = server.app.public_tab_id(1, 0).expect("second tab id");
+    let tabs = [
+        server.app.public_tab_id(0, 0).expect("first tab id"),
+        server.app.public_tab_id(1, 0).expect("second tab id"),
+    ];
+    let full_ids = [
+        server.app.public_workspace_id(0),
+        server.app.public_workspace_id(1),
+    ];
     let (control, _render) = connect_test_shell(&mut server, 82, 100, 30);
     control.recv().expect("first snapshot");
+    let focused = |server: &HeadlessServer| {
+        server.clients[&82]
+            .shell_location
+            .as_ref()
+            .and_then(|location| location.focused_tab_id().map(str::to_owned))
+    };
 
-    for (workspace_id, expected_tab) in [
-        ("2", &second_tab),
-        ("w_1", &first_tab),
-        ("w_2", &second_tab),
-        ("1", &first_tab),
-    ] {
+    for (workspace_id, expected) in [("2", 1), ("w_1", 0), ("w_2", 1), ("1", 0)] {
         for client_id in [None, Some(82)] {
-            let method = Method::WorkspaceFocus(WorkspaceTarget {
-                workspace_id: workspace_id.into(),
-            });
-            let response = send(&mut server, client_id, method);
-            assert!(
-                response.get("error").is_none(),
-                "{workspace_id} via {client_id:?}: {response}"
+            let label = format!("{workspace_id} via {client_id:?}");
+            // Start every request on the other workspace, by full id over the
+            // public path, so a pass needs this request to move the client.
+            let reset = send(
+                &mut server,
+                None,
+                Method::WorkspaceFocus(WorkspaceTarget {
+                    workspace_id: full_ids[1 - expected].clone(),
+                }),
             );
-            let location = server.clients[&82].shell_location.as_ref().unwrap();
+            assert!(reset.get("error").is_none(), "{label} reset: {reset}");
             assert_eq!(
-                location.focused_tab_id(),
-                Some(expected_tab.as_str()),
-                "{workspace_id} via {client_id:?}"
+                focused(&server).as_deref(),
+                Some(tabs[1 - expected].as_str())
             );
+            assert_eq!(server.app.state.active, Some(1 - expected), "{label} reset");
+
+            let response = send(
+                &mut server,
+                client_id,
+                Method::WorkspaceFocus(WorkspaceTarget {
+                    workspace_id: workspace_id.into(),
+                }),
+            );
+            assert!(response.get("error").is_none(), "{label}: {response}");
+            assert_eq!(
+                focused(&server).as_deref(),
+                Some(tabs[expected].as_str()),
+                "{label}"
+            );
+            if client_id.is_none() {
+                assert_eq!(server.app.state.active, Some(expected), "{label}");
+            }
         }
     }
 
