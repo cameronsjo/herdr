@@ -329,7 +329,7 @@ pub(super) fn render_agent_panel(
 
     let mut rows = agent_rows(snapshot, config, None);
     rows.extend(super::fork_registered_agents::registered_agent_rows(
-        snapshot, registered, config,
+        registered, config,
     ));
     render_agent_list(
         buffer,

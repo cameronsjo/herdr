@@ -21,13 +21,14 @@ pub(super) fn is_registered_row(pane_id: &str) -> bool {
 }
 
 /// Rows for `registered`, drawn after the pane rows. An active agent view
-/// filters panes only, so registered agents are hidden while one is set.
+/// stays out of them: the server evaluates a view against panes and sends the
+/// client only its label, so these rows keep their own "elsewhere" group
+/// below whatever the view shows.
 pub(super) fn registered_agent_rows(
-    snapshot: &ClientShellSnapshot,
     registered: &[RegisteredAgentInfo],
     config: &ClientShellConfig,
 ) -> Vec<AgentRow> {
-    if registered.is_empty() || snapshot.agent_view_label.is_some() {
+    if registered.is_empty() {
         return Vec::new();
     }
     agent_rows(&registered_snapshot(registered), config, None)
@@ -210,8 +211,10 @@ mod tests {
     }
 
     #[test]
-    fn active_agent_view_hides_registered_agents() {
-        let (text, _) = render_panel(&[info("remote-one", None)], Some("focus"));
-        assert!(!text.contains("remote-one"), "{text}");
+    fn active_agent_view_keeps_registered_agents() {
+        let (text, hits) = render_panel(&[info("remote-one", None)], Some("pinned"));
+        assert!(text.contains("remote-one"), "{text}");
+        assert!(!text.contains("no matching agents"), "{text}");
+        assert!(hits.agents.is_empty());
     }
 }
