@@ -120,8 +120,51 @@ async fn out_of_range_positional_workspace_ids_are_not_found_on_every_path() {
     }
 
     assert_eq!(server.app.state.workspaces.len(), 2);
+    for workspace in &server.app.state.workspaces {
+        assert_eq!(workspace.tabs.len(), 1, "a rejected request added a tab");
+    }
     let location = server.clients[&81].shell_location.as_ref().unwrap();
     assert_eq!(location.focused_tab_id(), Some(first_tab.as_str()));
+    server.app.state.assert_invariants_for_test();
+    shutdown_test_runtimes(&mut server);
+}
+
+/// The positive control: the bound must not reject the in-range positional
+/// ids it exists to keep.
+#[tokio::test]
+async fn in_range_positional_workspace_ids_still_focus_on_every_path() {
+    use crate::api::schema::{Method, WorkspaceTarget};
+
+    let mut server = two_workspace_server();
+    let first_tab = server.app.public_tab_id(0, 0).expect("first tab id");
+    let second_tab = server.app.public_tab_id(1, 0).expect("second tab id");
+    let (control, _render) = connect_test_shell(&mut server, 82, 100, 30);
+    control.recv().expect("first snapshot");
+
+    for (workspace_id, expected_tab) in [
+        ("2", &second_tab),
+        ("w_1", &first_tab),
+        ("w_2", &second_tab),
+        ("1", &first_tab),
+    ] {
+        for client_id in [None, Some(82)] {
+            let method = Method::WorkspaceFocus(WorkspaceTarget {
+                workspace_id: workspace_id.into(),
+            });
+            let response = send(&mut server, client_id, method);
+            assert!(
+                response.get("error").is_none(),
+                "{workspace_id} via {client_id:?}: {response}"
+            );
+            let location = server.clients[&82].shell_location.as_ref().unwrap();
+            assert_eq!(
+                location.focused_tab_id(),
+                Some(expected_tab.as_str()),
+                "{workspace_id} via {client_id:?}"
+            );
+        }
+    }
+
     server.app.state.assert_invariants_for_test();
     shutdown_test_runtimes(&mut server);
 }
