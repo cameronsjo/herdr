@@ -188,7 +188,7 @@ fn server_command(include_live_handoff: bool) -> Command {
     } else {
         command
     };
-    command
+    let command = command
         .subcommand(Command::new("reload-config").about("Reload config in the running server"))
         .subcommand(
             Command::new("agent-manifests")
@@ -203,7 +203,13 @@ fn server_command(include_live_handoff: bool) -> Command {
         .subcommand(
             Command::new("reload-agent-manifests")
                 .about("Reload local agent detection manifest overrides"),
-        )
+        );
+    #[cfg(windows)]
+    let command = command.arg(
+        flag("allow-unelevated-clients")
+            .help("Allow ordinary same-account clients to control this elevated server"),
+    );
+    command
 }
 
 fn api_command() -> Command {
@@ -878,6 +884,17 @@ fn plugin_command() -> Command {
             Command::new("uninstall")
                 .about("Uninstall a plugin")
                 .arg(required("plugin", "PLUGIN")),
+        )
+        .subcommand(
+            Command::new("update")
+                .about("Update GitHub-installed plugins")
+                .arg(Arg::new("plugins").value_name("PLUGIN").num_args(0..))
+                .arg(
+                    Arg::new("yes")
+                        .short('y')
+                        .long("yes")
+                        .action(ArgAction::SetTrue),
+                ),
         )
         .subcommand(
             Command::new("link")
