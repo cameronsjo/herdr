@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `e35f393` (2 commits); merged cleanly, no conflicts
+- (pending) PR — merge upstream through `4dc23bb` (24 commits); conflict record below
+- `704f48a` PR [#93](https://github.com/cameronsjo/herdr/pull/93) (2026-10-05) — merge upstream through `e35f393` (2 commits); merged cleanly, no conflicts
 - `97dcb16` PR [#92](https://github.com/cameronsjo/herdr/pull/92) (2026-10-03) — merge upstream through `5da0a01` (29 commits); conflict record below
 - `3f910b3` PR [#90](https://github.com/cameronsjo/herdr/pull/90) (2026-09-29) — merge upstream through `d5680d8` (27 commits); conflict record below
 - `38b3ac7` PR [#87](https://github.com/cameronsjo/herdr/pull/87) (2026-09-25) — merge upstream through `8d95e9bd` (53 commits); conflict record below
@@ -27,6 +28,29 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-10-08 sync: conflict resolutions
+
+Three files conflicted:
+
+- **Release workflow** (`.github/workflows/release.yml`): fork-owned and kept.
+  Upstream only bumped action pins there (install-nix-action, rust-cache,
+  action-gh-release); the fork's copy keeps its own pins.
+- **API accept loop** (`src/api/server.rs`): upstream reworked its
+  `run_accept_loop` to spawn threads through the new `crate::thread_spawn`
+  (#4958). The fork's `AcceptBackoff` / `SpawnDrops` loop is kept as before,
+  and now spawns both the accept thread and each connection thread through
+  `crate::thread_spawn::spawn_named`. A failed accept-thread spawn removes the
+  bound socket, as upstream does, and the injected-failure test hook covers the
+  fork's loop. Upstream's `run_accept_loop`, `spawn_connection_handler` and
+  their `accept_loop_tests` are dropped again; upstream's
+  `api_accept_thread_spawn_failure_removes_bound_socket` stays.
+  **Collision:** the accept-thread body of `start_server_inner`.
+- **Server subcommand** (`src/cli/spec.rs`): upstream turned `server_command`
+  into a `let command` chain for its Windows-only `--allow-unelevated-clients`
+  flag. The fork's `include_live_handoff` parameter is kept, and the chain is
+  rebound so the flag applies to the full command. **Collision:**
+  `server_command`.
 
 ### 2026-10-03 sync: conflict resolutions
 
