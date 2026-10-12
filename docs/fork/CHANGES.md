@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `4dc23bb` (24 commits); conflict record below
+- (pending) PR — merge upstream through `dc6b6e5` (16 commits); conflict record below
+- `1f576c6` PR [#104](https://github.com/cameronsjo/herdr/pull/104) (2026-10-08) — merge upstream through `4dc23bb` (24 commits); conflict record below
 - `704f48a` PR [#93](https://github.com/cameronsjo/herdr/pull/93) (2026-10-05) — merge upstream through `e35f393` (2 commits); merged cleanly, no conflicts
 - `97dcb16` PR [#92](https://github.com/cameronsjo/herdr/pull/92) (2026-10-03) — merge upstream through `5da0a01` (29 commits); conflict record below
 - `3f910b3` PR [#90](https://github.com/cameronsjo/herdr/pull/90) (2026-09-29) — merge upstream through `d5680d8` (27 commits); conflict record below
@@ -28,6 +29,25 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-10-12 sync: conflict resolutions
+
+Two files conflicted:
+
+- **Workspace id bounds** (`src/app/ids.rs`): upstream fixed the same
+  out-of-range `w_N` / `N` panic as fork PR #99 with the same filter
+  (#5171). The fork's line and its comment are kept; upstream's
+  `numeric_workspace_ids_beyond_the_last_workspace_are_not_found` test merged
+  in alongside the fork's request-path tests.
+- **Close pane keybinding** (`src/client/shell/actions.rs`): upstream moved
+  `ClosePane` out of the keybinding-to-method table into
+  `request_pane_close`, which confirms a workspace's last pane locally
+  (#5173). Its arm is dropped from the table; the fork's `MoveTabToNewSpace`,
+  `MovePaneToNewSpace` and `MovePaneToNewTab` arms beside it stay. A parent
+  group's last pane still goes to the server's `confirmation_required` path,
+  because the fork's `open_close_confirmation` declines a tab close that
+  would take a group. **Collision:** the action table in
+  `endpoint_method_for_action`.
 
 ### 2026-10-08 sync: conflict resolutions
 
