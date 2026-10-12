@@ -88,7 +88,9 @@ pub enum TabMoveDestination {
 pub enum TabMoveReason {
     /// The destination workspace already owns this tab.
     SameWorkspace,
-    /// The tab is its workspace's last, and a workspace must keep one.
+    /// The tab is its workspace's last, and the workspace owns linked worktree
+    /// workspaces, so closing it would orphan them. Any other workspace closes
+    /// when its last tab moves out.
     LastTabInWorkspace,
 }
 

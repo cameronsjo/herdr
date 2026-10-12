@@ -9,6 +9,15 @@ use crate::app::{App, Mode};
 use super::responses::{encode_error, encode_success};
 use crate::label::sanitize_label;
 
+/// A tab detached for a cross-workspace move.
+struct CrossWorkspaceTakenTab {
+    tab: crate::workspace::TakenTab,
+    /// The tab was its workspace's last, so the workspace was closed.
+    closed_source: bool,
+    /// The closed workspace was in view, so the view follows the tab.
+    followed: bool,
+}
+
 impl App {
     pub(super) fn handle_tab_list(&mut self, id: String, params: TabListParams) -> String {
         let tabs = if let Some(workspace_id) = params.workspace_id {
@@ -307,13 +316,13 @@ impl App {
                 ws_idx,
             );
         }
-        // A workspace derefs through its active tab, so it must keep one.
-        // Refusing beats silently closing the workspace out from under the user.
-        let source_tabs_len = match self.state.workspaces.get(ws_idx) {
-            Some(ws) => ws.tabs.len(),
+        // A workspace derefs through its active tab, so moving its last tab
+        // closes it, as `pane.move` does when a workspace's last pane leaves.
+        let closes_source = match self.state.workspaces.get(ws_idx) {
+            Some(ws) => ws.tabs.len() <= 1,
             None => return encode_error(id, "tab_move_failed", "source workspace is unavailable"),
         };
-        if source_tabs_len <= 1 {
+        if closes_source && !self.can_close_workspace_for_last_tab_move(ws_idx) {
             return self.encode_unchanged_tab_move(
                 id,
                 TabMoveReason::LastTabInWorkspace,
@@ -347,23 +356,28 @@ impl App {
 
         // Snapshot before the take: it unregisters these panes from the source.
         let previous_pane_ids = self.public_pane_ids_in_tab(ws_idx, tab_idx);
-        let Some(taken) = self
-            .state
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(|ws| ws.take_tab_for_move(tab_idx))
+        let Some(taken) = self.take_tab_for_cross_workspace_move(ws_idx, tab_idx, closes_source)
         else {
             return encode_error(id, "tab_move_failed", "source tab could not be moved");
         };
         // Old public pane ids keep resolving until something reuses the number.
         self.alias_moved_pane_ids(previous_pane_ids);
 
+        // Closing the source shifts every later workspace down by one.
+        let target_ws_idx = if taken.closed_source && target_ws_idx > ws_idx {
+            target_ws_idx - 1
+        } else {
+            target_ws_idx
+        };
         let target_tab_idx =
-            self.state.workspaces[target_ws_idx].insert_moved_tab(taken, insert_index);
+            self.state.workspaces[target_ws_idx].insert_moved_tab(taken.tab, insert_index);
+        if taken.followed {
+            self.follow_moved_tab(target_ws_idx, target_tab_idx);
+        }
 
         self.finish_cross_workspace_tab_move(
             id,
-            ws_idx,
+            (!taken.closed_source).then_some(ws_idx),
             target_ws_idx,
             target_tab_idx,
             previous_tab_id,
@@ -383,11 +397,11 @@ impl App {
             None => return encode_error(id, "tab_move_failed", "source tab is unavailable"),
         };
         let source_workspace_id = self.public_workspace_id(ws_idx);
-        let source_tabs_len = match self.state.workspaces.get(ws_idx) {
-            Some(ws) => ws.tabs.len(),
+        let closes_source = match self.state.workspaces.get(ws_idx) {
+            Some(ws) => ws.tabs.len() <= 1,
             None => return encode_error(id, "tab_move_failed", "source workspace is unavailable"),
         };
-        if source_tabs_len <= 1 {
+        if closes_source && !self.can_close_workspace_for_last_tab_move(ws_idx) {
             return self.encode_unchanged_tab_move(
                 id,
                 TabMoveReason::LastTabInWorkspace,
@@ -408,23 +422,23 @@ impl App {
             return encode_error(id, "tab_move_failed", "source workspace is unavailable");
         };
         let previous_pane_ids = self.public_pane_ids_in_tab(ws_idx, tab_idx);
-        let Some(taken) = self
-            .state
-            .workspaces
-            .get_mut(ws_idx)
-            .and_then(|ws| ws.take_tab_for_move(tab_idx))
+        let Some(taken) = self.take_tab_for_cross_workspace_move(ws_idx, tab_idx, closes_source)
         else {
             return encode_error(id, "tab_move_failed", "source tab could not be moved");
         };
         self.alias_moved_pane_ids(previous_pane_ids);
 
-        let workspace = crate::workspace::Workspace::from_existing_tab(label, identity_cwd, taken);
+        let workspace =
+            crate::workspace::Workspace::from_existing_tab(label, identity_cwd, taken.tab);
         self.state.workspaces.push(workspace);
         let target_ws_idx = self.state.workspaces.len() - 1;
+        if taken.followed {
+            self.follow_moved_tab(target_ws_idx, 0);
+        }
 
         self.finish_cross_workspace_tab_move(
             id,
-            ws_idx,
+            (!taken.closed_source).then_some(ws_idx),
             target_ws_idx,
             0,
             previous_tab_id,
@@ -466,10 +480,84 @@ impl App {
         }
     }
 
+    /// Whether moving a workspace's last tab out may close the workspace.
+    ///
+    /// A workspace that owns linked worktree workspaces may not: closing it
+    /// would orphan them, which `workspace.merge` also refuses without
+    /// `merge_group`.
+    fn can_close_workspace_for_last_tab_move(&self, ws_idx: usize) -> bool {
+        self.state.workspace_close_indices(ws_idx).len() <= 1
+    }
+
+    /// Detaches a tab for a move to another workspace. When it is the
+    /// workspace's last tab, the workspace is closed around it: a workspace
+    /// derefs through its active tab, so it cannot outlive its last one.
+    fn take_tab_for_cross_workspace_move(
+        &mut self,
+        ws_idx: usize,
+        tab_idx: usize,
+        closes_source: bool,
+    ) -> Option<CrossWorkspaceTakenTab> {
+        if !closes_source {
+            let tab = self
+                .state
+                .workspaces
+                .get_mut(ws_idx)?
+                .take_tab_for_move(tab_idx)?;
+            return Some(CrossWorkspaceTakenTab {
+                tab,
+                closed_source: false,
+                followed: false,
+            });
+        }
+
+        if self.state.workspaces.get(ws_idx)?.tabs.len() != 1 || tab_idx != 0 {
+            return None;
+        }
+        // Remove the workspace before draining it, so the drained value is
+        // never reachable through `AppState::workspaces`.
+        let workspace = self.state.workspaces.remove(ws_idx);
+        crate::logging::workspace_closed(&workspace.id);
+        let followed = self.state.active == Some(ws_idx);
+        if self.state.workspaces.is_empty() {
+            self.state.active = None;
+            self.state.selected = 0;
+        } else {
+            let last = self.state.workspaces.len() - 1;
+            if let Some(active) = self.state.active {
+                if active == ws_idx {
+                    self.state.active = Some(ws_idx.min(last));
+                } else if active > ws_idx {
+                    self.state.active = Some(active - 1);
+                }
+            }
+            if self.state.selected == ws_idx {
+                self.state.selected = ws_idx.min(last);
+            } else if self.state.selected > ws_idx {
+                self.state.selected -= 1;
+            }
+        }
+        let tab = workspace.into_all_tabs_for_move().into_iter().next()?;
+        Some(CrossWorkspaceTakenTab {
+            tab,
+            closed_source: true,
+            followed,
+        })
+    }
+
+    /// Moves the view onto a tab whose closed workspace was in view. Focus
+    /// stays on the same pane, so this is not a navigation: the previous
+    /// focus is kept rather than set to the neighbor the close left in view.
+    fn follow_moved_tab(&mut self, ws_idx: usize, tab_idx: usize) {
+        let previous_focus = self.state.previous_pane_focus.clone();
+        self.state.switch_workspace_tab(ws_idx, tab_idx);
+        self.state.previous_pane_focus = previous_focus;
+    }
+
     fn finish_cross_workspace_tab_move(
         &mut self,
         id: String,
-        source_ws_idx: usize,
+        source_ws_idx: Option<usize>,
         target_ws_idx: usize,
         target_tab_idx: usize,
         previous_tab_id: String,
@@ -480,7 +568,10 @@ impl App {
         };
         let workspace_id = self.public_workspace_id(target_ws_idx);
         let tabs = self.tab_list_info(target_ws_idx);
-        let source_tabs = self.tab_list_info(source_ws_idx);
+        // A closed source has no remaining tabs to report.
+        let source_tabs = source_ws_idx
+            .map(|source_ws_idx| self.tab_list_info(source_ws_idx))
+            .unwrap_or_default();
 
         self.state.repoint_pane_records_to_workspace(target_ws_idx);
         self.state.mark_session_dirty();
@@ -497,12 +588,23 @@ impl App {
                 tab_id: tab_id.clone(),
                 previous_tab_id,
                 workspace_id: workspace_id.clone(),
-                source_workspace_id,
+                source_workspace_id: source_workspace_id.clone(),
                 insert_index: target_tab_idx,
                 tabs: tabs.clone(),
                 source_tabs,
             },
         });
+        if source_ws_idx.is_none() {
+            // No final snapshot, as in `workspace.merge`: the tab moved rather
+            // than closed, so a pre-close `workspace_info` would report it closed.
+            self.emit_event(EventEnvelope {
+                event: EventKind::WorkspaceClosed,
+                data: EventData::WorkspaceClosed {
+                    workspace_id: source_workspace_id,
+                    workspace: None,
+                },
+            });
+        }
 
         encode_success(
             id,
@@ -1141,42 +1243,286 @@ mod tests {
         );
     }
 
-    #[test]
-    fn api_tab_move_refuses_the_last_tab_in_a_workspace() {
-        let event_hub = crate::api::EventHub::default();
+    fn test_app(event_hub: crate::api::EventHub) -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new(
+        App::new(
             &Config::default(),
             crate::app::AppPolicy::TEST,
             None,
             api_rx,
             event_hub,
-        );
-        app.state.workspaces = vec![Workspace::test_new("source"), Workspace::test_new("target")];
-        app.state.active = Some(0);
+        )
+    }
 
-        let tab_id = app.public_tab_id(0, 0).unwrap();
-        let target_workspace_id = app.public_workspace_id(1);
+    fn move_tab_to(app: &mut App, ws_idx: usize, destination: TabMoveDestination) -> TabMoveResult {
+        let tab_id = app.public_tab_id(ws_idx, 0).unwrap();
         let response = app.handle_tab_move(
             "req".into(),
             TabMoveParams {
                 tab_id,
                 insert_index: None,
-                destination: Some(TabMoveDestination::Workspace {
-                    workspace_id: target_workspace_id,
-                    insert_index: None,
-                }),
+                destination: Some(destination),
             },
         );
-
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         let ResponseResult::TabMove { move_result, .. } = success.result else {
             panic!("expected tab move result");
         };
+        move_result
+    }
+
+    /// A workspace derefs through its active tab, so moving its only tab out
+    /// closes it, the way `pane.move` closes a workspace its last pane leaves.
+    #[test]
+    fn api_tab_move_last_tab_closes_its_workspace_and_view_follows() {
+        let event_hub = crate::api::EventHub::default();
+        let mut app = test_app(event_hub.clone());
+        app.state.workspaces = vec![Workspace::test_new("source"), Workspace::test_new("target")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        app.state.previous_pane_focus = None;
+        let moved_root = app.state.workspaces[0].tabs[0].root_pane;
+        let source_workspace_id = app.public_workspace_id(0);
+        let target_key = app.state.workspaces[1].id.clone();
+        let target_workspace_id = app.public_workspace_id(1);
+
+        let move_result = move_tab_to(
+            &mut app,
+            0,
+            TabMoveDestination::Workspace {
+                workspace_id: target_workspace_id,
+                insert_index: None,
+            },
+        );
+
+        assert!(move_result.changed);
+        assert_eq!(move_result.reason, None);
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].id, target_key);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
+        assert_eq!(app.state.workspaces[0].tabs[1].root_pane, moved_root);
+        assert_eq!(app.parse_tab_id(&move_result.tab_id), Some((0, 1)));
+        // The view was on the closed workspace, so it follows the tab.
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(app.state.selected, 0);
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
+        // Focus stayed on the moved pane, so the target workspace's own pane
+        // is not recorded as somewhere the user came from.
+        assert_eq!(app.state.previous_pane_focus, None);
+        app.state.workspaces[0].assert_invariants_for_test();
+        app.state.assert_invariants_for_test();
+
+        assert_moved_then_closed(&event_hub, &source_workspace_id);
+    }
+
+    /// `TabMovedAcrossWorkspaces` comes first, then the source's
+    /// `WorkspaceClosed` with no snapshot.
+    fn assert_moved_then_closed(event_hub: &crate::api::EventHub, source_workspace_id: &str) {
+        let events = event_hub.events_after(0);
+        let moved = events
+            .iter()
+            .position(|(_, event)| {
+                matches!(&event.data, EventData::TabMovedAcrossWorkspaces { .. })
+            })
+            .expect("a TabMovedAcrossWorkspaces event");
+        let closed = events
+            .iter()
+            .position(|(_, event)| {
+                matches!(
+                    &event.data,
+                    EventData::WorkspaceClosed { workspace_id, workspace: None }
+                        if workspace_id == source_workspace_id
+                )
+            })
+            .expect("a WorkspaceClosed event for the source");
+        assert!(moved < closed, "the move is reported before the close");
+    }
+
+    /// A source after the target leaves the target's index alone, and a
+    /// view on a third workspace shifts down past the closed source only
+    /// when it sat after it.
+    #[test]
+    fn api_tab_move_last_tab_to_an_earlier_workspace_keeps_the_view() {
+        let mut app = test_app(crate::api::EventHub::default());
+        app.state.workspaces = vec![
+            Workspace::test_new("target"),
+            Workspace::test_new("source"),
+            Workspace::test_new("viewed"),
+        ];
+        app.state.active = Some(2);
+        app.state.selected = 2;
+        app.state.ensure_test_terminals();
+        let moved_root = app.state.workspaces[1].tabs[0].root_pane;
+        let target_key = app.state.workspaces[0].id.clone();
+        let viewed_key = app.state.workspaces[2].id.clone();
+        let target_workspace_id = app.public_workspace_id(0);
+
+        let move_result = move_tab_to(
+            &mut app,
+            1,
+            TabMoveDestination::Workspace {
+                workspace_id: target_workspace_id,
+                insert_index: None,
+            },
+        );
+
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert_eq!(app.state.workspaces[0].id, target_key);
+        assert_eq!(app.state.workspaces[0].tabs[1].root_pane, moved_root);
+        assert_eq!(app.state.workspaces[1].id, viewed_key);
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.selected, 1);
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Closing a background workspace shifts later indices down; the view
+    /// stays on the workspace it was on, and the target is found after the
+    /// shift.
+    #[test]
+    fn api_tab_move_last_tab_from_background_workspace_keeps_the_view() {
+        let mut app = test_app(crate::api::EventHub::default());
+        app.state.workspaces = vec![
+            Workspace::test_new("viewed"),
+            Workspace::test_new("source"),
+            Workspace::test_new("target"),
+        ];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let moved_root = app.state.workspaces[1].tabs[0].root_pane;
+        let viewed_key = app.state.workspaces[0].id.clone();
+        let target_key = app.state.workspaces[2].id.clone();
+        let target_workspace_id = app.public_workspace_id(2);
+
+        let move_result = move_tab_to(
+            &mut app,
+            1,
+            TabMoveDestination::Workspace {
+                workspace_id: target_workspace_id,
+                insert_index: Some(0),
+            },
+        );
+
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert_eq!(app.state.workspaces[0].id, viewed_key);
+        assert_eq!(app.state.workspaces[1].id, target_key);
+        assert_eq!(app.state.workspaces[1].tabs[0].root_pane, moved_root);
+        assert_eq!(app.state.active, Some(0));
+        assert_eq!(app.state.selected, 0);
+        app.state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn api_tab_move_last_tab_to_new_workspace_replaces_its_workspace() {
+        let event_hub = crate::api::EventHub::default();
+        let mut app = test_app(event_hub.clone());
+        app.state.workspaces = vec![Workspace::test_new("source"), Workspace::test_new("other")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let source_workspace_id = app.public_workspace_id(0);
+        let moved_root = app.state.workspaces[0].tabs[0].root_pane;
+        let other_key = app.state.workspaces[1].id.clone();
+
+        let move_result = move_tab_to(
+            &mut app,
+            0,
+            TabMoveDestination::NewWorkspace {
+                label: Some("fresh".into()),
+            },
+        );
+
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 2);
+        assert_eq!(app.state.workspaces[0].id, other_key);
+        assert_eq!(app.state.workspaces[1].tabs[0].root_pane, moved_root);
+        assert_eq!(
+            app.state.workspaces[1].custom_name.as_deref(),
+            Some("fresh")
+        );
+        assert_eq!(app.state.active, Some(1));
+        assert_eq!(app.state.selected, 1);
+        app.state.assert_invariants_for_test();
+        assert_moved_then_closed(&event_hub, &source_workspace_id);
+    }
+
+    /// The only workspace can still move its tab to a new one: the old one
+    /// closes and the new one takes over the view.
+    #[test]
+    fn api_tab_move_only_tab_of_only_workspace_to_new_workspace() {
+        let mut app = test_app(crate::api::EventHub::default());
+        app.state.workspaces = vec![Workspace::test_new("source")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let moved_root = app.state.workspaces[0].tabs[0].root_pane;
+
+        let move_result = move_tab_to(
+            &mut app,
+            0,
+            TabMoveDestination::NewWorkspace { label: None },
+        );
+
+        assert!(move_result.changed);
+        assert_eq!(app.state.workspaces.len(), 1);
+        assert_eq!(app.state.workspaces[0].tabs[0].root_pane, moved_root);
+        assert_eq!(app.state.active, Some(0));
+        app.state.assert_invariants_for_test();
+    }
+
+    /// Closing a worktree group's owner would orphan its linked workspaces, so
+    /// its last tab still stays put (`workspace.merge` refuses the same).
+    #[test]
+    fn api_tab_move_refuses_the_last_tab_of_a_worktree_group_owner() {
+        let mut app = test_app(crate::api::EventHub::default());
+        let mut parent = Workspace::test_new("parent");
+        parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr".into(),
+            is_linked_worktree: false,
+        });
+        let mut linked = Workspace::test_new("issue");
+        linked.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: "/repo/herdr-issue".into(),
+            is_linked_worktree: true,
+        });
+        app.state.workspaces = vec![parent, linked, Workspace::test_new("target")];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        let target_workspace_id = app.public_workspace_id(2);
+
+        let move_result = move_tab_to(
+            &mut app,
+            0,
+            TabMoveDestination::Workspace {
+                workspace_id: target_workspace_id,
+                insert_index: None,
+            },
+        );
+
         assert!(!move_result.changed);
         assert_eq!(move_result.reason, Some(TabMoveReason::LastTabInWorkspace));
+        assert_eq!(app.state.workspaces.len(), 3);
         assert_eq!(app.state.workspaces[0].tabs.len(), 1);
-        assert_eq!(app.state.workspaces[1].tabs.len(), 1);
+        assert_eq!(app.state.workspaces[2].tabs.len(), 1);
+
+        let move_result = move_tab_to(
+            &mut app,
+            0,
+            TabMoveDestination::NewWorkspace { label: None },
+        );
+        assert!(!move_result.changed);
+        assert_eq!(move_result.reason, Some(TabMoveReason::LastTabInWorkspace));
+        assert_eq!(app.state.workspaces.len(), 3);
     }
 
     #[test]

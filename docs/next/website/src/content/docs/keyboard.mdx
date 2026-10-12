@@ -27,7 +27,7 @@ Two more move the focused tab the same way: `move tab to space` and `move tab to
 
 `move pane to space` opens the session navigator to pick a destination. Filter it the same way, then press `enter`. Pick `+ new space` to give the pane a space of its own, a space to put it in a new tab there, or a tab to split it into that tab. The line above the footer says what the selected row will do, and `esc` cancels without moving anything.
 
-`move tab to space` opens the same picker, but a tab lands in a space rather than inside another tab, so only spaces and `+ new space` are offered. A space must keep at least one tab, so moving its last one is refused and a toast says so.
+`move tab to space` opens the same picker, but a tab lands in a space rather than inside another tab, so only spaces and `+ new space` are offered. Moving a space's last tab closes that space, and if you were looking at it, the view follows the tab. A space that owns linked worktree spaces keeps its last tab, because closing it would orphan them.
 
 ## Learn these five first
 
