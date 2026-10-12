@@ -11216,7 +11216,7 @@
             },
             {
               "const": "last_tab_in_workspace",
-              "description": "The tab is its workspace's last, and a workspace must keep one.",
+              "description": "The tab is its workspace's last, and the workspace owns linked worktree\nworkspaces, so closing it would orphan them. Any other workspace closes\nwhen its last tab moves out.",
               "type": "string"
             }
           ]

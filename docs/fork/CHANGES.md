@@ -180,6 +180,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Moving a space's last tab closes the space (issue [#107](https://github.com/cameronsjo/herdr/issues/107))
+
+### fix(api): move a space's only tab instead of refusing
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/app/api/tabs.rs` (`tab_move_to_workspace`, `tab_move_to_new_workspace`, new `take_tab_for_cross_workspace_move` and `can_close_workspace_for_last_tab_move`, `finish_cross_workspace_tab_move` takes an optional source), `src/api/schema/tabs.rs` (`TabMoveReason::LastTabInWorkspace` doc), `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/keyboard.mdx`
+- **Replaces:** the fork's own `tab.move` refusal of a workspace's last tab (`changed: false, reason: last_tab_in_workspace`), which the client shell ignored, so `move tab to space` and `move tab to new space` silently did nothing on a one-tab space. The move now closes the emptied workspace the way `pane.move` closes one its last pane leaves: the workspace is removed before it is drained, `active`/`selected` shift past it, a view that was on it follows the tab, and a `WorkspaceClosed` event (no snapshot, as in `workspace.merge`) follows `TabMovedAcrossWorkspaces`. A workspace that owns linked worktree workspaces still refuses with `last_tab_in_workspace`, since closing it would orphan them. No wire shape changes.
+- **Regression check:** `cargo nextest run -E 'test(/api_tab_move_/)'`. Restoring the unconditional refusal reddens `api_tab_move_last_tab_closes_its_workspace_and_view_follows`, `api_tab_move_last_tab_from_background_workspace_keeps_the_view`, `api_tab_move_last_tab_to_new_workspace_replaces_its_workspace` and `api_tab_move_only_tab_of_only_workspace_to_new_workspace`; dropping the worktree-owner gate reddens `api_tab_move_refuses_the_last_tab_of_a_worktree_group_owner`.
+- **Render scaling:** not affected; the change runs once per API call.
+
 ## Agents running outside a pane can register in the agents panel
 
 ### feat(agent): register pane-less agents with a heartbeat TTL
