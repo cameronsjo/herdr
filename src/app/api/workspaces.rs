@@ -2103,4 +2103,89 @@ mod tests {
         assert_eq!(workspaces[0].workspace_id, moved_id);
         assert!(event_hub.events_after(0).is_empty());
     }
+
+    /// `state.active` and `state.selected` are indexed bare in many places,
+    /// so every structural operation must leave them in range. Random
+    /// close/move/merge sequences, checked after each step, rule out a
+    /// sequence that leaves either one stale.
+    #[test]
+    fn random_close_move_merge_sequences_keep_active_and_selected_in_range() {
+        // xorshift64: deterministic without adding a dependency, so a
+        // failure reproduces from the printed seed and step.
+        fn next(state: &mut u64) -> u64 {
+            *state ^= *state << 13;
+            *state ^= *state >> 7;
+            *state ^= *state << 17;
+            *state
+        }
+        fn pick(rng: &mut u64, len: usize) -> usize {
+            (next(rng) % len as u64) as usize
+        }
+
+        for seed in 1..=24u64 {
+            let mut rng = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+            let mut app = merge_test_app(&["a", "b", "c"]);
+            app.state.assert_invariants_for_test();
+            for step in 0..40 {
+                let len = app.state.workspaces.len();
+                let op = if len == 0 { 0 } else { pick(&mut rng, 9) };
+                match op {
+                    0 => {
+                        let mut workspace = Workspace::test_new("added");
+                        if next(&mut rng).is_multiple_of(2) {
+                            workspace.test_add_tab(None);
+                        }
+                        app.state.workspaces.push(workspace);
+                        app.state.ensure_test_terminals();
+                        if app.state.active.is_none() {
+                            app.state.active = Some(0);
+                            app.state.selected = 0;
+                        }
+                    }
+                    1 => {
+                        let idx = pick(&mut rng, len);
+                        app.state.switch_workspace(idx);
+                    }
+                    2 => {
+                        app.state.selected = pick(&mut rng, len);
+                    }
+                    3 => {
+                        let source = pick(&mut rng, len);
+                        let insert = pick(&mut rng, len + 1);
+                        app.state.move_workspace(source, insert);
+                    }
+                    4 => {
+                        app.state.selected = pick(&mut rng, len);
+                        app.state.close_selected_workspace();
+                    }
+                    5 if len >= 2 => {
+                        let source = pick(&mut rng, len);
+                        let target = (source + 1 + pick(&mut rng, len - 1)) % len;
+                        merge_request(&mut app, source, target, false);
+                    }
+                    6 => {
+                        app.state.close_tab();
+                    }
+                    7 => {
+                        app.state.close_pane();
+                    }
+                    _ => {
+                        if let Some(active) = app.state.active {
+                            let workspace = &mut app.state.workspaces[active];
+                            if next(&mut rng).is_multiple_of(2) {
+                                workspace.test_add_tab(None);
+                            } else {
+                                workspace.test_split(ratatui::layout::Direction::Horizontal);
+                            }
+                            app.state.ensure_test_terminals();
+                        }
+                    }
+                }
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    app.state.assert_invariants_for_test();
+                }));
+                assert!(result.is_ok(), "seed {seed}, step {step}, op {op}");
+            }
+        }
+    }
 }
