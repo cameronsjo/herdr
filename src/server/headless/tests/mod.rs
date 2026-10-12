@@ -73,9 +73,14 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
     );
 
     app.state.default_shell = crate::app::exiting_test_command().into();
+    // The counter keeps the name unique when tests share a process (plain
+    // `cargo test`): macOS clocks tick in microseconds, so two tests starting
+    // together can read the same timestamp and collide on the socket.
+    static NEXT_DIR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "hh-{}-{}",
+        "hh-{}-{}-{}",
         std::process::id(),
+        NEXT_DIR.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())

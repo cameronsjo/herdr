@@ -683,6 +683,13 @@ impl AppState {
         {
             self.previous_pane_focus = None;
         }
+        // Every pane-closing path comes through here, and `handle_pane_died`
+        // returns before its own alias cleanup once the pane's tab or
+        // workspace is already gone, so drop aliases to the closed panes now.
+        self.pane_id_aliases
+            .retain(|_, alias| !pane_ids.contains(alias));
+        self.public_pane_id_aliases
+            .retain(|_, alias| !pane_ids.contains(alias));
         for pane_id in pane_ids {
             self.plugin_panes.remove(&pane_id);
         }

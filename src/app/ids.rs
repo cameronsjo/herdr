@@ -22,9 +22,15 @@ impl App {
     }
 
     /// Infallible form for the many callers that already hold a validated
-    /// index. An out-of-range index is a bug, but it must not panic the server
-    /// from one socket request: it logs, trips in debug builds, and yields an
-    /// empty id that matches no workspace.
+    /// index. An out-of-range index is a bug: it logs, trips in debug builds,
+    /// and yields an empty id that matches no workspace.
+    ///
+    /// The empty-id fallback only keeps this call from panicking. Callers such
+    /// as `workspace_info`, `emit_focus_api_events`, and `handle_pane_move`
+    /// index `state.workspaces[ws_idx]` directly next to the call, so a bad
+    /// index still panics there. The real protection is upstream: every
+    /// client-supplied workspace id is bounds-checked by `parse_workspace_id`
+    /// when it becomes an index, so no unvalidated index reaches these callers.
     #[track_caller]
     pub(crate) fn public_workspace_id(&self, ws_idx: usize) -> String {
         // Captured here: `#[track_caller]` does not reach into the closure.
