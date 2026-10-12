@@ -709,6 +709,7 @@ pub(super) struct ClientConfirmMergeOverlay {
 
 #[derive(Debug)]
 pub(super) struct ClientTabCloseConfirmation {
+    pub(super) pane_id: Option<String>,
     pub(super) tab_id: String,
     pub(super) workspace: WorkspaceNavigationTarget,
 }
