@@ -2,14 +2,60 @@
 
 use std::collections::BTreeMap;
 
+use clap::{Arg, ArgAction, Command, ValueHint};
+
 use crate::api::schema::{
-    AgentRegisterParams, AgentUnregisterParams, EmptyParams, Method, Request,
+    AgentRegisterParams, AgentStatus, AgentUnregisterParams, EmptyParams, Method, Request,
 };
 
 pub(super) const REGISTER_USAGE: &str = "herdr agent register <name> [--source ID] [--agent LABEL] [--status STATUS] [--cwd PATH] [--token KEY=VALUE]... [--ttl-ms N]";
 pub(super) const UNREGISTER_USAGE: &str = "herdr agent unregister <name> [--source ID]";
 pub(super) const REGISTERED_USAGE: &str = "herdr agent registered";
 const DEFAULT_SOURCE: &str = "cli";
+
+/// The clap shape of these commands, for `herdr agent --help` and completions.
+/// Parsing stays with the functions below.
+pub(super) fn commands() -> [Command; 3] {
+    let option = |name: &'static str, value_name: &'static str| {
+        Arg::new(name)
+            .long(name)
+            .value_name(value_name)
+            .action(ArgAction::Set)
+    };
+    let name = || Arg::new("name").value_name("NAME").required(true);
+    [
+        Command::new("register")
+            .about("Register or refresh an agent that runs outside any pane")
+            .arg(name())
+            .arg(option("source", "ID"))
+            .arg(option("agent", "LABEL"))
+            .arg(
+                option("status", "STATUS")
+                    .value_parser(["idle", "working", "blocked", "done", "unknown"]),
+            )
+            .arg(option("cwd", "PATH").value_hint(ValueHint::AnyPath))
+            .arg(option("token", "KEY=VALUE").action(ArgAction::Append))
+            .arg(option("ttl-ms", "N")),
+        Command::new("unregister")
+            .about("Remove an agent registered outside any pane")
+            .arg(name())
+            .arg(option("source", "ID")),
+        Command::new("registered").about("List agents registered outside any pane"),
+    ]
+}
+
+fn parse_agent_status(value: &str) -> std::io::Result<AgentStatus> {
+    match value {
+        "idle" => Ok(AgentStatus::Idle),
+        "working" => Ok(AgentStatus::Working),
+        "blocked" => Ok(AgentStatus::Blocked),
+        "done" => Ok(AgentStatus::Done),
+        "unknown" => Ok(AgentStatus::Unknown),
+        _ => Err(std::io::Error::other(format!(
+            "invalid agent status: {value} (expected idle, working, blocked, done, or unknown)"
+        ))),
+    }
+}
 
 pub(super) fn agent_register(args: &[String]) -> std::io::Result<i32> {
     let Some(name) = args.first().filter(|name| !name.starts_with("--")) else {
@@ -35,7 +81,7 @@ pub(super) fn agent_register(args: &[String]) -> std::io::Result<i32> {
         match flag {
             "--source" => params.source = value.clone(),
             "--agent" => params.agent = Some(value.clone()),
-            "--status" => match super::parse_agent_status(value) {
+            "--status" => match parse_agent_status(value) {
                 Ok(status) => params.status = Some(status),
                 Err(err) => {
                     eprintln!("{err}");
