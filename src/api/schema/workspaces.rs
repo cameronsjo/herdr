@@ -3,72 +3,100 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::common::AgentStatus;
+use crate::cli::projection::{cli_params, Field};
+use crate::cli::workspace_bindings as bindings;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceCreateParams {
-    /// Workspace whose focused pane supplies the `follow` cwd policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_workspace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(default)]
-    pub focus: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub env: HashMap<String, String>,
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceCreateParams => WorkspaceCreateProjection {
+        /// Workspace whose focused pane supplies the `follow` cwd policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub source_workspace_id: Option<String> => Field::new(None::<String>),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub cwd: Option<String> => Field::new(None)
+            .input(bindings::optional_text("cwd", "PATH").path().order(0)),
+        #[serde(default)]
+        pub focus: bool => Field::new(false)
+            .input(bindings::boolean("focus", true).order(3))
+            .input(bindings::boolean("no-focus", false).order(4)),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub label: Option<String> => Field::new(None)
+            .input(bindings::optional_text("label", "TEXT").order(1)),
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        pub env: HashMap<String, String> => Field::new(HashMap::new())
+            .input(bindings::environment().order(2)),
+    }
 }
 
-/// Focuses the space already open on the requested path, or creates one there.
-///
-/// `workspace.create` keeps creating unconditionally, so this is a separate
-/// method rather than a flag on it: an older server that ignored such a flag
-/// would report success while opening the duplicate the caller asked it to
-/// avoid. A server that does not advertise `workspace.open` simply loses the
-/// reuse, and the client falls back to `workspace.create`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceOpenParams {
-    /// Workspace whose focused pane supplies the `follow` cwd policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_workspace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(default)]
-    pub focus: bool,
-    /// Applied only to a space this call creates; reuse never renames a space.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub env: HashMap<String, String>,
+cli_params! {
+    /// Focuses the space already open on the requested path, or creates one there.
+    ///
+    /// `workspace.create` keeps creating unconditionally, so this is a separate
+    /// method rather than a flag on it: an older server that ignored such a flag
+    /// would report success while opening the duplicate the caller asked it to
+    /// avoid. A server that does not advertise `workspace.open` simply loses the
+    /// reuse, and the client falls back to `workspace.create`.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceOpenParams => WorkspaceOpenProjection {
+        /// Workspace whose focused pane supplies the `follow` cwd policy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub source_workspace_id: Option<String> => Field::new(None::<String>),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub cwd: Option<String> => Field::new(None)
+            .input(bindings::optional_text("cwd", "PATH").path().order(0)),
+        #[serde(default)]
+        pub focus: bool => Field::new(false)
+            .input(bindings::boolean("focus", true).order(3))
+            .input(bindings::boolean("no-focus", false).order(4)),
+        /// Applied only to a space this call creates; reuse never renames a space.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub label: Option<String> => Field::new(None)
+            .input(bindings::optional_text("label", "TEXT").order(1)),
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        pub env: HashMap<String, String> => Field::new(HashMap::new())
+            .input(bindings::environment().order(2)),
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceCloseParams {
-    pub workspace_id: String,
-    #[serde(default, skip_serializing_if = "super::is_false")]
-    pub close_group: bool,
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceCloseParams => WorkspaceCloseProjection {
+        pub workspace_id: String => Field::new(String::new()).input(bindings::workspace_id()),
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub close_group: bool => Field::new(false)
+            .input(bindings::boolean("group", true).hidden()),
+    }
 }
 
-/// Relocates every tab of `source_workspace_id` into `target_workspace_id` and
-/// then closes the emptied source.
-///
-/// `merge_group` is the same explicit-intent gate `workspace.close` carries: a
-/// source that owns linked worktree workspaces refuses without it, so merge
-/// cannot become a way around that control. With the flag the whole worktree
-/// group merges — every member's tabs move to the target, and every member
-/// closes. Merge never destroys a tab.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceMergeParams {
-    pub source_workspace_id: String,
-    pub target_workspace_id: String,
-    #[serde(default, skip_serializing_if = "super::is_false")]
-    pub merge_group: bool,
+cli_params! {
+    /// Relocates every tab of `source_workspace_id` into `target_workspace_id` and
+    /// then closes the emptied source.
+    ///
+    /// `merge_group` is the same explicit-intent gate `workspace.close` carries: a
+    /// source that owns linked worktree workspaces refuses without it, so merge
+    /// cannot become a way around that control. With the flag the whole worktree
+    /// group merges — every member's tabs move to the target, and every member
+    /// closes. Merge never destroys a tab.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceMergeParams => WorkspaceMergeProjection {
+        pub source_workspace_id: String => Field::new(String::new())
+            .input(bindings::positional_workspace_id("source_workspace_id", 0)
+                .value_name("SOURCE_WORKSPACE_ID")),
+        pub target_workspace_id: String => Field::new(String::new())
+            .input(bindings::positional_workspace_id("target_workspace_id", 1)
+                .value_name("TARGET_WORKSPACE_ID")),
+        #[serde(default, skip_serializing_if = "super::is_false")]
+        pub merge_group: bool => Field::new(false).input(bindings::boolean("group", true)),
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceRenameParams {
-    pub workspace_id: String,
-    pub label: String,
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceRenameParams => WorkspaceRenameProjection {
+        pub workspace_id: String => Field::new(String::new())
+            .input(bindings::workspace_id().value_name("WORKSPACE_ID")),
+        pub label: String => Field::new(String::new()).input(bindings::label()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -84,17 +112,23 @@ pub struct WorkspaceMoveBlockParams {
     pub before_workspace_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkspaceReportMetadataParams {
-    pub workspace_id: String,
-    pub source: String,
-    #[schemars(schema_with = "super::common::metadata_token_patch_schema")]
-    pub tokens: HashMap<String, Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seq: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 1, max = 86_400_000))]
-    pub ttl_ms: Option<u64>,
+cli_params! {
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WorkspaceReportMetadataParams => WorkspaceMetadataProjection {
+        pub workspace_id: String => Field::new(String::new())
+            .input(bindings::workspace_id().value_name("WORKSPACE_ID")),
+        pub source: String => Field::new(String::new()).input(bindings::source())
+            .validate(|source| bindings::validate_source(source)),
+        #[schemars(schema_with = "super::common::metadata_token_patch_schema")]
+        pub tokens: HashMap<String, Option<String>> => Field::new(HashMap::new())
+            .input(bindings::token()).input(bindings::clear_token())
+            .validate(bindings::validate_tokens),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub seq: Option<u64> => Field::new(None).input(bindings::seq()),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(range(min = 1, max = 86_400_000))]
+        pub ttl_ms: Option<u64> => Field::new(None).input(bindings::ttl_ms()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

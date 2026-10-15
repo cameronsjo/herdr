@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `dc6b6e5` (16 commits); conflict record below
+- (pending) PR — merge upstream through `916fcf8` (21 commits); conflict record below
+- `746b19a` PR [#105](https://github.com/cameronsjo/herdr/pull/105) (2026-10-12) — merge upstream through `dc6b6e5` (16 commits); conflict record below
 - `1f576c6` PR [#104](https://github.com/cameronsjo/herdr/pull/104) (2026-10-08) — merge upstream through `4dc23bb` (24 commits); conflict record below
 - `704f48a` PR [#93](https://github.com/cameronsjo/herdr/pull/93) (2026-10-05) — merge upstream through `e35f393` (2 commits); merged cleanly, no conflicts
 - `97dcb16` PR [#92](https://github.com/cameronsjo/herdr/pull/92) (2026-10-03) — merge upstream through `5da0a01` (29 commits); conflict record below
@@ -29,6 +30,54 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-10-15 sync: conflict resolutions
+
+Nineteen files conflicted, in two groups. `skills/herdr/SKILL.md` keeps the
+fork's split skill, and `integrations.mdx` keeps the fork's Codex text.
+
+- **Codex turn hooks** (`src/integration/{mod,targets,tests}.rs`,
+  `assets/codex/herdr-agent-state.{sh,ps1}`, plus the auto-merged
+  `src/agent_resume.rs`, `src/app/actions.rs`, `src/terminal/state.rs` and
+  `tests/cli/hooks.rs`): upstream dropped Codex's working/idle hooks and made
+  `herdr:codex` a reserved native-state source, so screen detection alone
+  drives Codex state (#5278). The fork's hybrid lifecycle (working, blocked,
+  idle and metadata hooks with screen correction) is kept: that commit is
+  reverted in full, including the files that merged without a conflict,
+  because `is_reserved_native_state_source` would otherwise have discarded
+  every fork hook report silently. Its
+  `install_codex_removes_turn_status_hooks_from_previous_integration` test is
+  dropped. Upstream's UTF-8 stdin read for PowerShell hooks (#5270) is applied
+  to the fork's Codex script. `CODEX_INTEGRATION_VERSION` goes to 11, because
+  upstream's session-only script is now also v10 and would not reinstall.
+  **Collision:** any upstream edit to the Codex hook scripts, the codex arms of
+  `is_reserved_native_state_source`, or the codex guards in
+  `TerminalState`.
+- **CLI and API command contracts** (`src/api/{mod,schema,server}.rs`,
+  `src/api/schema/{agents,workspaces}.rs`, `src/cli/{agent,completion,spec,tab,workspace}.rs`,
+  `src/server/client_commands.rs`; `src/cli/runtime.rs` deleted): upstream
+  now declares every API method once in `define_operations!` with its UI and
+  client-shell flags, and builds CLI commands from `cli_params!` projections
+  (#5212). The fork's methods are added to that table with the flags they had
+  before: `workspace.open`, `workspace.merge` and `tab.move_to_destination`
+  change the UI and are client-shell methods, `agent.type_submit` changes the
+  UI, and the registered-agent methods do neither. The fork's client-shell
+  admissions for `agent.view.clear`, `pane.move`, `plugin.action.invoke`,
+  `plugin.list` and `plugin.pane.open` are set in the same table, and
+  upstream's UI classification test lists the four fork methods. The fork's
+  CLI commands moved into upstream's binding files: `workspace open`, `move`
+  and `merge` are `workspace_bindings` leaves, `tab move` is a
+  `tab_bindings` leaf that still rejects mixed destinations, and
+  `agent type-submit` is an agent binding. `agent register`, `unregister` and
+  `registered` keep their own parser in `fork_registered_agents.rs` and add
+  their clap shape to the agent tree for help and completion. Upstream now
+  registers `server live-handoff` as a hidden command; the fork un-hides it in
+  `command()` so `herdr server --help` still lists it, and completions use
+  `command_for_completions()`, which leaves it out. Upstream's
+  `completions_hide_private_commands_arguments_and_values` test reads that
+  tree, and checks `--group` on `workspace close` only, because
+  `workspace merge --group` is public in the fork. **Collision:** the
+  `define_operations!` table, the `LEAVES` arrays, and `agent::bindings::command`.
 
 ### 2026-10-12 sync: conflict resolutions
 
