@@ -13,9 +13,10 @@
 # This replaces that line with ALLOWED below: the pinned wrapper, one rule
 # per subcommand the skill bodies run. Everything else (init, update,
 # archive, feedback, completion, config, workset) still asks. It also adds a note
-# under each file's frontmatter. Rerun it after every `openspec update`; CI
-# fails until you do. Idempotent. It fails on an allowed-tools line it does
-# not recognize, so a changed upstream template is looked at, not passed.
+# under each file's frontmatter. scripts/openspec.sh runs it after `init` and
+# `update`; rerun it by hand after regenerating them any other way, or CI
+# fails. Idempotent. It fails on an allowed-tools line it does not
+# recognize, so a changed upstream template is looked at, not passed.
 # Last, it checks every markdown file under the agent directories: no bare
 # `Bash(openspec` grant anywhere, at most one allowed-tools key per file, no
 # indented continuation of it, and no allowed-tools naming openspec other
