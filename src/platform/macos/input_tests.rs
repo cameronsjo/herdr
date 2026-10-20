@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use crate::api::schema::{AgentStartParams, Method, PaneSendInputParams, Request};
+use crate::api::schema::{
+    AgentStartParams, Method, PaneSendInputParams, PaneSendTextParams, Request,
+};
 use crate::app::{App, AppPolicy, AppState};
 use crate::pty::actor::{PtyIoActor, PtyIoActorConfig, PtyReadResult};
 use crate::terminal::{TerminalId, TerminalRuntime};
@@ -188,6 +190,43 @@ async fn canonical_api_rejection_writes_nothing_and_allows_same_name_retry() {
         }
         app.state.assert_invariants_for_test();
     }
+}
+
+#[tokio::test]
+async fn send_text_rejects_oversized_canonical_input_instead_of_dropping_it() {
+    let (master, mut slave) = pty_pair();
+    set_canonical(&slave, true);
+    let handle = PtyIoActor::spawn(PtyIoActorConfig {
+        pane_id: 1,
+        master_fd: master,
+        initially_quiesced: false,
+        on_read: Box::new(|_| PtyReadResult::empty()),
+        on_reader_exit: None,
+    })
+    .unwrap();
+    let (mut app, pane_id, _) = app_with_actor(handle);
+    let send_text = |app: &mut App, text: &str| -> serde_json::Value {
+        let request = Request {
+            id: "text".into(),
+            method: Method::PaneSendText(PaneSendTextParams {
+                pane_id: pane_id.clone(),
+                text: text.into(),
+            }),
+        };
+        serde_json::from_str(&app.handle_api_request(request)).unwrap()
+    };
+    // Darwin silently discards a canonical line past MAX_CANON, so send-text
+    // must refuse it the way send-input does rather than report success.
+    let response = send_text(&mut app, &"x".repeat(3000));
+    assert_eq!(response["error"]["code"], "pane_send_failed");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("canonical mode"));
+    // Nothing was written, and a short line still goes through.
+    let response = send_text(&mut app, "retry\n");
+    assert!(response.get("error").is_none(), "{response}");
+    assert_eq!(read_line(&mut slave), b"retry\n");
 }
 
 #[tokio::test]
