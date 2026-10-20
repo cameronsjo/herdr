@@ -51,7 +51,7 @@ pub(crate) fn validate_pty_submission(fd: RawFd, text: &[u8], enter: &[u8]) -> s
     if line_len > limit as usize {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("input contains a {line_len}-byte line but the terminal is in canonical mode with a {limit}-byte limit; wait for the shell prompt and retry"),
+            format!("input contains a {line_len}-byte line but the terminal is in canonical mode with a {limit}-byte limit; wait for the shell prompt and retry, or split the text into shorter lines"),
         ));
     }
     Ok(())

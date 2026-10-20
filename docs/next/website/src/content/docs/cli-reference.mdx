@@ -275,6 +275,8 @@ and `shift+tab`, function keys such as `f1`, and named punctuation such as
 aliases for `ctrl+c`.
 `esc` is the canonical spelling; `escape` is also accepted.
 
+On macOS, `send-text` is refused with `pane_send_failed` when the pane's terminal is in canonical mode and a line of the text exceeds the 1024-byte limit; the tty would otherwise drop it silently. Split the text into shorter lines or wait for a raw-mode prompt.
+
 `pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
 Report agent state from custom hooks:
