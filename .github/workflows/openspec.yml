@@ -1,0 +1,57 @@
+name: OpenSpec
+
+# Fork-only workflow (cameronsjo/herdr#112). openspec/ holds the specs for the
+# fork's own capabilities and the change proposals. It lives in its own file,
+# not a job in ci.yml, so upstream syncs never conflict on it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openspec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openspec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      # A spec the CLI cannot parse is skipped silently by `openspec list` and
+      # by an agent's /opsx commands, so a malformed one fails here. The CLI
+      # comes from scripts/openspec/package-lock.json (integrity hashes,
+      # install scripts off); the runner image's Node is enough (>= 20.19).
+      - name: Validate specs and changes
+        run: |
+          node --version
+          scripts/openspec.sh validate --all --strict --no-interactive
+
+      # `openspec update` regenerates the skills with a bare `openspec`
+      # pre-allowed, which would run an unpinned CLI from PATH.
+      - name: Generated skills use the pinned CLI
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(.claude/skills/openspec-*/SKILL.md .claude/commands/opsx/*.md .agents/skills/openspec-*/SKILL.md)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no generated OpenSpec skills found; the glob matched nothing"
+            exit 1
+          fi
+          fail=0
+          for f in "${files[@]}"; do
+            if grep -q 'Bash(openspec:' "$f" || ! grep -qF '<!-- herdr: pinned openspec CLI -->' "$f"; then
+              echo "::error file=$f::not pointed at the pinned CLI; run scripts/openspec-localize.sh"
+              fail=1
+            fi
+          done
+          exit "$fail"

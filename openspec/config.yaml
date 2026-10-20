@@ -1,0 +1,37 @@
+schema: spec-driven
+
+# Constraints an agent cannot infer from the code. Everything else (layout,
+# commands, gotchas) is in AGENTS.md and docs/fork/; keep it there, not here.
+context: |
+  This is cameronsjo/herdr, a fork of herdrdev/herdr (a Rust terminal agent
+  runtime). openspec/ specs ONLY what the fork adds or changes; upstream
+  behavior is upstream's to document. Never open an issue, PR or any other
+  write against herdrdev/herdr. Fork issues and PRs go to cameronsjo/herdr.
+  docs/fork/CHANGES.md is the divergence ledger: every fork PR still adds
+  its entry there, and every upstream sync re-runs the regression checks it
+  lists. A spec says what the fork's behavior is; the ledger says where the
+  code diverges and what to re-check on a sync.
+  docs/plans/ is frozen history (no new plans after 2026-10-20). Read a done
+  plan as background, never as a requirement.
+  AGENTS.md and the repo's CLAUDE.md symlink are shared with upstream: keep
+  fork additions inside its "Fork operating rule" section so syncs stay
+  clean. Fork-only CI goes in its own workflow file, never in ci.yml.
+  Run the OpenSpec CLI as scripts/openspec.sh (the pinned version), not a
+  bare `openspec` or `npx`.
+  Commit subjects and PR titles use a type from ALLOWED_TYPES in
+  scripts/conventional_commits.py.
+
+rules:
+  proposal:
+    - Link the cameronsjo/herdr issue the change implements. Every change has one.
+    - Say whether the change touches code upstream also edits (a sync collision surface) and name those files.
+  specs:
+    - Spec observable behavior (keys, palette commands, CLI verbs, API methods and fields, what the TUI shows), not internal type names.
+    - Spec fork behavior only. When upstream adopts a fork behavior, remove the requirement in the sync that lands it.
+  tasks:
+    - End with a task to add the docs/fork/CHANGES.md entry, including its regression check.
+
+operations:
+  archive:
+    guidance:
+      - Archive only after the implementing PR has merged to master.
