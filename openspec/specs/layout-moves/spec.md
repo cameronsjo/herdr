@@ -5,15 +5,15 @@ Layout moves let the operator relocate tabs and panes between spaces and reorder
 
 ## Requirements
 
-### Requirement: CLI move commands
-`herdr workspace move <id> --index N` SHALL reorder a space, and `herdr pane move <pane_id>` MUST require exactly one of `--tab <tab_id> --split <dir>`, `--new-tab` or `--new-workspace`. `herdr tab move` and the `tab.move` API it calls, including moving a space's last tab and the `same_workspace` refusal, are specified in `workspace-api`.
+### Requirement: CLI workspace move
+`herdr workspace move <workspace_id> --index N` SHALL send `workspace.move` to reorder a space, and `--index` MUST be a required non-negative integer. `herdr tab move` and the `tab.move` API it calls, including moving a space's last tab and the `same_workspace` refusal, are specified in `workspace-api`.
 
-#### Scenario: Pane move with two destinations
-- **WHEN** `herdr pane move p_1 --new-tab --new-workspace` is run
-- **THEN** it exits with a usage error and no request is sent
+#### Scenario: Non-numeric index
+- **WHEN** `herdr workspace move w_1 --index two` is run
+- **THEN** it exits with the usage error `--index must be a non-negative integer` and no request is sent
 
 ### Requirement: Every move reachable from keys and palette
-The client SHALL provide these bindable actions, each with a palette row and unbound by default: `move_tab_to_space`, `move_tab_to_new_space`, `move_pane_to_space`, `move_pane_to_new_space`, `move_pane_to_new_tab`, `merge_workspace`, `move_workspace_previous|next` and `move_tab_previous|next`. The "to space" and merge actions MUST open a destination picker; the "new space" and "new tab" actions act on the focused tab or pane at once. Tab reorder wraps at either end.
+The client SHALL provide these bindable actions, each with a palette row and unbound by default: `move_tab_to_space`, `move_tab_to_new_space`, `move_pane_to_space`, `move_pane_to_new_space`, `move_pane_to_new_tab`, `merge_workspace` and `move_workspace_previous|next`. The "to space" and merge actions MUST open a destination picker; the "new space" and "new tab" actions act on the focused tab or pane at once.
 
 #### Scenario: Bound key moves the pane to a new tab
 - **WHEN** `[keys] move_pane_to_new_tab` is bound and pressed
@@ -35,7 +35,7 @@ The tab context menu SHALL offer `Move left`, `Move right`, `Move to space...` a
 - **THEN** the menu lists `Move to space...` and choosing it opens the tab destination picker
 
 ### Requirement: Mouse moves
-Dragging a tab onto another space's sidebar row SHALL move the tab to that space; dropping it within the tab bar reorders it. Dragging from an agent row in the sidebar SHALL move that agent's pane: a drop on a space row sends it to a new tab there, a drop on another tab opens the split-direction chooser, and a release off every target cancels. An agent-row press released without dragging MUST focus that agent the same way an ordinary click does.
+Dragging a tab onto another space's sidebar row SHALL move the tab to that space. Dragging from an agent row in the sidebar SHALL move that agent's pane: a drop on a space row sends it to a new tab there, a drop on another tab opens the split-direction chooser, and a release off every target cancels. An agent-row press released without dragging MUST focus that agent the same way an ordinary click does.
 
 #### Scenario: Tab dropped on a sidebar space
 - **WHEN** a tab is dragged from the tab bar and released over another space in the sidebar

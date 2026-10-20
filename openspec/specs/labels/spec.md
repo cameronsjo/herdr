@@ -1,7 +1,7 @@
 # labels Specification
 
 ## Purpose
-Labels covers the fork's single sanitizing rule for every workspace, tab, pane and worktree label herdr stores or draws, including labels derived from paths, and the grammar an agent name must satisfy.
+Labels covers the fork's single sanitizing rule for every workspace, tab, pane and worktree label herdr stores or draws, including labels derived from paths, and where the fork enforces upstream's agent-name grammar.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ Every workspace, tab and pane label setter, whether reached through the API, the
 - **THEN** the stored label is its first 128 characters
 
 ### Requirement: Path-derived workspace labels are sanitized
-A workspace label derived from a directory SHALL pass through the same sanitizer, because a checked-out repository names its own directory. For a non-repository directory the label is the sanitized final path component, falling back to the sanitized full path when that component sanitizes to empty. For a repository the label is the sanitized repository directory name, and a worktree group's repository name falls back to `repo` when it sanitizes to empty.
+A workspace label derived from a directory SHALL pass through the same sanitizer. For a non-repository directory the label is `~` for the home directory itself, otherwise the sanitized final path component, falling back to the sanitized full path when that component sanitizes to empty. For a repository the label is the sanitized repository directory name, and a worktree group's repository name falls back to `repo` when it sanitizes to empty.
 
 #### Scenario: Directory name with control characters
 - **WHEN** a workspace opens on a directory named `proj\u0007ect` with no custom label
@@ -49,13 +49,17 @@ The label of an agent view, which is drawn beside a click target in the agents p
 - **WHEN** an agent view is set with the label `my\u200dview`
 - **THEN** the view's label is `myview`
 
-### Requirement: Agent name grammar
-An agent name SHALL be a lowercase ASCII letter followed by lowercase ASCII letters, digits, `-` or `_`, at most 32 bytes in total. The check MUST run on the raw input before any sanitizing, and a name that fails it MUST NOT be stored as a routing key by any path, including session restore.
+### Requirement: Agent names are checked at the setter and on restore
+The agent-name grammar is upstream's `valid_agent_name`, which upstream applies in `agent.start` and `agent.rename`. The fork SHALL also apply it inside the terminal's agent-name setter, on the raw input before any sanitizing, so a rejected name clears the routing key whatever path set it. Session restore MUST drop a stored name the grammar refuses, and when two panes restore the same name only the first MUST keep it.
 
-#### Scenario: Valid names
-- **WHEN** an agent is started with the name `reviewer-2` or `a_b`
-- **THEN** the name is accepted
+#### Scenario: Format character is not laundered
+- **WHEN** the setter receives `rev\u200biewer`
+- **THEN** the pane carries no agent name, rather than `reviewer`
 
-#### Scenario: Invalid names
-- **WHEN** an agent name is `Reviewer`, ` reviewer`, `reviewer one`, `2nd`, `rev\u200biewer` or 33 bytes long
-- **THEN** it is refused and no pane carries it
+#### Scenario: Invalid stored name on restore
+- **WHEN** a session file stores the agent name `Reviewer` for a pane
+- **THEN** the pane restores with no agent name
+
+#### Scenario: Duplicate stored name on restore
+- **WHEN** a session file stores the agent name `reviewer` for two panes that both restore their agent
+- **THEN** the first pane restored keeps `reviewer` and the second restores with no agent name

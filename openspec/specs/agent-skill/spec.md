@@ -1,7 +1,7 @@
 # agent-skill Specification
 
 ## Purpose
-The agent skill is the guidance file agents read to drive herdr. The fork splits it into a `SKILL.md` plus progressive-disclosure references, bundles all of them into the binary, and lets the binary write the whole directory.
+The agent skill is the guidance file agents read to drive herdr. The fork splits it into a `SKILL.md` plus progressive-disclosure references, bundles all of them into the binary, and lets the binary write the whole directory. Printing `SKILL.md` with a bare `herdr --skill` is upstream behavior and is not specified here.
 
 ## Requirements
 
@@ -11,13 +11,6 @@ The agent skill SHALL be `skills/herdr/SKILL.md` plus reference files under `ski
 #### Scenario: A reference file is added
 - **WHEN** a new `.md` file is added under `skills/herdr/references/` without bundling it
 - **THEN** the build's skill-bundling test fails
-
-### Requirement: herdr --skill prints the skill
-`herdr --skill` SHALL print the bundled `SKILL.md` to stdout and exit with status 0, without starting or contacting a server.
-
-#### Scenario: Print the skill
-- **WHEN** `herdr --skill` is run
-- **THEN** the contents of `SKILL.md` are printed and the process exits 0
 
 ### Requirement: herdr --skill --install writes the directory
 `herdr --skill --install <dir>` (or `--install=<dir>`) SHALL create `<dir>/references/`, write `SKILL.md` and every bundled reference file, and print `installed herdr skill to <dir>`. Installing over an existing directory MUST remove any `references/*.md` file this build does not carry and MUST NOT touch any other file in `<dir>`.

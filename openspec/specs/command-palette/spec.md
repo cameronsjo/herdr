@@ -17,7 +17,7 @@ The palette SHALL offer one row for every keybind help entry that carries an act
 - **THEN** no row matches
 
 ### Requirement: Compact empty palette led by recent commands
-With an empty query the palette SHALL show at most 12 rows: the most recently run commands first (newest on top, no duplicates, skipping any no longer available), then a fixed featured list of common actions (new workspace, new and open worktree, new tab, both splits, pane and tab moves to a space, zoom, toggle sidebar, settings). Typing any query MUST search every row, including rows the compact list omits.
+With an empty query the palette SHALL show at most 12 rows: the most recently run commands first (newest on top, no duplicates, skipping any no longer available), then a fixed featured list of 12 common actions (new workspace, new worktree, open worktree, new tab, split vertical, split horizontal, move pane to space, move pane to new tab, move tab to space, zoom, toggle sidebar, settings). Typing any query MUST search every row, including rows the compact list omits.
 
 #### Scenario: Recent command leads
 - **WHEN** the operator last ran `resize pane left` from the palette and reopens it with no query

@@ -34,4 +34,4 @@ rules:
 operations:
   archive:
     guidance:
-      - Archive only after the implementing PR has merged to master.
+      - Archive in the PR that finishes the change, so the spec merges with the code. Never archive a change whose implementation is not in that PR or already on master.

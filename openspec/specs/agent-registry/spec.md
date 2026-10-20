@@ -49,15 +49,34 @@ A registered record SHALL be removed once its TTL passes without another `agent.
 - **THEN** the response is the error `registered_agent_limit`
 
 ### Requirement: Registered agents reach clients as an optional endpoint control
-The server SHALL send the registry to client shells as the optional endpoint control `fork.registered-agents.v1`, only when its visible contents change, and MUST NOT send it to a client before any agent has ever registered, so existing endpoint message sequences are unchanged. A heartbeat that changes only the deadline MUST NOT trigger a send. A client MUST read an unknown status as `unknown`, drop a malformed record, and clear the list on an unparseable payload.
+The server SHALL send the registry to client shells as the optional endpoint control `fork.registered-agents.v1` only when its revision differs from the one that client last received, and MUST NOT send it to a client that has received none while the registry is empty, so existing message sequences are unchanged. A heartbeat that changes only the deadline MUST NOT trigger a send.
 
-#### Scenario: No agent ever registered
-- **WHEN** a client attaches to a server where no agent has registered
+#### Scenario: Empty registry on attach
+- **WHEN** a client attaches to a server whose registry is empty
 - **THEN** the client receives no `fork.registered-agents.v1` control
 
 #### Scenario: Pure heartbeat
 - **WHEN** an agent re-registers with identical fields
 - **THEN** no new control is sent to attached clients
+
+### Requirement: Clients decode the registry control tolerantly
+A client SHALL read an unknown status in `fork.registered-agents.v1` as `unknown`, MUST drop a malformed record while keeping the rest, and MUST clear its list on an unparseable payload.
+
+#### Scenario: Unparseable payload
+- **WHEN** a client receives a `fork.registered-agents.v1` control whose data is not valid JSON
+- **THEN** the client's registered agent list is empty
+
+### Requirement: Registered agents appear in the agent panel as unfocusable rows
+The agent panel SHALL draw registered agents after the pane rows, under one synthetic space labeled `elsewhere`, through the same row builder as pane rows. A registered row MUST NOT get a click target. An active agent view MUST NOT filter them: they follow the view's rows, so a view matching no pane shows them instead of `no matching agents`. The multi-machine endpoint agent list MUST NOT show them.
+
+#### Scenario: Registered agent in the panel
+- **WHEN** an agent registers with `cwd` `/work/cadence` and a client's panel is open
+- **THEN** a row for it appears after every pane row under `elsewhere`, titled `cadence`
+- **AND** clicking that row focuses nothing
+
+#### Scenario: Agent view matching no pane
+- **WHEN** an agent view that matches no pane is active and one agent is registered
+- **THEN** the panel shows the registered row rather than `no matching agents`
 
 ### Requirement: agent.type_submit types literal text and presses Enter
 The API SHALL provide `agent.type_submit` (CLI `herdr agent type-submit <target> <text>`), which writes `text` into the target agent's pane as typed input followed by Enter, without `agent prompt`'s prompt handling. Empty text MUST be refused with `empty_agent_type_submit`, a disallowed control character with `invalid_agent_type_submit_text`, and a pane with no known running agent with `agent_not_ready`. A blocked agent MUST NOT be refused.

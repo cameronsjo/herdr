@@ -41,6 +41,68 @@ Rerunning `scripts/sync-upstream.sh` after the conflicts are resolved and staged
 - **WHEN** the sync worktree has uncommitted changes and no merge in progress
 - **THEN** the script exits with an error about unrelated uncommitted changes
 
+### Requirement: CI sync keeps fork-owned files and refuses other conflicts
+`scripts/sync-upstream-ci.sh <upstream-url> <branch>` SHALL merge upstream `master` into a new branch with `--no-commit`, then restore every `FORK_OWNED` file (today `README.md` and `.github/workflows/release.yml`) from the fork's tip, whether or not it conflicted. Any other conflict MUST abort the merge and exit 1, and a merge failing for any reason besides conflicts MUST abort with git's exit status. Adding a file to `FORK_OWNED` means upstream's copy is never wanted.
+
+#### Scenario: Upstream edits the fork's release workflow cleanly
+- **WHEN** upstream changes `.github/workflows/release.yml` in a region the fork never touched
+- **THEN** the merge commit carries the fork's copy unchanged
+
+#### Scenario: Conflict outside the owned list
+- **WHEN** upstream conflicts with the fork in `src/app/ids.rs`
+- **THEN** the script aborts the merge, lists the file, and exits 1 without committing
+
+### Requirement: CI sync reports its result and flags tooling changes
+When the fork is already level, `scripts/sync-upstream-ci.sh` SHALL emit `synced=false` and exit 0 without creating a branch. After a merge it SHALL commit `chore(sync): merge upstream through <sha>` and emit `synced=true` and `base=<sha>`, and MUST list every merged path under `.github/`, `scripts/`, `build.rs` or `crates/*/build.rs` as `sensitive`, written to `$GITHUB_OUTPUT` as a multi-line value.
+
+#### Scenario: Sync touches a workflow
+- **WHEN** a merged upstream range changes `.github/workflows/ci.yml`
+- **THEN** the script prints that the sync changes CI or build tooling and emits that path in `sensitive`
+
+#### Scenario: Nothing to sync
+- **WHEN** the fork already contains upstream `master`
+- **THEN** the script emits `synced=false` and exits 0
+
+### Requirement: open-sync-pr never overwrites a sync branch
+`scripts/open-sync-pr.sh` SHALL push `HEAD` to the sync branch with an explicitly supplied token and a plain, non-force push, and MUST exit 1 when the branch already exists and has diverged, so a hand-resolved branch is never overwritten. When a pull request for the branch is open it SHALL stop after the push; otherwise it opens one against `master`, titled with ` (touches CI)` and listing the paths first when `SENSITIVE` is set.
+
+#### Scenario: Branch already hand-resolved
+- **WHEN** today's sync branch exists on the fork with commits the run does not have
+- **THEN** the push is rejected and the script exits 1 without opening a pull request
+
+#### Scenario: Sync touches CI
+- **WHEN** `SENSITIVE` lists `.github/workflows/ci.yml`
+- **THEN** the pull request title ends with `(touches CI)` and its body lists that path before anything else
+
+### Requirement: The sync workflow runs only on dispatch
+`.github/workflows/sync-upstream.yml` SHALL trigger on `workflow_dispatch` only; its weekly schedule was removed deliberately and MUST NOT be restored until sync merges stop routinely conflicting. It MUST check out without persisted credentials, run `scripts/sync-upstream-ci.sh` on `chore/sync-upstream-<YYYYMMDD>`, and run `scripts/open-sync-pr.sh` only when the merge emitted `synced=true`.
+
+#### Scenario: Maintainer starts a sync
+- **WHEN** `gh workflow run "Sync upstream" --repo cameronsjo/herdr` is run and upstream merges cleanly
+- **THEN** a `chore/sync-upstream-<date>` branch is pushed and a pull request is opened against `master`
+
+### Requirement: upstream-drift answers with its exit status
+`scripts/upstream-drift.sh` SHALL fetch the upstream and fork remotes (`UPSTREAM_REMOTE`, default `origin`; `FORK_REMOTE`, default `fork`) and print how many commits the fork is ahead and behind and the newest upstream `v*` tag that is not a `-palette.` tag. It MUST exit 0 when the fork is level, 1 when it is behind, and 2 when it cannot answer because a remote is missing or a fetch fails.
+
+#### Scenario: Fork behind
+- **WHEN** upstream `master` has commits the fork's `master` lacks
+- **THEN** the script prints the count with how to sync and exits 1
+
+#### Scenario: Missing remote
+- **WHEN** no remote named `fork` exists and `FORK_REMOTE` is unset
+- **THEN** the script exits 2
+
+### Requirement: Fork release notes refuse unsafe input
+`scripts/fork_release_notes.py --build-info <file> --tag <tag> --output <file>` SHALL write notes carrying the Homebrew `version`, `url` and `sha256` for the artifact. It MUST refuse a tag that does not fully match `vMAJOR.MINOR.PATCH-palette.N` in ASCII digits, so an upstream tag cannot publish a palette-less build, and MUST refuse a build-info file with no `sha256=` line.
+
+#### Scenario: Upstream tag
+- **WHEN** the script is run with `--tag v0.9.0`
+- **THEN** it exits non-zero without writing notes
+
+#### Scenario: Missing digest
+- **WHEN** the build-info file has no `sha256=` line
+- **THEN** it exits non-zero without writing notes
+
 ### Requirement: docker-check runs the Rust gate in a container
 `scripts/docker-check.sh` SHALL run `cargo fmt --check`, clippy and nextest in a Linux container, then the maintenance script unit tests natively, and print `docker-check: PASS` when all pass. It MUST fail fast when Docker is missing or unreachable. The Zig prebuild MUST run on a bounded CPU set (`ZIG_BUILD_CPUSET`, default `0-1`) and the compile with bounded jobs (`CARGO_BUILD_JOBS`, default `2`) so a small Docker VM does not kill it.
 

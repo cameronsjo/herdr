@@ -31,7 +31,7 @@ The server MUST accept `herdr:codex` state reports for the `codex` agent; `herdr
 - **THEN** the report is ignored and the pane's state does not change
 
 ### Requirement: Screen detection corrects stale Codex reports
-Because Codex runs hooks concurrently and emits no approval-resolved hook, screen detection SHALL stay active alongside the hook. A visible working signal that is not older than the hook report MUST override a Codex `idle` or `blocked` report and show `working`, and a visible blocker MUST override a working report and show `blocked`.
+Because Codex runs hooks concurrently and emits no approval-resolved hook, screen detection SHALL stay active alongside the hook. A visible working signal not older than the hook report MUST override a Codex `idle` or `blocked` report and show `working`, and a visible blocker not older than the hook report MUST override a non-blocked report and show `blocked`.
 
 #### Scenario: Stale Stop during a running turn
 - **WHEN** the Codex hook last reported `idle` but the screen now shows Codex working
@@ -42,7 +42,7 @@ Because Codex runs hooks concurrently and emits no approval-resolved hook, scree
 - **THEN** the pane's state is `blocked`
 
 ### Requirement: The hook ignores events outside its contract
-The hook script MUST exit silently, sending nothing, when it runs outside a herdr pane (`HERDR_ENV`, `HERDR_SOCKET_PATH` or `HERDR_PANE_ID` unset), when the payload's `hook_event_name` does not belong to the action it was installed for, when the payload has no `session_id`, when a `SessionStart` payload has no transcript path, or when `CODEX_THREAD_ID` is set to a different session (a nested Codex). `Stop` and `Interrupt` MUST still report without a transcript path.
+The hook script MUST exit without reporting when it runs outside a herdr pane (`HERDR_ENV` is not `1`, or `HERDR_PANE_ID` or, for the shell script, `HERDR_SOCKET_PATH` is empty), when the payload's `hook_event_name` does not match its installed action, when the payload has no `session_id`, when a `SessionStart` payload has no transcript path, or when `CODEX_THREAD_ID` is set to a different session (a nested Codex). `Stop` and `Interrupt` MUST still report without a transcript path.
 
 #### Scenario: Nested Codex session
 - **WHEN** a hook fires with a `session_id` different from the inherited `CODEX_THREAD_ID`
@@ -53,7 +53,7 @@ The hook script MUST exit silently, sending nothing, when it runs outside a herd
 - **THEN** the hook still reports `idle`
 
 ### Requirement: The Codex hook reports a pane title
-On `SessionStart`, `UserPromptSubmit` and `Stop`, the hook SHALL report a title through `pane.report_metadata`, read from the thread's name or preview over Codex's app-server protocol, falling back on `UserPromptSubmit` to the submitted prompt. The title MUST drop leading `[Image #N]` markers, collapse whitespace, and cut anything over 80 characters to 77 plus `...`. It MUST NOT change Codex's thread id, and nothing is sent when no title can be derived.
+On `SessionStart`, `UserPromptSubmit` and `Stop`, the hook SHALL report a title through `pane.report_metadata`, read from the thread's name or preview over Codex's app-server protocol, or on `UserPromptSubmit` the submitted prompt. The title MUST drop leading `[Image #N]` markers, collapse whitespace, and cut anything over 80 characters to its first 77 with trailing whitespace stripped, plus `...`. It MUST NOT change Codex's thread id, and nothing is sent when no title can be derived.
 
 #### Scenario: Thread renamed in Codex
 - **WHEN** the Codex thread was renamed with `/rename fix login` and a turn stops
@@ -61,7 +61,7 @@ On `SessionStart`, `UserPromptSubmit` and `Stop`, the hook SHALL report a title 
 
 #### Scenario: Long prompt fallback
 - **WHEN** the app-server is unavailable and the user submits a 200-character prompt
-- **THEN** the reported title is the prompt's first 77 characters followed by `...`
+- **THEN** the reported title is the prompt's first 77 characters, trailing whitespace stripped, followed by `...`
 
 ### Requirement: Codex integration version 11
 The installed Codex hook script SHALL carry `HERDR_INTEGRATION_VERSION=11`, and an installed Codex integration with a lower or missing version MUST be reported as outdated by `herdr integration status` so it is reinstalled. The version MUST be above both sides' version 10, since upstream's session-only script also carries 10 and would otherwise never be replaced.
