@@ -28,8 +28,9 @@ Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
 - Stage `docs/fork/CHANGES.md` with `git add -f`. The `/docs/*` ignore rule
   makes a plain `git add` exit non-zero and skip the rest of an `&&` chain.
 - Commit subjects and PR titles must use a type from `ALLOWED_TYPES` in
-  `scripts/conventional_commits.py` (there is no `build:`). CI does not re-run
-  on a title edit, so get the title right before opening the PR.
+  `scripts/conventional_commits.py` (there is no `build:`). A title edit
+  reruns the fork's `PR title` check; ci.yml's `conventional-commits` check
+  keeps its old result until the next push.
 - Run `cargo fmt` after the last edit, tests included. CI's `just lint` fails
   on formatting before any test runs.
 - `just test` (nextest) runs tests in separate processes, so it cannot catch
