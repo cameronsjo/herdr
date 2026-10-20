@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## A test checks that every env lock is the shared one
+
+### test: fail when a module's env_lock is not the shared lock
+
+- **PR:** see the PR that adds this entry
+- **Files:** new fork file `scripts/test_env_lock_architecture.py`; `justfile` (`maintenance-test` lists it)
+- **Replaces:** nothing upstream. Routing each module's test `env_lock()` through `crate::config::test_config_env_lock()` (#74, #36) was a manual step at every sync, and the 2026-10-03 sync had to re-route `update.rs` by hand. The test scans `src/` for every `fn *env_lock(` other than the shared lock itself. Each one's body must call `crate::config::test_config_env_lock()` and must not build its own `static`, `Mutex::new`, `OnceLock` or `LazyLock`. It reuses `mask_comments_and_literals` and `function_body` from `scripts/test_ui_hot_path_architecture.py`, so a comment or string naming the lock does not count.
+- **Regression check:** `python3 -m unittest scripts.test_env_lock_architecture`. Staged break, 2026-10-20: giving `src/update.rs`'s `env_lock()` its own `static LOCK` reddens it with `src/update.rs:2610: env_lock()`. On a sync that conflicts here, route any new `env_lock()` through the shared lock until the test passes. **Collision:** an upstream rename of the two helpers it imports breaks the import loudly.
+- **Render scaling:** not affected; a test only.
+
 ## Fork specs live in OpenSpec (issue [#112](https://github.com/cameronsjo/herdr/issues/112))
 
 ### docs: adopt OpenSpec for fork-only capabilities
@@ -325,7 +335,7 @@ experience) reviewed the sync resolution and fork commits. Fixes:
 ### test: share one env lock across every test that mutates the environment (#74, #36)
 
 - **Files:** `src/config.rs` (`test_config_env_lock`), the test `env_lock()` in `src/{api/server,client/tests/mod,platform/linux,product_announcements,server/autodetect,session,update}.rs`
-- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. Upstream adding a new private `env_lock()` will reintroduce the race; route it through the shared one.
+- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. `scripts/test_env_lock_architecture.py` fails when a sync brings in an `env_lock()` that does not; see its entry above.
 - **Regression check:** `just test-single-process` (five single-process `cargo test --bin herdr` runs; each must reach `test result: ok`). `just test` cannot show this race: nextest runs every test in its own process. 3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25. The follow-up sweep also moved `remote/attach.rs`'s `TMPDIR` lock and `integration_env_lock` onto the shared lock.
 
 ### test: point the hot-path architecture guard at the client shell (#40)
