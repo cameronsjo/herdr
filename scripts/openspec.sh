@@ -46,6 +46,20 @@ case "$sub" in
       exit 2
     fi
     ;;
+  context)
+    # `context --code-workspace <path> --force` overwrites any file with
+    # workspace JSON, and the skills pre-allow `context`.
+    for arg in "$@"; do
+      case "$arg" in
+        --code-workspace | --code-workspace=*)
+          if [[ "${OPENSPEC_ALLOW_OUTSIDE:-}" != 1 ]]; then
+            echo "openspec.sh: 'context --code-workspace' writes outside this repo; rerun with OPENSPEC_ALLOW_OUTSIDE=1 to allow it" >&2
+            exit 2
+          fi
+          ;;
+      esac
+    done
+    ;;
 esac
 
 cd "$root"

@@ -57,8 +57,9 @@ upstream behavior is not. Read the relevant spec before changing fork code.
   `OpenSpec` workflow validates every spec and change. After
   `scripts/openspec.sh update`, run `scripts/openspec-localize.sh` or that
   workflow fails; it narrows the generated skills to the subcommands they run.
-- The wrapper refuses `feedback`, `completion`, `config` and `workset` (they
-  reach outside the repo) unless `OPENSPEC_ALLOW_OUTSIDE=1` is set.
+- The wrapper refuses `feedback`, `completion`, `config`, `workset` and
+  `context --code-workspace` (they reach outside the repo) unless
+  `OPENSPEC_ALLOW_OUTSIDE=1` is set.
 - When a sync brings in upstream's version of a fork behavior, drop the
   requirement from the spec in the same sync.
 

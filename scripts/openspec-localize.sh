@@ -59,15 +59,17 @@ if [ "$found" -eq 0 ]; then
 fi
 
 while IFS= read -r -d '' f; do
-  if grep -q 'Bash(openspec' "$f"; then
+  if grep -qE 'Bash\((npx )?openspec' "$f"; then
     echo "openspec-localize: $f: pre-allows a bare openspec" >&2
     status=1
   fi
   # Frontmatter only: the lines between the first two --- delimiters.
   report="$(ALLOWED="$ALLOWED" awk '
+    { sub(/\r$/, "") }
+    NR == 1 { sub(/^\xef\xbb\xbf/, "") }
     NR == 1 && $0 != "---" { exit }
     /^---$/ { if (++d == 2) exit; next }
-    /^allowed-tools:/ {
+    /^"?allowed-tools"?[ \t]*:/ {
       if (++n > 1) print "more than one allowed-tools key"
       if ($0 ~ /openspec/ && $0 != ENVIRON["ALLOWED"]) print "allowed-tools names openspec but is not the narrowed list"
       grant = 1; next
