@@ -236,15 +236,19 @@ next sync is likely to conflict again:
 `pane.send_input` runs. Darwin discards a canonical-mode line longer than
 `MAX_CANON` (1024 bytes) with no error, so a long send-text to a pane in
 canonical mode reported success and delivered nothing. The handler now runs the
-same preflight and returns `pane_send_failed`. Raw-mode panes are unaffected:
+same preflight and returns `pane_send_failed`. The mode is sampled at
+admission, so a pane that flips to canonical while the text waits in the actor
+queue can still drop a long line. Raw-mode panes are unaffected:
 a 622 KB send-text through a throwaway server arrived byte-identical, even
 with a reader that started three seconds late.
 
 - **Files:** `src/app/api/panes.rs` (`handle_pane_send_text`).
-- **Regression checks:** `send_text_rejects_oversized_canonical_input_instead_of_dropping_it`
-  (macOS only, `src/platform/macos/input_tests.rs`) and
+- **Regression check:** `send_text_rejects_oversized_canonical_input_instead_of_dropping_it`
+  (macOS only, `src/platform/macos/input_tests.rs`; it also pins that
+  multi-line text under the limit and long raw-mode text are accepted).
   `actor_delivers_text_far_past_the_pty_buffer_to_a_slow_raw_reader`
-  (`src/pty/actor/unix.rs`, pins raw-mode delivery past 1 MiB).
+  (`src/pty/actor/unix.rs`) is a characterization test of the unchanged
+  raw-mode path past 1 MiB, not a pin for this check.
 - **Collision:** any upstream change to `handle_pane_send_text` or
   `PtyInputGuard`.
 

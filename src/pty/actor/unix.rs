@@ -1658,6 +1658,9 @@ mod tests {
         );
         let mut termios = unsafe { termios.assume_init() };
         unsafe { libc::cfmakeraw(&mut termios) };
+        // Time out instead of blocking forever, so a stalled actor fails the test.
+        termios.c_cc[libc::VMIN] = 0;
+        termios.c_cc[libc::VTIME] = 30;
         assert_eq!(
             unsafe { libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &termios) },
             0

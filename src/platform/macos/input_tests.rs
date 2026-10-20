@@ -227,6 +227,34 @@ async fn send_text_rejects_oversized_canonical_input_instead_of_dropping_it() {
     let response = send_text(&mut app, "retry\n");
     assert!(response.get("error").is_none(), "{response}");
     assert_eq!(read_line(&mut slave), b"retry\n");
+    // Several lines, each under the limit, are accepted although the total is not.
+    let multi = format!(
+        "{}\n{}\n{}\n",
+        "a".repeat(600),
+        "b".repeat(600),
+        "c".repeat(600)
+    );
+    let response = send_text(&mut app, &multi);
+    assert!(response.get("error").is_none(), "{response}");
+    let mut received = Vec::new();
+    while received.len() < multi.len() {
+        let mut chunk = read_line(&mut slave);
+        assert!(!chunk.is_empty());
+        received.append(&mut chunk);
+    }
+    assert_eq!(received, multi.as_bytes());
+    // The same long line is fine once the terminal is not canonical.
+    set_canonical(&slave, false);
+    let long = "x".repeat(3000);
+    let response = send_text(&mut app, &long);
+    assert!(response.get("error").is_none(), "{response}");
+    let mut received = Vec::new();
+    while received.len() < long.len() {
+        let mut chunk = read_line(&mut slave);
+        assert!(!chunk.is_empty());
+        received.append(&mut chunk);
+    }
+    assert_eq!(received, long.as_bytes());
 }
 
 #[tokio::test]
