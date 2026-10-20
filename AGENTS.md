@@ -25,8 +25,6 @@ Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
   applies to `upstream` there.
 - Merge upstream-sync PRs with a merge commit, never squash or rebase, or the
   next sync hits every conflict again.
-- Stage `docs/fork/CHANGES.md` with `git add -f`. The `/docs/*` ignore rule
-  makes a plain `git add` exit non-zero and skip the rest of an `&&` chain.
 - Commit subjects and PR titles must use a type from `ALLOWED_TYPES` in
   `scripts/conventional_commits.py` (there is no `build:`). CI does not re-run
   on a title edit, so get the title right before opening the PR.

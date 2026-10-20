@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The fork ledger is tracked without `git add -f`
+
+### chore: stop ignoring docs/fork
+
+- **PR:** see the PR that adds this entry
+- **Files:** `.gitignore` (two `!/docs/fork/` exceptions beside upstream's `docs/next`, `docs/preview` and `docs/versions` ones), `AGENTS.md` (fork section only: the `git add -f` note is gone)
+- **Replaces:** nothing upstream. Upstream's `/docs/*` rule ignored the fork's own ledger, so every fork PR needed `git add -f`, and a plain `git add` in an `&&` chain failed the rest of the chain.
+- **Regression check:** `git check-ignore docs/fork/CHANGES.md` exits 1. **Collision:** an upstream edit to the `/docs/*` block of `.gitignore`; keep both `!/docs/fork/` lines.
+- **Render scaling:** not affected; no code changes.
+
 ## Fork specs live in OpenSpec (issue [#112](https://github.com/cameronsjo/herdr/issues/112))
 
 ### docs: adopt OpenSpec for fork-only capabilities
