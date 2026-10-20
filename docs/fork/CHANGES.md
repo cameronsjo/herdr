@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Fork specs live in OpenSpec (issue [#112](https://github.com/cameronsjo/herdr/issues/112))
+
+### docs: adopt OpenSpec for fork-only capabilities
+
+- **PR:** [cameronsjo/herdr#113](https://github.com/cameronsjo/herdr/pull/113)
+- **Files:** `openspec/` (config, ten baseline specs, the archived `2026-10-20-adopt-openspec-baseline` change), `.claude/` and `.agents/skills/openspec-*` (generated, localized to the pinned CLI), `scripts/openspec.sh`, `scripts/openspec-localize.sh`, `scripts/openspec/` (CLI pin), `.github/workflows/openspec.yml` (fork-only), `AGENTS.md` (fork section only)
+- **Replaces:** nothing upstream. Adds a spec per fork capability alongside this ledger; `docs/plans/` takes no new plans after 2026-10-20.
+- **Regression check:** `scripts/openspec.sh validate --all --strict --no-interactive` passes. On a sync, drop any spec requirement for a behavior upstream now ships itself, and confirm `.github/workflows/openspec.yml` and the fork section of `AGENTS.md` survived the merge.
+- **Render scaling:** not affected; no code changes.
+
 ## Moving a space's last tab closes the space (issue [#107](https://github.com/cameronsjo/herdr/issues/107))
 
 ### fix(api): move a space's only tab instead of refusing

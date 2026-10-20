@@ -43,6 +43,26 @@ Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
 - CodeRabbit is capped at one review per hour on the fork. Do not wait on it
   as a review gate, and never tick its paid on-demand review box.
 
+### Fork specs and changes (OpenSpec)
+
+The fork's own behavior is specced in `openspec/specs/` (cameronsjo/herdr#112);
+upstream behavior is not. Read the relevant spec before changing fork code.
+
+- New fork behavior starts as a change, `openspec/changes/<id>/`, driven by
+  `/opsx:propose`, `/opsx:apply` and `/opsx:archive` (the `openspec-*` skills
+  in Codex). Archive it in the PR that finishes it. It still adds its
+  `docs/fork/CHANGES.md` entry.
+- `docs/plans/` is frozen: no new plans after 2026-10-20.
+- Run the CLI only as `scripts/openspec.sh`, the pinned version. The fork-only
+  `OpenSpec` workflow validates every spec and change. After
+  `scripts/openspec.sh update`, run `scripts/openspec-localize.sh` or that
+  workflow fails; it narrows the generated skills to the subcommands they run.
+- The wrapper refuses `feedback`, `completion`, `config`, `workset` and
+  `context --code-workspace` (they reach outside the repo) unless
+  `OPENSPEC_ALLOW_OUTSIDE=1` is set.
+- When a sync brings in upstream's version of a fork behavior, drop the
+  requirement from the spec in the same sync.
+
 ## Scope and Audience
 
 These instructions are layered.

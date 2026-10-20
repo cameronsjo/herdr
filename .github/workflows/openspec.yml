@@ -1,0 +1,55 @@
+name: OpenSpec
+
+# Fork-only workflow (cameronsjo/herdr#112). openspec/ holds the specs for the
+# fork's own capabilities and the change proposals. It lives in its own file,
+# not a job in ci.yml, so upstream syncs never conflict on it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openspec-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openspec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+
+      # A spec the CLI cannot parse is skipped silently by `openspec list` and
+      # by an agent's /opsx commands, so a malformed one fails here. The CLI
+      # comes from scripts/openspec/package-lock.json (integrity hashes,
+      # install scripts off). The CLI needs Node >= 20.19.
+      - name: Validate specs and changes
+        run: |
+          node --version
+          scripts/openspec.sh validate --all --strict --no-interactive
+
+      # `openspec update` resets the generated skills to a bare, unpinned
+      # `openspec` that covers every subcommand. Rerunning the localize script
+      # must change nothing. It also fails on a grant it does not recognize, a
+      # second or continued allowed-tools key, or a bare `Bash(openspec`
+      # anywhere under .claude/ or .agents/.
+      - name: Generated skills use the pinned CLI
+        run: |
+          set -euo pipefail
+          bash scripts/openspec-localize.sh
+          if ! git diff --exit-code -- .claude .agents/skills; then
+            echo "::error::generated OpenSpec skills are not localized to the pinned CLI; run scripts/openspec-localize.sh and commit the result"
+            exit 1
+          fi
