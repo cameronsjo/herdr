@@ -10,6 +10,8 @@
 #   scripts/openspec.sh validate --all --strict --no-interactive
 #   scripts/openspec.sh list --specs
 #   scripts/openspec.sh <any openspec subcommand>
+#
+# `init` and `update` also run scripts/openspec-localize.sh afterwards.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,4 +65,20 @@ case "$sub" in
 esac
 
 cd "$root"
+case "$sub" in
+  init | update)
+    # Both rewrite the generated skills with a bare, unpinned
+    # `Bash(openspec:*)` grant, which the OpenSpec workflow rejects. Localize
+    # them in the same run, even after a failed CLI run that may have written
+    # some of them. The CLI's failure wins the exit status.
+    status=0
+    "$bin" "$@" || status=$?
+    localize=0
+    bash "$root/scripts/openspec-localize.sh" || localize=$?
+    if [[ $status -ne 0 ]]; then
+      exit "$status"
+    fi
+    exit "$localize"
+    ;;
+esac
 exec "$bin" "$@"

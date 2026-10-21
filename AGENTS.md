@@ -25,11 +25,10 @@ Gotchas fork sessions have hit. Each one cost a CI cycle or a debugging detour.
   applies to `upstream` there.
 - Merge upstream-sync PRs with a merge commit, never squash or rebase, or the
   next sync hits every conflict again.
-- Stage `docs/fork/CHANGES.md` with `git add -f`. The `/docs/*` ignore rule
-  makes a plain `git add` exit non-zero and skip the rest of an `&&` chain.
 - Commit subjects and PR titles must use a type from `ALLOWED_TYPES` in
-  `scripts/conventional_commits.py` (there is no `build:`). CI does not re-run
-  on a title edit, so get the title right before opening the PR.
+  `scripts/conventional_commits.py` (there is no `build:`). A title edit
+  reruns the fork's `PR title` check; ci.yml's `conventional-commits` check
+  keeps its old result until the next push.
 - Run `cargo fmt` after the last edit, tests included. CI's `just lint` fails
   on formatting before any test runs.
 - `just test` (nextest) runs tests in separate processes, so it cannot catch
@@ -54,9 +53,7 @@ upstream behavior is not. Read the relevant spec before changing fork code.
   `docs/fork/CHANGES.md` entry.
 - `docs/plans/` is frozen: no new plans after 2026-10-20.
 - Run the CLI only as `scripts/openspec.sh`, the pinned version. The fork-only
-  `OpenSpec` workflow validates every spec and change. After
-  `scripts/openspec.sh update`, run `scripts/openspec-localize.sh` or that
-  workflow fails; it narrows the generated skills to the subcommands they run.
+  `OpenSpec` workflow validates every spec and change.
 - The wrapper refuses `feedback`, `completion`, `config`, `workset` and
   `context --code-workspace` (they reach outside the repo) unless
   `OPENSPEC_ALLOW_OUTSIDE=1` is set.

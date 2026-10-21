@@ -240,6 +240,68 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run --locked -E 'test(positional_workspace_id) + test(numeric_workspace_ids_beyond_the_last_workspace_are_not_found)'`. On a sync, `parse_workspace_id` should merge with no conflict.
 - **Render scaling:** not affected; the parser runs once per request.
 
+## The OpenSpec wrapper localizes the skills it regenerates
+
+### fix: run openspec-localize after openspec init and update
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/openspec.sh`, `scripts/openspec-localize.sh` (header comment), `AGENTS.md` (fork section only)
+- **Replaces:** nothing upstream. `openspec init` and `openspec update` rewrite the generated skills with a bare, unpinned `Bash(openspec:*)` grant, and the `OpenSpec` workflow fails until `scripts/openspec-localize.sh` narrows them again. That second command was a manual step in AGENTS.md. The wrapper now runs the CLI without `exec` for those two subcommands, then runs the localize script, even after a failed CLI run. The CLI's failure wins the exit status; otherwise the localize script's status is returned. Every other subcommand still `exec`s the CLI.
+- **Regression check:** `scripts/openspec.sh update`, then `bash scripts/openspec-localize.sh && git diff --exit-code -- .claude .agents/skills` (the workflow's own check) exits 0. On 2026-10-20 the old wrapper's `update` left 18 generated files changed and this one left none. `scripts/openspec.sh init --no-such-flag` exits 1.
+- **Render scaling:** not affected; no code changes.
+
+## A test checks that every env lock is the shared one
+
+### test: fail when a module's env_lock is not the shared lock
+
+- **PR:** see the PR that adds this entry
+- **Files:** new fork file `scripts/test_env_lock_architecture.py`; `justfile` (`maintenance-test` lists it)
+- **Replaces:** nothing upstream. Routing each module's test `env_lock()` through `crate::config::test_config_env_lock()` (#74, #36) was a manual step at every sync, and the 2026-10-03 sync had to re-route `update.rs` by hand. The test scans `src/` for every `fn *env_lock(` other than the shared lock itself. Each one's body must call `crate::config::test_config_env_lock()`, must not build its own `static`, `Mutex::new`, `OnceLock` or `LazyLock`, and must not name any `static` lock declared anywhere in `src/` (so `&LOCK` or `&super::LOCK` beside the shared call still fails). A `'static` lifetime is not a `static` declaration. It reuses `mask_comments_and_literals` and `function_body` from `scripts/test_ui_hot_path_architecture.py`, so a comment or string naming the lock does not count.
+- **Regression check:** `python3 -m unittest scripts.test_env_lock_architecture`. Staged break, 2026-10-20: giving `src/update.rs`'s `env_lock()` its own `static LOCK` reddens it with `src/update.rs:2610: env_lock()`, and so does a module-level `static PRIVATE_ENV_LOCK` that `env_lock()` returns after calling the shared lock. A wrapper binding `let lock: &'static Mutex<()> = crate::config::test_config_env_lock();` stays green. On a sync that conflicts here, route any new `env_lock()` through the shared lock until the test passes. **Collision:** an upstream rename of the two helpers it imports breaks the import loudly.
+- **Render scaling:** not affected; a test only.
+
+## A PR title edit reruns the title check
+
+### ci: check the PR title again when it is edited
+
+- **PR:** see the PR that adds this entry
+- **Files:** new fork file `.github/workflows/pr-title.yml`, `AGENTS.md` (fork section only)
+- **Replaces:** nothing upstream. ci.yml's `conventional-commits` job checks the PR title on `opened`, `synchronize` and `reopened` only, so a corrected title got no new result until the next push. The fork-only `PR title` workflow runs the same `python3 scripts/conventional_commits.py "$PR_TITLE"` check on those events and on `edited`. ci.yml is unchanged, so its own check still keeps its old result until a push.
+- **Regression check:** `actionlint .github/workflows/pr-title.yml` exits 0. On a PR, editing the title to `bogus: x` turns `PR title` red, and editing it back turns it green, with no push. On a sync, confirm `pr-title.yml` survived the merge.
+- **Render scaling:** not affected; no code changes.
+
+## The fork ledger is tracked without `git add -f`
+
+### chore: stop ignoring docs/fork
+
+- **PR:** see the PR that adds this entry
+- **Files:** `.gitignore` (two `!/docs/fork/` exceptions beside upstream's `docs/next`, `docs/preview` and `docs/versions` ones), `AGENTS.md` (fork section only: the `git add -f` note is gone)
+- **Replaces:** nothing upstream. Upstream's `/docs/*` rule ignored the fork's own ledger, so every fork PR needed `git add -f`, and a plain `git add` in an `&&` chain failed the rest of the chain.
+- **Regression check:** `git check-ignore docs/fork/CHANGES.md` exits 1. **Collision:** an upstream edit to the `/docs/*` block of `.gitignore`; keep both `!/docs/fork/` lines.
+- **Render scaling:** not affected; no code changes.
+
+## `pane send-text` refuses a canonical-mode line the macOS tty would drop
+
+`pane.send_text` skipped the `validate_input_submission` check that
+`pane.send_input` runs. Darwin discards a canonical-mode line longer than
+`MAX_CANON` (1024 bytes) with no error, so a long send-text to a pane in
+canonical mode reported success and delivered nothing. The handler now runs the
+same preflight and returns `pane_send_failed`. The mode is sampled at
+admission, so a pane that flips to canonical while the text waits in the actor
+queue can still drop a long line. Raw-mode panes are unaffected:
+a 622 KB send-text through a throwaway server arrived byte-identical, even
+with a reader that started three seconds late.
+
+- **Files:** `src/app/api/panes.rs` (`handle_pane_send_text`).
+- **Regression check:** `send_text_rejects_oversized_canonical_input_instead_of_dropping_it`
+  (macOS only, `src/platform/macos/input_tests.rs`; it also pins that
+  multi-line text under the limit and long raw-mode text are accepted).
+  `actor_delivers_text_far_past_the_pty_buffer_to_a_slow_raw_reader`
+  (`src/pty/actor/unix.rs`) is a characterization test of the unchanged
+  raw-mode path past 1 MiB, not a pin for this check.
+- **Collision:** any upstream change to `handle_pane_send_text` or
+  `PtyInputGuard`.
+
 ## Fork specs live in OpenSpec (issue [#112](https://github.com/cameronsjo/herdr/issues/112))
 
 ### docs: adopt OpenSpec for fork-only capabilities
@@ -335,7 +397,7 @@ experience) reviewed the sync resolution and fork commits. Fixes:
 ### test: share one env lock across every test that mutates the environment (#74, #36)
 
 - **Files:** `src/config.rs` (`test_config_env_lock`), the test `env_lock()` in `src/{api/server,client/tests/mod,platform/linux,product_announcements,server/autodetect,session,update}.rs`
-- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. Upstream adding a new private `env_lock()` will reintroduce the race; route it through the shared one.
+- **Replaces:** Upstream keeps a private `env_lock()` per module, which does not exclude other modules mutating the same variables. The fork routes all of them through one lock that clears poison on each call. `scripts/test_env_lock_architecture.py` fails when a sync brings in an `env_lock()` that does not; see its entry above.
 - **Regression check:** `just test-single-process` (five single-process `cargo test --bin herdr` runs; each must reach `test result: ok`). `just test` cannot show this race: nextest runs every test in its own process. 3 of 8 runs failed before, 9 of 9 passed after, 2026-09-25. The follow-up sweep also moved `remote/attach.rs`'s `TMPDIR` lock and `integration_env_lock` onto the shared lock.
 
 ### test: point the hot-path architecture guard at the client shell (#40)
