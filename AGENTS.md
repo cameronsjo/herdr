@@ -53,9 +53,7 @@ upstream behavior is not. Read the relevant spec before changing fork code.
   `docs/fork/CHANGES.md` entry.
 - `docs/plans/` is frozen: no new plans after 2026-10-20.
 - Run the CLI only as `scripts/openspec.sh`, the pinned version. The fork-only
-  `OpenSpec` workflow validates every spec and change. After
-  `scripts/openspec.sh update`, run `scripts/openspec-localize.sh` or that
-  workflow fails; it narrows the generated skills to the subcommands they run.
+  `OpenSpec` workflow validates every spec and change.
 - The wrapper refuses `feedback`, `completion`, `config`, `workset` and
   `context --code-workspace` (they reach outside the repo) unless
   `OPENSPEC_ALLOW_OUTSIDE=1` is set.

@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The OpenSpec wrapper localizes the skills it regenerates
+
+### fix: run openspec-localize after openspec init and update
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/openspec.sh`, `scripts/openspec-localize.sh` (header comment), `AGENTS.md` (fork section only)
+- **Replaces:** nothing upstream. `openspec init` and `openspec update` rewrite the generated skills with a bare, unpinned `Bash(openspec:*)` grant, and the `OpenSpec` workflow fails until `scripts/openspec-localize.sh` narrows them again. That second command was a manual step in AGENTS.md. The wrapper now runs the CLI without `exec` for those two subcommands, then runs the localize script, even after a failed CLI run. The CLI's failure wins the exit status; otherwise the localize script's status is returned. Every other subcommand still `exec`s the CLI.
+- **Regression check:** `scripts/openspec.sh update`, then `bash scripts/openspec-localize.sh && git diff --exit-code -- .claude .agents/skills` (the workflow's own check) exits 0. On 2026-10-20 the old wrapper's `update` left 18 generated files changed and this one left none. `scripts/openspec.sh init --no-such-flag` exits 1.
+- **Render scaling:** not affected; no code changes.
+
 ## A test checks that every env lock is the shared one
 
 ### test: fail when a module's env_lock is not the shared lock
