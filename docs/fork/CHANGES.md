@@ -277,7 +277,7 @@ next sync is likely to conflict again:
 - **PR:** see the PR that adds this entry
 - **Files:** `.gitignore` (two `!/docs/fork/` exceptions beside upstream's `docs/next`, `docs/preview` and `docs/versions` ones), `AGENTS.md` (fork section only: the `git add -f` note is gone)
 - **Replaces:** nothing upstream. Upstream's `/docs/*` rule ignored the fork's own ledger, so every fork PR needed `git add -f`, and a plain `git add` in an `&&` chain failed the rest of the chain.
-- **Regression check:** `git check-ignore docs/fork/CHANGES.md` exits 1. **Collision:** an upstream edit to the `/docs/*` block of `.gitignore`; keep both `!/docs/fork/` lines.
+- **Regression check:** `git check-ignore --no-index docs/fork/CHANGES.md` exits 1. Without `--no-index`, git skips tracked paths and exits 1 even while `/docs/*` still ignores the file. **Collision:** an upstream edit to the `/docs/*` block of `.gitignore`; keep both `!/docs/fork/` lines.
 - **Render scaling:** not affected; no code changes.
 
 ## `pane send-text` refuses a canonical-mode line the macOS tty would drop
