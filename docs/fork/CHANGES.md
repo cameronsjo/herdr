@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## A PR title edit reruns the title check
+
+### ci: check the PR title again when it is edited
+
+- **PR:** see the PR that adds this entry
+- **Files:** new fork file `.github/workflows/pr-title.yml`, `AGENTS.md` (fork section only)
+- **Replaces:** nothing upstream. ci.yml's `conventional-commits` job checks the PR title on `opened`, `synchronize` and `reopened` only, so a corrected title got no new result until the next push. The fork-only `PR title` workflow runs the same `python3 scripts/conventional_commits.py "$PR_TITLE"` check on those events and on `edited`. ci.yml is unchanged, so its own check still keeps its old result until a push.
+- **Regression check:** `actionlint .github/workflows/pr-title.yml` exits 0. On a PR, editing the title to `bogus: x` turns `PR title` red, and editing it back turns it green, with no push. On a sync, confirm `pr-title.yml` survived the merge.
+- **Render scaling:** not affected; no code changes.
+
 ## The fork ledger is tracked without `git add -f`
 
 ### chore: stop ignoring docs/fork

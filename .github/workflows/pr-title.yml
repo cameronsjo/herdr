@@ -1,0 +1,35 @@
+name: PR title
+
+# Fork-only workflow. ci.yml's `conventional-commits` job checks the title on
+# opened, synchronize and reopened only, so a fixed title gets no new result
+# until the next push. This job also runs on `edited`. It lives in its own
+# file, not ci.yml, so upstream syncs never conflict on it.
+#
+# `edited` also fires for body and base-branch edits. The job reruns on those
+# too: skipping them would record a skipped run over a red title result.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 scripts/conventional_commits.py "$PR_TITLE"
