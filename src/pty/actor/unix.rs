@@ -1632,6 +1632,76 @@ mod tests {
     }
 
     #[test]
+    fn actor_delivers_text_far_past_the_pty_buffer_to_a_slow_raw_reader() {
+        // pane.send_text queues its whole text as one write. A raw-mode pty
+        // holds only a few KiB, so the actor must keep the remainder across
+        // partial writes and WouldBlock until a late reader drains it.
+        let (mut master, mut slave) = (-1, -1);
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let master = unsafe { OwnedFd::from_raw_fd(master) };
+        let mut slave = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(slave) });
+        let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(
+            unsafe { libc::tcgetattr(slave.as_raw_fd(), termios.as_mut_ptr()) },
+            0
+        );
+        let mut termios = unsafe { termios.assume_init() };
+        unsafe { libc::cfmakeraw(&mut termios) };
+        // Time out instead of blocking forever, so a stalled actor fails the test.
+        termios.c_cc[libc::VMIN] = 0;
+        termios.c_cc[libc::VTIME] = 30;
+        assert_eq!(
+            unsafe { libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &termios) },
+            0
+        );
+
+        let handle = PtyIoActor::spawn(PtyIoActorConfig {
+            pane_id: 1,
+            master_fd: master,
+            initially_quiesced: false,
+            on_read: Box::new(|_| PtyReadResult::empty()),
+            on_reader_exit: None,
+        })
+        .expect("actor spawn");
+
+        // Multi-paragraph text with multibyte characters, 1 MiB and more.
+        let paragraph = "Paragraph with caf\u{e9} and \u{2713} marks, then a break.\n\n";
+        let text = paragraph.repeat((1 << 20) / paragraph.len() + 1);
+        assert!(text.len() > 1 << 20);
+        handle
+            .try_write_user_input(Bytes::from(text.clone()))
+            .expect("text accepted");
+
+        let expected_len = text.len();
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let mut received = Vec::with_capacity(expected_len);
+            let mut chunk = [0u8; 8192];
+            while received.len() < expected_len {
+                let count = slave.read(&mut chunk).expect("slave read");
+                assert!(count > 0, "pty closed after {} bytes", received.len());
+                received.extend_from_slice(&chunk[..count]);
+            }
+            received
+        });
+        let received = reader.join().expect("reader joins");
+        assert_eq!(received.len(), text.len());
+        assert!(received == text.as_bytes(), "delivered text differs");
+        handle.shutdown();
+    }
+
+    #[test]
     fn resize_and_nudge_keep_latest_request_when_command_queue_is_full() {
         let (data_tx, _data_rx) = mpsc::channel(1);
         let (control_tx, _control_rx) = std_mpsc::channel();
