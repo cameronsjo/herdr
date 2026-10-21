@@ -1930,6 +1930,11 @@ impl App {
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
+        // Same admission check as send_input: Darwin drops a canonical-mode
+        // line past MAX_CANON without an error, so refuse it up front.
+        if let Err(err) = runtime.validate_input_submission(params.text.as_bytes()) {
+            return encode_error(id, "pane_send_failed", err.to_string());
+        }
         if let Err(err) = runtime.try_send_bytes(Bytes::from(params.text)) {
             return encode_error(id, "pane_send_failed", err.to_string());
         }

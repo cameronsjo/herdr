@@ -240,6 +240,38 @@ next sync is likely to conflict again:
 - **Regression check:** `actionlint .github/workflows/pr-title.yml` exits 0. On a PR, editing the title to `bogus: x` turns `PR title` red, and editing it back turns it green, with no push. On a sync, confirm `pr-title.yml` survived the merge.
 - **Render scaling:** not affected; no code changes.
 
+## The fork ledger is tracked without `git add -f`
+
+### chore: stop ignoring docs/fork
+
+- **PR:** see the PR that adds this entry
+- **Files:** `.gitignore` (two `!/docs/fork/` exceptions beside upstream's `docs/next`, `docs/preview` and `docs/versions` ones), `AGENTS.md` (fork section only: the `git add -f` note is gone)
+- **Replaces:** nothing upstream. Upstream's `/docs/*` rule ignored the fork's own ledger, so every fork PR needed `git add -f`, and a plain `git add` in an `&&` chain failed the rest of the chain.
+- **Regression check:** `git check-ignore docs/fork/CHANGES.md` exits 1. **Collision:** an upstream edit to the `/docs/*` block of `.gitignore`; keep both `!/docs/fork/` lines.
+- **Render scaling:** not affected; no code changes.
+
+## `pane send-text` refuses a canonical-mode line the macOS tty would drop
+
+`pane.send_text` skipped the `validate_input_submission` check that
+`pane.send_input` runs. Darwin discards a canonical-mode line longer than
+`MAX_CANON` (1024 bytes) with no error, so a long send-text to a pane in
+canonical mode reported success and delivered nothing. The handler now runs the
+same preflight and returns `pane_send_failed`. The mode is sampled at
+admission, so a pane that flips to canonical while the text waits in the actor
+queue can still drop a long line. Raw-mode panes are unaffected:
+a 622 KB send-text through a throwaway server arrived byte-identical, even
+with a reader that started three seconds late.
+
+- **Files:** `src/app/api/panes.rs` (`handle_pane_send_text`).
+- **Regression check:** `send_text_rejects_oversized_canonical_input_instead_of_dropping_it`
+  (macOS only, `src/platform/macos/input_tests.rs`; it also pins that
+  multi-line text under the limit and long raw-mode text are accepted).
+  `actor_delivers_text_far_past_the_pty_buffer_to_a_slow_raw_reader`
+  (`src/pty/actor/unix.rs`) is a characterization test of the unchanged
+  raw-mode path past 1 MiB, not a pin for this check.
+- **Collision:** any upstream change to `handle_pane_send_text` or
+  `PtyInputGuard`.
+
 ## Fork specs live in OpenSpec (issue [#112](https://github.com/cameronsjo/herdr/issues/112))
 
 ### docs: adopt OpenSpec for fork-only capabilities
