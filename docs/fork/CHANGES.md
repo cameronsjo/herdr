@@ -230,6 +230,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `parse_workspace_id` takes upstream's text again
+
+### fix: use upstream's bound in parse_workspace_id
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/app/ids.rs` (`parse_workspace_id` only)
+- **Replaces:** the fork's own copy of the positional-id bound (#77, PR #81). Upstream added the same `.filter` in #5171; the fork's `|index| *index <` form and its four-line comment are now upstream's `|&index| index <`, with the same behavior. The function matches upstream `master` (`143bf5f`) exactly. The #81 entry below is marked retired for that part.
+- **Regression check:** `cargo nextest run --locked -E 'test(positional_workspace_id) + test(numeric_workspace_ids_beyond_the_last_workspace_are_not_found)'`. On a sync, `parse_workspace_id` should merge with no conflict.
+- **Render scaling:** not affected; the parser runs once per request.
+
 ## The OpenSpec wrapper localizes the skills it regenerates
 
 ### fix: run openspec-localize after openspec init and update
@@ -541,6 +551,7 @@ experience) reviewed the sync resolution and fork commits. Fixes:
 - **Files:** `src/app/ids.rs`, `src/app/api/workspaces.rs`, `src/app/api/tabs.rs`, `src/app/api/panes.rs`
 - **Replaces:** Upstream's `parse_workspace_id` accepts `w_N` and a bare `N` as a documented positional convenience (the Nth workspace in display order) but returns the parsed index without checking it against the live workspace list, so `"999999"` resolves to `Some(999998)`. Three call sites re-check `< len` by hand; the ones that do not index `self.state.workspaces` directly through `public_workspace_id`, so one socket request panics the whole server — reachable through `pane.move` with `destination.type = "new_tab"` (the hand-rolled guard further down that arm is dead code, the panic fires first) and through `Method::WorkspaceFocus` in the headless client-view path, which has no guard at all. The fork adds one `.filter(|index| *index < len)` to the parser, so every caller gets `None` for an out-of-range positional id and maps it to the `workspace_not_found` error it already returns for an unknown id. The positional convenience itself is unchanged and still documented. The three hand-rolled `< len` guards are kept deliberately as defense in depth at their indexing calls; only their now-false comments are corrected.
 - **Regression check:** `cargo nextest run --locked -E 'test(positional_workspace_id) + test(api_pane_move_to_new_tab_rejects)'`.
+- **Retired 2026-10-20 for the parser filter:** upstream fixed the same panic with the same filter (#5171), which the 2026-10-12 sync merged. That sync kept the fork's line and comment; `parse_workspace_id` now carries upstream's text, so the parser no longer diverges. The fork's request-path tests and the three hand-rolled `< len` guards stay, and their regression check above still applies.
 
 ### test: pin out-of-range positional workspace ids on every request path
 
