@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `sync-upstream.sh` resumes a merge started on an earlier day
+
+### fix: resume a sync whose conflicts were resolved after midnight
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/sync-upstream.sh` (the worktree pick), new `scripts/test_sync_upstream.py`, `justfile` (`maintenance-test` runs it), `openspec/specs/fork-maintenance/spec.md` (via the archived `sync-upstream-resume-across-days` change)
+- **Replaces:** nothing upstream; the script is fork-only. The branch and worktree are named `sync-upstream-<today>`, so a sync stopped on conflicts one day and rerun after midnight missed the hand-resolved worktree, created a new one from `fork/master`, hit the same conflicts and exited 1. The script now resumes any `sync-upstream-*` worktree with a merge in progress first, and refuses when there are two.
+- **Regression check:** `python3 -m unittest scripts.test_sync_upstream` (3 tests: a later-day resume finishes the first merge and creates no new worktree, a same-day resume still finishes, two in-progress merges refuse). The later-day and two-merge tests were confirmed red against the old script. `shellcheck --severity=warning scripts/sync-upstream.sh` is clean.
+- **Render scaling:** not affected; maintenance script only.
+
 ## docker-check counts a test killed by a signal as a failure
 
 ### fix: count every nextest failing status in docker-check

@@ -14,7 +14,8 @@ ROOT_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 ORIGIN_REMOTE=${ORIGIN_REMOTE:-origin}
 FORK_REMOTE=${FORK_REMOTE:-fork}
 BRANCH="sync-upstream-$(date +%Y%m%d)"
-WORKTREE_DIR="$(cd -P -- "$ROOT_DIR/.." && pwd -P)/herdr-worktrees/$BRANCH"
+WORKTREES_DIR="$(cd -P -- "$ROOT_DIR/.." && pwd -P)/herdr-worktrees"
+WORKTREE_DIR="$WORKTREES_DIR/$BRANCH"
 
 cd "$ROOT_DIR"
 
@@ -33,6 +34,35 @@ git fetch "$FORK_REMOTE" --prune
 # and can SIGPIPE the producer (141), inverting this test and sending the
 # resume path into `git worktree add` on a directory that already exists.
 worktree_list=$(git worktree list --porcelain)
+
+# The branch name carries the day the sync started, so a run resumed after
+# midnight would miss yesterday's hand-resolved merge and start a second one
+# from scratch. Any sync worktree with a merge in progress is the one to
+# finish, whatever day it is named for.
+resume_dir=""
+while IFS= read -r line; do
+  case "$line" in
+    "worktree $WORKTREES_DIR/sync-upstream-"*) ;;
+    *) continue ;;
+  esac
+  dir=${line#worktree }
+  git_dir=$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || continue
+  [[ -f "$git_dir/MERGE_HEAD" ]] || continue
+  if [[ -n "$resume_dir" ]]; then
+    echo "error: more than one sync worktree has a merge in progress:" >&2
+    echo "  $resume_dir" >&2
+    echo "  $dir" >&2
+    echo "Finish or abort all but one, then re-run." >&2
+    exit 1
+  fi
+  resume_dir=$dir
+done <<<"$worktree_list"
+if [[ -n "$resume_dir" && "$resume_dir" != "$WORKTREE_DIR" ]]; then
+  WORKTREE_DIR=$resume_dir
+  BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --short HEAD)
+  echo "==> an earlier sync's merge is still in progress; resuming $BRANCH"
+fi
+
 if command grep -qx "worktree $WORKTREE_DIR" <<<"$worktree_list"; then
   echo "==> reusing existing worktree at $WORKTREE_DIR"
 else
