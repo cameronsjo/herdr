@@ -110,6 +110,15 @@ pub(crate) fn agent_args() -> Input<Vec<String>> {
     .configure(|arg| arg.required(false).num_args(0..).last(true))
 }
 
+/// Fork: repeatable `--env KEY=VALUE`. Errors never repeat the argument, which may hold a secret.
+pub(crate) fn agent_env() -> Input<crate::api::schema::AgentEnv> {
+    Input::<crate::api::schema::AgentEnv>::value("env", "KEY=VALUE", |slot, value| {
+        slot.insert_pair(value)
+            .map_err(|error| ParseError::Usage(format!("--env: {error}")))
+    })
+    .help("Set an environment variable for the agent process only (repeatable)")
+}
+
 pub(crate) fn kind() -> Input<String> {
     Input::value("kind", "KIND", |slot, value| {
         *slot = value.to_owned();
