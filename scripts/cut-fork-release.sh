@@ -110,10 +110,12 @@ printf 'OK    authenticated\n'
 step "Checking the remote"
 remote_url="$(git remote get-url "$FORK_REMOTE" 2>/dev/null)" \
   || die "no remote named '$FORK_REMOTE' (override with FORK_REMOTE=)"
-# Normalise both SSH and HTTPS spellings to owner/name, then compare exactly.
-# A substring match would accept cameronsjo/herdr-mirror, or any host at all.
+# Normalise the scp-style, ssh:// and HTTPS spellings (with or without a
+# trailing slash) to owner/name, then compare exactly. A substring match would
+# accept cameronsjo/herdr-mirror, or any host at all.
 remote_slug="$(printf '%s' "$remote_url" \
-  | sed -e 's#^git@[^:]*:##' -e 's#^https://[^/]*/##' -e 's#\.git$##')"
+  | sed -e 's#^git@[^:]*:##' -e 's#^ssh://[^/]*/##' -e 's#^https://[^/]*/##' \
+    -e 's#/$##' -e 's#\.git$##')"
 [ "$remote_slug" = "$FORK_REPO" ] \
   || die "remote '$FORK_REMOTE' resolves to '$remote_slug', not '$FORK_REPO' -- refusing to tag it"
 printf 'OK    %s -> %s\n' "$FORK_REMOTE" "$remote_slug"

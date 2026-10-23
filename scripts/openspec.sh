@@ -30,8 +30,10 @@ export OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}"
 export OPENSPEC_NO_UPDATE_CHECK="${OPENSPEC_NO_UPDATE_CHECK:-1}"
 # Subcommands that reach outside this repo: `feedback` files a GitHub issue
 # upstream with your gh login, `completion` writes your shell rc, `config`
-# edits the global config or opens $EDITOR, and `workset` launches an
-# opener. None is part of the spec workflow, so they need an explicit opt-in.
+# edits the global config or opens $EDITOR, `workset` launches an opener, and
+# `store` (but its read-only list/ls/doctor) registers, creates or deletes a
+# store elsewhere on disk. None is part of the spec workflow, so they need an
+# explicit opt-in.
 # The first argument that is not an option is the subcommand (`--no-color
 # feedback` is still feedback).
 sub=""
@@ -47,6 +49,30 @@ case "$sub" in
       echo "openspec.sh: '$sub' reaches outside this repo; rerun with OPENSPEC_ALLOW_OUTSIDE=1 to allow it" >&2
       exit 2
     fi
+    ;;
+  store)
+    # The store's own subcommand is the next argument that is not an option.
+    action=""
+    seen=0
+    for arg in "$@"; do
+      if [[ $seen == 0 ]]; then
+        [[ "$arg" == store ]] && seen=1
+        continue
+      fi
+      case "$arg" in
+        -*) ;;
+        *) action="$arg"; break ;;
+      esac
+    done
+    case "$action" in
+      "" | list | ls | doctor) ;;
+      *)
+        if [[ "${OPENSPEC_ALLOW_OUTSIDE:-}" != 1 ]]; then
+          echo "openspec.sh: 'store $action' reaches outside this repo; rerun with OPENSPEC_ALLOW_OUTSIDE=1 to allow it" >&2
+          exit 2
+        fi
+        ;;
+    esac
     ;;
   context)
     # `context --code-workspace <path> --force` overwrites any file with
