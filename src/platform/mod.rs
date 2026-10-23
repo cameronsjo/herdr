@@ -727,7 +727,10 @@ fn fish_single_quoted(value: &str) -> String {
 /// Wraps a PowerShell agent command so `env` is set only while it runs, then
 /// restores each variable's previous value (or absence). The saved values sit
 /// in an ordinal (case-sensitive) dictionary, since Unix env names are
-/// case-sensitive and a PowerShell hashtable is not.
+/// case-sensitive and a PowerShell hashtable is not. An absent variable is
+/// restored with `[NullString]::Value`: PowerShell turns `$null` into "" for a
+/// string parameter, and on .NET 9 (pwsh 7.5) "" sets an empty variable
+/// instead of removing it.
 pub(crate) fn powershell_env_script(command: &str, env: &[(&str, &str)]) -> String {
     let keys = env
         .iter()
@@ -745,7 +748,7 @@ pub(crate) fn powershell_env_script(command: &str, env: &[(&str, &str)]) -> Stri
         })
         .collect::<String>();
     format!(
-        "& {{$herdrEnv=[System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal);foreach($herdrKey in @({keys})){{$herdrEnv[$herdrKey]=[Environment]::GetEnvironmentVariable($herdrKey)}};try{{{assignments}{command}}}finally{{foreach($herdrKey in $herdrEnv.Keys){{[Environment]::SetEnvironmentVariable($herdrKey,$herdrEnv[$herdrKey])}}}}}}"
+        "& {{$herdrEnv=[System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal);foreach($herdrKey in @({keys})){{$herdrEnv[$herdrKey]=[Environment]::GetEnvironmentVariable($herdrKey)}};try{{{assignments}{command}}}finally{{foreach($herdrKey in $herdrEnv.Keys){{$herdrOld=$herdrEnv[$herdrKey];if($null -eq $herdrOld){{$herdrOld=[NullString]::Value}};[Environment]::SetEnvironmentVariable($herdrKey,$herdrOld)}}}}}}"
     )
 }
 
