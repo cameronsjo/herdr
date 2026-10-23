@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The OpenSpec wrapper guards `store`, and the release cut reads every remote spelling
+
+### fix: guard openspec store writes and accept ssh:// fork remotes
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/openspec.sh`, `scripts/test_openspec_wrapper.py` (new), `justfile` (`maintenance-test` runs it), `scripts/cut-fork-release.sh`, `AGENTS.md`
+- **Replaces:** nothing upstream; both scripts are the fork's. The wrapper's guard refused the subcommands that reach outside the repo, but not `store`, whose `setup`, `register`, `unregister` and `remove` change the per-user store registry, and `store remove --yes` deletes a folder elsewhere on disk. They now need `OPENSPEC_ALLOW_OUTSIDE=1`, like `feedback`; `store list|ls|doctor` still run without it. So does `--store <id>` on any command, which works in a registered store's folder instead of this repo. `cut-fork-release.sh` read the remote's slug with a sed that knew only `git@host:` and `https://host/`, so `ssh://git@github.com/cameronsjo/herdr.git` and a trailing-slash HTTPS URL were refused as some other repo, while any host (or a bare `cameronsjo/herdr` path) passed. It now accepts the scp-style, `ssh://` and HTTPS spellings of github.com only.
+- **Regression check:** `python3 -m unittest scripts.test_openspec_wrapper` (fails without the fix: the `store` writes reach the CLI). The slug check was run by hand: the github.com scp-style, `ssh://` (with and without `:22`) and HTTPS spellings, with and without `.git` or a trailing slash, give `cameronsjo/herdr`; `cameronsjo/herdr-mirror`, another host and a bare path are refused.
+- **Render scaling:** not affected; maintenance scripts only.
+
 ## The Codex metadata hook skips an ephemeral session again
 
 ### fix: skip codex metadata on a SessionStart with no transcript

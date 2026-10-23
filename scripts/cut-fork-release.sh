@@ -110,12 +110,15 @@ printf 'OK    authenticated\n'
 step "Checking the remote"
 remote_url="$(git remote get-url "$FORK_REMOTE" 2>/dev/null)" \
   || die "no remote named '$FORK_REMOTE' (override with FORK_REMOTE=)"
-# Normalise both SSH and HTTPS spellings to owner/name, then compare exactly.
-# A substring match would accept cameronsjo/herdr-mirror, or any host at all.
+# Normalise the scp-style, ssh:// and HTTPS spellings of a github.com remote
+# (with or without a trailing slash) to owner/name, then compare exactly. A
+# substring match would accept cameronsjo/herdr-mirror, and another host would
+# take the tag while gh watches GitHub.
 remote_slug="$(printf '%s' "$remote_url" \
-  | sed -e 's#^git@[^:]*:##' -e 's#^https://[^/]*/##' -e 's#\.git$##')"
-[ "$remote_slug" = "$FORK_REPO" ] \
-  || die "remote '$FORK_REMOTE' resolves to '$remote_slug', not '$FORK_REPO' -- refusing to tag it"
+  | sed -e 's#^git@github\.com:##' -e 's#^ssh://git@github\.com\(:22\)\{0,1\}/##' \
+    -e 's#^https://github\.com/##' -e 's#/$##' -e 's#\.git$##')"
+[ "$remote_slug" = "$FORK_REPO" ] && [ "$remote_slug" != "$remote_url" ] \
+  || die "remote '$FORK_REMOTE' resolves to '$remote_slug', not github.com/$FORK_REPO -- refusing to tag it"
 printf 'OK    %s -> %s\n' "$FORK_REMOTE" "$remote_slug"
 
 # Tracked files only. Step 5 tags fork/master explicitly, so nothing in the
