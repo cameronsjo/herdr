@@ -55,8 +55,10 @@ upstream behavior is not. Read the relevant spec before changing fork code.
 - Run the CLI only as `scripts/openspec.sh`, the pinned version. The fork-only
   `OpenSpec` workflow validates every spec and change.
 - The wrapper refuses `feedback`, `completion`, `config`, `workset`,
-  `store` (except `store list|ls|doctor`) and `context --code-workspace`
-  (they reach outside the repo) unless `OPENSPEC_ALLOW_OUTSIDE=1` is set.
+  `store` (except `store list|ls|doctor`), `--store <id>` on any command and
+  `context --code-workspace` (they reach outside the repo) unless
+  `OPENSPEC_ALLOW_OUTSIDE=1` is set. It guards those known ways out; it is not
+  a sandbox.
 - When a sync brings in upstream's version of a fork behavior, drop the
   requirement from the spec in the same sync.
 

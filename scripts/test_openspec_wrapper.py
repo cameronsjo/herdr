@@ -18,6 +18,7 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve().parent / "openspec.sh"
 
 
+@unittest.skipUnless(os.name == "posix", "the fake CLI is a bash script")
 class OpenSpecWrapperTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -40,6 +41,7 @@ class OpenSpecWrapperTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def run_wrapper(self, *args: str, allow: bool = False) -> subprocess.CompletedProcess[str]:
+        self.ran.unlink(missing_ok=True)
         env = {k: v for k, v in os.environ.items() if k != "OPENSPEC_ALLOW_OUTSIDE"}
         if allow:
             env["OPENSPEC_ALLOW_OUTSIDE"] = "1"
@@ -72,7 +74,19 @@ class OpenSpecWrapperTest(unittest.TestCase):
                 result = self.run_wrapper(*args)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.ran.read_text(), " ".join(args) + "\n")
-                self.ran.unlink()
+
+    def test_store_option_needs_the_opt_in(self) -> None:
+        for args in (
+            ["new", "change", "x", "--store", "demo"],
+            ["list", "--store=demo"],
+        ):
+            with self.subTest(args=args):
+                result = self.run_wrapper(*args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("OPENSPEC_ALLOW_OUTSIDE=1", result.stderr)
+                self.assertFalse(self.ran.exists())
+        result = self.run_wrapper("list", "--store", "demo", allow=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_opt_in_allows_a_store_write(self) -> None:
         result = self.run_wrapper("store", "remove", "demo", "--yes", allow=True)
