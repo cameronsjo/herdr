@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The Codex metadata hook skips an ephemeral session again
+
+### fix: skip codex metadata on a SessionStart with no transcript
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/integration/assets/codex/herdr-agent-state.{sh,ps1}` (the transcript guard), `tests/cli/hooks.rs`
+- **Replaces:** nothing upstream; the Codex `metadata` action is the fork's (cameronsjo/herdr#26). The scripts skipped a `SessionStart` with no `transcript_path` only for the `session` action, but `metadata` also runs on `SessionStart`, so an ephemeral Codex session still started `codex app-server` and reported a pane title. The codex-lifecycle spec already says such a payload MUST exit without reporting. The guard now tests the event, not the action. `CODEX_INTEGRATION_VERSION` stays 11: it is already one past the last fork release (v0.9.3-palette.1 ships 10).
+- **Regression check:** `cargo nextest run -E 'test(/codex_metadata_hook/)'`: `codex_metadata_hook_prefers_app_server_thread_name` now also asserts that a transcript-less `SessionStart` sends nothing. Checked by hand against a fake socket and a fake app-server: before the fix the `metadata` action sent `pane.report_metadata`, after it sends nothing, while a `SessionStart` with a transcript and a `Stop` without one still report.
+- **Render scaling:** not affected; hook script only.
+
 ## `sync-upstream.sh` resumes a merge started on an earlier day
 
 ### fix: resume a sync whose conflicts were resolved after midnight

@@ -180,7 +180,8 @@ transcript_path = hook_input.get("transcript_path")
 if not isinstance(session_id, str) or not session_id:
     raise SystemExit(0)
 # Only SessionStart needs a transcript; Stop and Interrupt payloads may omit it.
-if action == "session" and (not isinstance(transcript_path, str) or not transcript_path.strip()):
+# Check the event, not the action: metadata also runs on SessionStart.
+if hook_event_name == "SessionStart" and (not isinstance(transcript_path, str) or not transcript_path.strip()):
     raise SystemExit(0)
 inherited_session_id = os.environ.get("CODEX_THREAD_ID")
 if inherited_session_id and inherited_session_id != session_id:
