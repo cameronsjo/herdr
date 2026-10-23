@@ -241,6 +241,16 @@ next sync is likely to conflict again:
 - **Regression check:** `python3 -m unittest scripts.test_sync_upstream` (3 tests: a later-day resume finishes the first merge and creates no new worktree, a same-day resume still finishes, two in-progress merges refuse). The later-day and two-merge tests were confirmed red against the old script. `shellcheck --severity=warning scripts/sync-upstream.sh` is clean.
 - **Render scaling:** not affected; maintenance script only.
 
+## Two fork scripts fail with their own guidance again
+
+### fix: read the real plugin registry under XDG_CONFIG_HOME, and keep cut-fork-release's digest message
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/palette-live-check.sh` (`REAL_REGISTRY`), `scripts/cut-fork-release.sh` (step 9's digest read)
+- **Replaces:** nothing upstream; both scripts are fork-only. `palette-live-check.sh` looked for the installed registry at `~/.config/herdr/plugins.json`, but herdr's `config_dir()` uses `$XDG_CONFIG_HOME/herdr` whenever that variable is set, so with it set the check refused with "No plugin registry" (or seeded from a stale `~/.config` copy). It now follows the same rule. In `cut-fork-release.sh`, a release body with no sha256 made `grep` exit 1, and under `set -euo pipefail` the script ended at "Reading the published digest" with no message; the `die` that says to verify the tap by hand now runs.
+- **Regression check:** `shellcheck --severity=warning` on both scripts. The digest read was checked in isolation under `set -euo pipefail` with a body holding no digest: the old line exits silently, the new one reaches the `die`. The registry path expansion was checked with `XDG_CONFIG_HOME` set (it resolves under that directory) and unset (it resolves under `~/.config`).
+- **Render scaling:** not affected; maintenance scripts only.
+
 ## docker-check counts a test killed by a signal as a failure
 
 ### fix: count every nextest failing status in docker-check

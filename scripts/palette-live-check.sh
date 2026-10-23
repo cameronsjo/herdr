@@ -84,7 +84,9 @@ EOF
 # not the feature works. Measured 2026-09-15: unseeded prints "No plugins
 # installed"; seeded prints all five. The registry stores absolute plugin_root
 # paths, so a copy is enough and the real config is only ever read.
-REAL_REGISTRY="$HOME/.config/herdr/plugins.json"
+# The installed (release) binary's own config dir, by its config_dir() rule:
+# $XDG_CONFIG_HOME/herdr when that is set (even empty), else ~/.config/herdr.
+REAL_REGISTRY="${XDG_CONFIG_HOME-$HOME/.config}/herdr/plugins.json"
 if [ ! -f "$REAL_REGISTRY" ]; then
   echo "No plugin registry at $REAL_REGISTRY." >&2
   echo "Step 5 needs an installed plugin to mark destructive, and this script" >&2
