@@ -267,6 +267,7 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
         pane_id,
         args: agent_args,
         timeout_ms,
+        env,
     } = params;
     let Some(expected_kind) = crate::detect::parse_agent_label(&kind) else {
         eprintln!("unsupported interactive agent kind: {kind}");
@@ -276,6 +277,11 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000));
     let retryable_timeout = timeout > crate::app::AGENT_START_SETTLE_DELAY
         && timeout <= crate::app::MAX_AGENT_START_TIMEOUT;
+    if !env.is_empty() {
+        if let Some(error) = agent_start_env_unsupported()? {
+            return super::print_response(&error);
+        }
+    }
     let pinned_terminal_id = pane_terminal_id(&pane_id)?;
     let mut retry_deadline = None;
     let mut previous_busy_response = None;
@@ -298,6 +304,7 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
                 pane_id: pane_id.clone(),
                 args: agent_args.clone(),
                 timeout_ms,
+                env: env.clone(),
             }),
         })?;
         if response.get("error").is_none() {
@@ -354,6 +361,33 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
             print_agent_transport_error(err, "cli:agent:start", "agent_start_transport_failed")
         }
     }
+}
+
+/// Fork (#103): a server that predates `env` would drop it and still report
+/// success, so `--env` is sent only to a server advertising
+/// `agent_start_env`. Returns the error to print when it does not.
+fn agent_start_env_unsupported() -> std::io::Result<Option<serde_json::Value>> {
+    const REQUEST_ID: &str = "cli:agent:start";
+    let client = super::target::api_client()?;
+    let status = super::target::server_status(&client)
+        .map_err(|err| super::map_handshake_probe_error(err, REQUEST_ID, &client))?;
+    Ok(agent_start_env_support_error(status.capabilities.as_ref()))
+}
+
+fn agent_start_env_support_error(
+    capabilities: Option<&crate::api::schema::ServerCapabilities>,
+) -> Option<serde_json::Value> {
+    if capabilities.is_some_and(|capabilities| capabilities.agent_start_env) {
+        return None;
+    }
+    Some(cli_agent_error(
+        "cli:agent:start",
+        "agent_start_env_unsupported",
+        format!(
+            "the Herdr server does not support agent start --env and would ignore it; nothing was started. {}",
+            super::target::restart_guidance()
+        ),
+    ))
 }
 
 fn agent_list() -> std::io::Result<i32> {

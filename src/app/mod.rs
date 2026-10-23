@@ -2999,6 +2999,7 @@ mod tests {
                 pane_id,
                 args: Vec::new(),
                 timeout_ms: Some(1_000),
+                env: Default::default(),
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -3006,6 +3007,99 @@ mod tests {
         assert_eq!(response["error"]["code"], "agent_pane_unavailable");
         assert_eq!(app.state.workspaces[0].tabs[0].layout.pane_count(), 1);
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+    }
+
+    /// Fork (#103): a shell-ready pane with a capturing runtime, for agent.start env tests.
+    fn agent_start_env_app(
+        label: &str,
+    ) -> (
+        App,
+        String,
+        crate::terminal::TerminalId,
+        tokio::sync::mpsc::Receiver<bytes::Bytes>,
+    ) {
+        let mut app = test_app();
+        let workspace = Workspace::test_new(label);
+        let root = workspace.tabs[0].root_pane;
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let pane_id = app.pane_info(0, root).unwrap().pane_id;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let (runtime, receiver) =
+            crate::terminal::TerminalRuntime::test_with_channel_capacity(80, 24, 4);
+        app.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        (app, pane_id, terminal_id, receiver)
+    }
+
+    fn agent_start_env_request(
+        pane_id: &str,
+        env: crate::api::schema::AgentEnv,
+    ) -> crate::api::schema::Request {
+        crate::api::schema::Request {
+            id: "req_agent_start_env".into(),
+            method: crate::api::schema::Method::AgentStart(crate::api::schema::AgentStartParams {
+                name: "worker".into(),
+                kind: "claude".into(),
+                pane_id: pane_id.into(),
+                args: vec!["--resume".into()],
+                timeout_ms: Some(4_000),
+                env,
+            }),
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn agent_start_env_prefixes_the_typed_agent_command() {
+        let (mut app, pane_id, terminal_id, mut receiver) = agent_start_env_app("agent-start-env");
+        let env = crate::api::schema::AgentEnv::from([
+            ("CLAUDE_CONFIG_DIR", "/home/me/.claude alt"),
+            ("MODE", "x"),
+        ]);
+
+        let response = app.handle_api_request(agent_start_env_request(&pane_id, env));
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response["result"]["type"], "agent_started");
+        // The reported argv is the agent's own; env is not part of it.
+        assert_eq!(
+            response["result"]["argv"],
+            serde_json::json!(["claude", "--resume"])
+        );
+        let typed = receiver.try_recv().unwrap();
+        let typed = String::from_utf8_lossy(&typed);
+        assert!(
+            typed.starts_with("CLAUDE_CONFIG_DIR='/home/me/.claude alt' MODE=x claude --resume"),
+            "typed command: {typed:?}"
+        );
+        assert_eq!(
+            app.state.terminals[&terminal_id].agent_name.as_deref(),
+            Some("worker")
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_start_invalid_env_is_rejected_without_echo_or_input() {
+        const SECRET: &str = "sk-live-secret-value";
+        for env in [
+            crate::api::schema::AgentEnv::from([("1BAD", SECRET)]),
+            crate::api::schema::AgentEnv::from([(SECRET, SECRET)]),
+            crate::api::schema::AgentEnv::from([("TOKEN", "sk-live-secret-value\n")]),
+        ] {
+            let (mut app, pane_id, terminal_id, mut receiver) =
+                agent_start_env_app("agent-start-env-invalid");
+
+            let raw = app.handle_api_request(agent_start_env_request(&pane_id, env));
+            assert!(!raw.contains(SECRET), "response leaked a value: {raw}");
+            let response: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(response["error"]["code"], "invalid_agent_env");
+            assert!(receiver.try_recv().is_err(), "nothing may be typed");
+            assert_eq!(app.state.terminals[&terminal_id].agent_name, None);
+        }
     }
 
     #[tokio::test]
@@ -3041,6 +3135,7 @@ mod tests {
                 pane_id: pane_id.clone(),
                 args: vec!["resume".into(), "codex-session".into()],
                 timeout_ms: Some(4_000),
+                env: Default::default(),
             }),
         };
         let response = app.handle_api_request(request());

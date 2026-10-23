@@ -1278,6 +1278,13 @@
     },
     "request": {
       "$defs": {
+        "AgentEnv": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables set for the agent process only, keyed by name.\n\nSerialized as a JSON object of string values. An empty map is the default\nand is omitted on the wire, so requests without `env` are unchanged.",
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -1453,6 +1460,10 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "env": {
+              "$ref": "#/schemas/request/$defs/AgentEnv",
+              "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control characters.\nServers that accept this field advertise `capabilities.agent_start_env`."
             },
             "kind": {
               "type": "string"
@@ -11054,6 +11065,11 @@
         },
         "ServerCapabilities": {
           "properties": {
+            "agent_start_env": {
+              "default": false,
+              "description": "Fork (cameronsjo/herdr#103): `agent.start` honors its optional `env`\nfield. A server without this flag would ignore `env` and still succeed.",
+              "type": "boolean"
+            },
             "detached_server_daemon": {
               "default": false,
               "type": "boolean"

@@ -202,6 +202,12 @@ cli_params! {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub timeout_ms: Option<u64> => Field::new(None).input(bindings::timeout()
             .help("Wait for interactive readiness (default: 30000; max: 300000)")),
+        /// Fork: environment variables for the agent process only. Keys must match
+        /// `^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control characters.
+        /// Servers that accept this field advertise `capabilities.agent_start_env`.
+        #[serde(default, skip_serializing_if = "super::fork_agent_env::AgentEnv::is_empty")]
+        pub env: super::fork_agent_env::AgentEnv => Field::new(super::fork_agent_env::AgentEnv::default())
+            .input(bindings::agent_env()),
     }
 }
 

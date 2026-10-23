@@ -74,6 +74,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         surface_interest: true,
         health_check: true,
         ssh_agent_registration: false,
+        agent_start_env: true,
     })
 }
 
@@ -1501,6 +1502,7 @@ mod tests {
                 surface_interest: true,
                 health_check: true,
                 ssh_agent_registration: false,
+                agent_start_env: false,
             }),
             None,
             None,

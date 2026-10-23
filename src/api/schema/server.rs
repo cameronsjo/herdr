@@ -55,4 +55,8 @@ pub struct ServerCapabilities {
     /// Supports connection-scoped `server.ssh_agent.register` on the local JSON API.
     #[serde(default)]
     pub ssh_agent_registration: bool,
+    /// Fork (cameronsjo/herdr#103): `agent.start` honors its optional `env`
+    /// field. A server without this flag would ignore `env` and still succeed.
+    #[serde(default)]
+    pub agent_start_env: bool,
 }

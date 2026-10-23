@@ -635,6 +635,87 @@ pub(crate) fn interactive_unix_shell_command(
     Some(command)
 }
 
+/// Fork (cameronsjo/herdr#103): the command `agent.start` types into a shell,
+/// with `env` applied to the agent process only. Values are passed literally,
+/// never expanded by the target shell.
+pub(crate) fn interactive_agent_shell_command(
+    argv: &[String],
+    env: &[(&str, &str)],
+    shell_name: &str,
+) -> Option<String> {
+    if env.is_empty() {
+        return interactive_shell_command(argv, shell_name);
+    }
+    interactive_shell_command_with_env(argv, env, shell_name)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn interactive_unix_shell_command_with_env(
+    argv: &[String],
+    env: &[(&str, &str)],
+    shell_name: &str,
+    quote_posix_arg: fn(&str) -> String,
+) -> Option<String> {
+    let command = interactive_unix_shell_command(argv, shell_name, quote_posix_arg)?;
+    if is_powershell_process_name(shell_name) {
+        return Some(powershell_env_script(&command, env));
+    }
+    let assignments = env
+        .iter()
+        .map(|(key, value)| format!("{key}={}", quote_posix_arg(value)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // These shells have no `KEY=VALUE command` prefix syntax; `env` scopes the
+    // variables to the one process instead.
+    let prefix = if matches!(
+        normalized_process_name(shell_name).as_str(),
+        "csh" | "tcsh" | "elvish" | "xonsh"
+    ) {
+        "env "
+    } else {
+        ""
+    };
+    Some(format!("{prefix}{assignments} {command}"))
+}
+
+/// Wraps a PowerShell agent command so `env` is set only while it runs, then
+/// restores each variable's previous value (or absence).
+pub(crate) fn powershell_env_script(command: &str, env: &[(&str, &str)]) -> String {
+    let keys = env
+        .iter()
+        .map(|(key, _)| powershell_single_quoted(key))
+        .collect::<Vec<_>>()
+        .join(",");
+    let assignments = env
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "[Environment]::SetEnvironmentVariable({},{});",
+                powershell_single_quoted(key),
+                powershell_single_quoted(value)
+            )
+        })
+        .collect::<String>();
+    format!(
+        "& {{$herdrEnv=@{{}};foreach($herdrKey in @({keys})){{$herdrEnv[$herdrKey]=[Environment]::GetEnvironmentVariable($herdrKey)}};try{{{assignments}{command}}}finally{{foreach($herdrKey in $herdrEnv.Keys){{[Environment]::SetEnvironmentVariable($herdrKey,$herdrEnv[$herdrKey])}}}}}}"
+    )
+}
+
+/// Always single-quoted. PowerShell also treats the typographic single quotes
+/// as quote characters, so every one of them is doubled.
+fn powershell_single_quoted(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for ch in value.chars() {
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            quoted.push(ch);
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
+}
+
 pub(crate) fn quote_powershell_arg(value: &str) -> String {
     if !value.is_empty()
         && !value.starts_with('-')
@@ -967,6 +1048,79 @@ mod tests {
         assert_eq!(
             interactive_shell_command(&argv, "pwsh").as_deref(),
             Some("pi '' 'two words' 'a''b' '$HOME' 'semi;colon' '@options'")
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interactive_agent_shell_command_without_env_is_unchanged() {
+        let argv = vec!["pi".to_string(), "two words".into()];
+        for shell in ["bash", "pwsh", "tcsh"] {
+            assert_eq!(
+                interactive_agent_shell_command(&argv, &[], shell),
+                interactive_shell_command(&argv, shell)
+            );
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interactive_agent_shell_command_scopes_env_per_shell() {
+        let argv = vec!["claude".to_string(), "--resume".into()];
+        let env = [("CLAUDE_CONFIG_DIR", "~/.claude alt"), ("MODE", "x")];
+        assert_eq!(
+            interactive_agent_shell_command(&argv, &env, "bash").as_deref(),
+            Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
+        );
+        assert_eq!(
+            interactive_agent_shell_command(&argv, &env, "-zsh").as_deref(),
+            Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
+        );
+        assert_eq!(
+            interactive_agent_shell_command(&argv, &env, "tcsh").as_deref(),
+            Some("env CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
+        );
+        let pwsh = interactive_agent_shell_command(&argv, &env, "pwsh").unwrap();
+        assert!(pwsh.starts_with("& {"));
+        assert!(pwsh.contains("@('CLAUDE_CONFIG_DIR','MODE')"));
+        assert!(pwsh.contains(
+            "[Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR','~/.claude alt');"
+        ));
+        assert!(pwsh.contains("claude '--resume'}finally{"));
+    }
+
+    #[test]
+    fn powershell_env_script_doubles_every_single_quote_form() {
+        let script = powershell_env_script("pi", &[("A", "it's \u{2019}q\u{2018}")]);
+        assert!(script
+            .contains("SetEnvironmentVariable('A','it''s \u{2019}\u{2019}q\u{2018}\u{2018}');"));
+    }
+
+    /// Runs the generated command in a real `/bin/sh`: the agent process sees
+    /// each value literally, and the shell itself keeps its own environment.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interactive_agent_shell_command_env_reaches_only_the_agent_process() {
+        let value = "a 'quoted' $HOME `x` \\ ;b=c";
+        let argv = vec![
+            "/bin/sh".to_string(),
+            "-c".into(),
+            "printf '<%s>' \"$HERDR_TEST_AGENT_ENV\"".into(),
+        ];
+        let command =
+            interactive_agent_shell_command(&argv, &[("HERDR_TEST_AGENT_ENV", value)], "sh")
+                .unwrap();
+        let script = format!("{command}; printf '[%s]' \"${{HERDR_TEST_AGENT_ENV-unset}}\"");
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .env_remove("HERDR_TEST_AGENT_ENV")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("<{value}>[unset]")
         );
     }
 

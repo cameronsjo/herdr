@@ -688,7 +688,9 @@ mod tests {
                 .map(str::to_string)
         );
         assert!(has_option(agent_start, "pane"));
-        for legacy in ["cwd", "workspace", "tab", "split", "focus", "env", "argv"] {
+        // Fork (cameronsjo/herdr#103): `--env` returns, scoped to the agent process.
+        assert!(has_option(agent_start, "env"));
+        for legacy in ["cwd", "workspace", "tab", "split", "focus", "argv"] {
             assert!(!has_option(agent_start, legacy), "legacy option --{legacy}");
         }
         assert!(agent_start
