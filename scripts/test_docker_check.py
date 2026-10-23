@@ -183,6 +183,34 @@ class DockerCheckRetryTests(unittest.TestCase):
             result.stderr,
         )
 
+    def test_signal_timeout_and_leak_statuses_count_as_failures(self) -> None:
+        """A test killed by a signal (a stack overflow or double panic aborts),
+        timed out, or leaking a handle is reported with that status in place
+        of FAIL. Each one is a failure; reading only FAIL lines let a SIGABRT
+        through as a passing run."""
+        names = {
+            "SIGABRT": "overflows_its_stack",
+            "SIGSEGV": "touches_a_bad_pointer",
+            "TIMEOUT": "hangs_forever",
+            "LEAK-FAIL": "leaks_a_handle",
+        }
+        with _tmp_dir() as tmp_path:
+            log_file = tmp_path / "nextest.log"
+            log_file.write_text(
+                LOG_PREAMBLE
+                + "".join(
+                    f"     {status} [   0.100s] (  2/3862) {DEFAULT_BINARY} {name}\n"
+                    for status, name in names.items()
+                ),
+                encoding="utf-8",
+            )
+            result = _run_classification(log_file, "  return 1")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"STILL_FAILING_COUNT={len(names)}", result.stdout)
+        for name in names.values():
+            self.assertIn(f"STILL_FAILING_ENTRY={DEFAULT_BINARY}\t{name}", result.stdout)
+
     def test_mixed_flake_and_real_failure_reports_only_the_real_one(self) -> None:
         with _tmp_dir() as tmp_path:
             log_file = _write_log(
