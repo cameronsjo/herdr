@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `upstream-drift.sh` answers when upstream has no `v*` tag
+
+### fix: keep upstream-drift running when no upstream tag matches
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/upstream-drift.sh` (the tag pick only), new `scripts/test_upstream_drift.py`, `justfile` (`maintenance-test` runs it)
+- **Replaces:** nothing upstream; the script is fork-only. The newest-tag pick ended in `grep -v -- '-palette\.' | head -1`. With no `v*` tag, or only `-palette.` tags, grep matched nothing and exited 1, and under `set -euo pipefail` the assignment ended the script: no output and exit 1, so a level fork read as "behind" and the `(none found ...)` fallback never printed. The pick is now one `awk` that cannot fail on an empty match.
+- **Regression check:** `python3 -m unittest scripts.test_upstream_drift` (4 tests: level with no tags exits 0, palette-only tags read as none found, behind names the newest non-palette tag and exits 1, a missing `fork` remote exits 2). The first two were confirmed red against the old script.
+- **Render scaling:** not affected; maintenance script only.
+
 ## `rows_by_agent` set while grouped warns at config load (issue [#31](https://github.com/cameronsjo/herdr/issues/31))
 
 ### feat(config): warn when rows_by_agent is ignored while grouped

@@ -36,8 +36,10 @@ git fetch --quiet --no-tags "$FORK_REMOTE" master || die "could not fetch $FORK_
 behind="$(git rev-list --count "$FORK_REMOTE/master..$UPSTREAM_REMOTE/master")"
 ahead="$(git rev-list --count "$UPSTREAM_REMOTE/master..$FORK_REMOTE/master")"
 
+# awk, not `grep -v | head`: grep exits 1 when every tag is a palette tag (or
+# there are none), and under pipefail that would end the script right here.
 upstream_tag="$(git tag --list 'v*' --sort=-v:refname \
-  --merged "$UPSTREAM_REMOTE/master" | grep -v -- '-palette\.' | head -1)"
+  --merged "$UPSTREAM_REMOTE/master" | awk '!/-palette\./ && !found { print; found = 1 }')"
 [ -n "$upstream_tag" ] || upstream_tag="(none found -- run: git fetch $UPSTREAM_REMOTE --tags)"
 
 printf 'fork ahead:   %s commits\n' "$ahead"
