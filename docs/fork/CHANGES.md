@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## docker-check counts a test killed by a signal as a failure
+
+### fix: count every nextest failing status in docker-check
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/docker-check.sh` (`classify_nextest_failures` and the main body), `scripts/test_docker_check.py`, `openspec/specs/fork-maintenance/spec.md` (via the archived `docker-check-every-failure-status` change)
+- **Replaces:** nothing upstream; `docker-check.sh` is fork-only. The parser read only `FAIL` lines. nextest reports a signal-killed test as `SIGABRT`/`SIGSEGV` (a stack overflow or a double panic aborts), a timeout kill as `TIMEOUT`, a Windows abort as `ABORT` and a leaked handle as `LEAK-FAIL`, so such a run parsed as zero failures and ended in `docker-check: PASS`. Those statuses now go through the same allowlist and retry path as `FAIL`. A nextest run that exits non-zero with nothing recognized now fails the check outright, so a status this parser does not know yet cannot pass either.
+- **Regression check:** `python3 -m unittest scripts.test_docker_check` (11 tests). `test_signal_timeout_and_leak_statuses_count_as_failures` was confirmed red against the old parser. `shellcheck scripts/docker-check.sh` reports only the pre-existing SC1091 info.
+- **Render scaling:** not affected; maintenance script only.
+
 ## `upstream-drift.sh` answers when upstream has no `v*` tag
 
 ### fix: keep upstream-drift running when no upstream tag matches

@@ -106,8 +106,13 @@ classify_nextest_failures() {
   # which proc-macro-generated tests can pad with spaces — so it must not be
   # truncated to the last field ($NF), only to what follows the binary id.
   #
-  # Matching `^ *FAIL ` also excludes nextest's own retry-attempt lines, which
-  # are prefixed `TRY N FAIL`. That is deliberate — only the final verdict
+  # A test that does not exit normally gets another status in the same column:
+  # SIGSEGV/SIGABRT/... when a signal kills it (a stack overflow or a double
+  # panic aborts), TIMEOUT past a slow-timeout terminate-after, ABORT on
+  # Windows, LEAK-FAIL for a leaked handle. Each of those is a failure too.
+  #
+  # Anchoring the status at line start also excludes nextest's own
+  # retry-attempt lines, which are prefixed `TRY N FAIL`. That is deliberate — only the final verdict
   # counts — and moot today, since nothing here configures `--retries`. Revisit
   # the filter alongside any change that does.
   #
@@ -120,9 +125,9 @@ classify_nextest_failures() {
   while IFS= read -r fail_line; do
     ACTUAL_FAILURES+=("$fail_line")
   done < <(
-    command grep -E '^ *FAIL ' "$log_file" | awk '
+    command grep -E '^ *(FAIL|SIG[A-Z0-9]+|TIMEOUT|ABORT|LEAK-FAIL) ' "$log_file" | awk '
       {
-        if (!sub(/^[ \t]*FAIL[ \t]+\[[^]]*\][ \t]+\([ \t]*[0-9]+\/[0-9]+\)[ \t]+/, "")) {
+        if (!sub(/^[ \t]*(FAIL|SIG[A-Z0-9]+|TIMEOUT|ABORT|LEAK-FAIL)[ \t]+\[[^]]*\][ \t]+\([ \t]*[0-9]+\/[0-9]+\)[ \t]+/, "")) {
           next
         }
         binary = $1
@@ -237,6 +242,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     fi
 
     classify_nextest_failures "$LOG_FILE"
+
+    # nextest failed but no failing test line was recognized: a status this
+    # parser does not know yet, or a run that died mid-way. Never a pass.
+    if [[ "${#ACTUAL_FAILURES[@]}" -eq 0 ]]; then
+      echo
+      echo "error: nextest exited $NEXTEST_EXIT but no failing test was recognized in its output — see above" >&2
+      exit 1
+    fi
 
     if [[ "${#STILL_FAILING[@]}" -gt 0 ]]; then
       echo
