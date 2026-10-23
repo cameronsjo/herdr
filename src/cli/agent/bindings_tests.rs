@@ -212,3 +212,78 @@ fn agent_projection_clap_relations_and_help_before_transport() {
         );
     }
 }
+
+#[test]
+fn agent_start_env_is_repeatable_and_last_value_wins() {
+    assert_eq!(
+        params(&[
+            "start",
+            "name",
+            "--kind=claude",
+            "--pane=1",
+            "--env",
+            "CLAUDE_CONFIG_DIR=/home/me/.claude-alt",
+            "--env=MODE=a=b",
+            "--env",
+            "EMPTY=",
+            "--env",
+            "MODE=last",
+            "--",
+            "--env",
+            "NOT_ENV=1",
+        ]),
+        serde_json::json!({
+            "name":"name", "kind":"claude", "pane_id":"1",
+            "env": {"CLAUDE_CONFIG_DIR":"/home/me/.claude-alt", "EMPTY":"", "MODE":"last"},
+            "args":["--env","NOT_ENV=1"],
+        })
+    );
+}
+
+#[test]
+fn agent_start_env_rejects_bad_pairs_without_echoing_them() {
+    const SECRET: &str = "sk-live-secret-value";
+    for pair in [
+        SECRET.to_string(),
+        format!("1BAD={SECRET}"),
+        format!("{SECRET}={SECRET}"),
+        format!("BAD-KEY={SECRET}"),
+        format!("={SECRET}"),
+    ] {
+        let args = ["start", "name", "--kind=claude", "--pane=1", "--env", &pair];
+        let Err(ParseError::Usage(message)) = parse(&args) else {
+            panic!("{pair:?} should be a usage error");
+        };
+        assert!(message.starts_with("--env: "), "{message}");
+        assert!(!message.contains(SECRET), "{message}");
+    }
+    let Err(ParseError::Usage(message)) = parse(&[
+        "start",
+        "name",
+        "--kind=claude",
+        "--pane=1",
+        "--env",
+        "NOEQUALS",
+    ]) else {
+        panic!("missing '=' should be a usage error");
+    };
+    assert_eq!(message, "--env: agent env entries must be KEY=VALUE");
+}
+
+#[test]
+fn agent_start_env_requires_the_server_capability() {
+    let mut capabilities = crate::api::schema::ServerCapabilities {
+        live_handoff: false,
+        detached_server_daemon: false,
+        endpoint_protocol_generation: None,
+        surface_interest: false,
+        health_check: false,
+        ssh_agent_registration: false,
+        agent_start_env: false,
+    };
+    let error = super::agent_start_env_support_error(Some(&capabilities)).unwrap();
+    assert_eq!(error["error"]["code"], "agent_start_env_unsupported");
+    assert!(super::agent_start_env_support_error(None).is_some());
+    capabilities.agent_start_env = true;
+    assert!(super::agent_start_env_support_error(Some(&capabilities)).is_none());
+}

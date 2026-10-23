@@ -1248,6 +1248,29 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
     }
 }
 
+/// Fork (cameronsjo/herdr#103): the agent script with `env` scoped to it. The
+/// cmd.exe route encodes the wrapped script, so the variables never touch cmd.
+pub(crate) fn interactive_shell_command_with_env(
+    argv: &[String],
+    env: &[(&str, &str)],
+    shell_name: &str,
+) -> Option<String> {
+    let shell_name = shell_name.to_ascii_lowercase();
+    let powershell = shell_name.contains("powershell") || shell_name.contains("pwsh");
+    let script = super::powershell_env_script(&powershell_agent_script(argv)?, env);
+    if powershell {
+        Some(script)
+    } else {
+        Some(cmd_encoded_powershell_command(&script))
+    }
+}
+
+/// Every Windows pane shell launches agents through a PowerShell script (cmd
+/// and others via `-EncodedCommand`), so the env wrapper applies to all.
+pub(crate) fn agent_env_shell_supported(_shell_name: &str) -> bool {
+    true
+}
+
 fn powershell_agent_script(argv: &[String]) -> Option<String> {
     let (program, args) = argv.split_first()?;
     if args.is_empty() {

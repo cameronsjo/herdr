@@ -95,6 +95,7 @@ fn start_request(pane_id: &str, argument: &str) -> Request {
             pane_id: pane_id.into(),
             args: vec!["resume".into(), argument.into()],
             timeout_ms: Some(10_000),
+            env: Default::default(),
         }),
     }
 }

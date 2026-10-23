@@ -154,6 +154,7 @@ impl App {
         {
             return Err(AgentStartError::InvalidArgument);
         }
+        params.env.validate().map_err(AgentStartError::InvalidEnv)?;
         let persisted_agent_session =
             crate::agent_resume::persisted_session_from_launch_args(kind, &params.args);
         let conflicts = self.agent_name_conflicts(&name, "");
@@ -188,9 +189,16 @@ impl App {
         let shell_name = available_shell_name(runtime)
             .ok_or_else(|| AgentStartError::TargetBusy(params.pane_id.clone()))?;
 
+        if !params.env.is_empty() && !crate::platform::agent_env_shell_supported(&shell_name) {
+            return Err(AgentStartError::EnvUnsupportedShell(
+                crate::platform::pane_shell_label(&shell_name),
+            ));
+        }
+
         let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
         argv.extend(params.args);
-        let command = crate::platform::interactive_shell_command(&argv, &shell_name)
+        let env = params.env.iter().collect::<Vec<_>>();
+        let command = crate::platform::interactive_agent_shell_command(&argv, &env, &shell_name)
             .ok_or(AgentStartError::InvalidArgument)?;
         let bytes = crate::app::api_helpers::encode_api_submission(runtime, &command);
         let timeout = Duration::from_millis(
@@ -245,6 +253,16 @@ impl App {
             AgentStartError::InvalidArgument => crate::api::schema::ErrorBody {
                 code: "invalid_agent_argument".into(),
                 message: "agent arguments cannot be encoded safely for the target shell".into(),
+            },
+            AgentStartError::InvalidEnv(error) => crate::api::schema::ErrorBody {
+                code: "invalid_agent_env".into(),
+                message: error.to_string(),
+            },
+            AgentStartError::EnvUnsupportedShell(shell) => crate::api::schema::ErrorBody {
+                code: "agent_env_unsupported_shell".into(),
+                message: format!(
+                    "agent start --env is not supported in a {shell} pane; supported shells: sh, bash, dash, zsh, ksh, mksh, fish, pwsh (and every shell on Windows)"
+                ),
             },
             AgentStartError::InvalidTimeout => crate::api::schema::ErrorBody {
                 code: "invalid_agent_timeout".into(),
@@ -468,6 +486,11 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
 pub(super) enum AgentStartError {
     InvalidName,
     UnsupportedKind(String),
+    /// Fork (#103). Carries no env value, so the error body cannot leak one.
+    InvalidEnv(crate::api::schema::AgentEnvError),
+    /// Fork (#103): the pane's shell has no verified env quoting. Carries the
+    /// shell's process name only.
+    EnvUnsupportedShell(String),
     InvalidArgument,
     InvalidTimeout,
     TargetNotFound(String),
