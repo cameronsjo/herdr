@@ -130,9 +130,12 @@ function Normalize-Title($Value) {
     if ([string]::IsNullOrWhiteSpace($title)) { return $null }
     # Count characters, not UTF-16 units: a cut inside a surrogate pair leaves
     # half an emoji, which is not valid UTF-8 and herdr refuses the argument.
-    $chars = [regex]::Matches($title, '[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]')
-    if ($chars.Count -gt 80) {
-        $title = (-join ($chars | Select-Object -First 77 | ForEach-Object { $_.Value })).TrimEnd() + "..."
+    # 80 units or fewer is 80 characters or fewer, so most titles skip this.
+    if ($title.Length -gt 80) {
+        $chars = [regex]::Matches($title, '[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]')
+        if ($chars.Count -gt 80) {
+            $title = (-join ($chars | Select-Object -First 77 | ForEach-Object { $_.Value })).TrimEnd() + "..."
+        }
     }
     return $title
 }
