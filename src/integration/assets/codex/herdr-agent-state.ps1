@@ -128,7 +128,12 @@ function Normalize-Title($Value) {
     $title = $Value -replace '^\s*(?:\[Image #\d+\]\s*)+', ''
     $title = ($title -replace '\s+', ' ').Trim()
     if ([string]::IsNullOrWhiteSpace($title)) { return $null }
-    if ($title.Length -gt 80) { $title = $title.Substring(0, 77).TrimEnd() + "..." }
+    # Count characters, not UTF-16 units: a cut inside a surrogate pair leaves
+    # half an emoji, which is not valid UTF-8 and herdr refuses the argument.
+    $chars = [regex]::Matches($title, '[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]')
+    if ($chars.Count -gt 80) {
+        $title = (-join ($chars | Select-Object -First 77 | ForEach-Object { $_.Value })).TrimEnd() + "..."
+    }
     return $title
 }
 
