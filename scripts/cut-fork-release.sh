@@ -308,7 +308,9 @@ fi
 step "Reading the published digest"
 release_body="$(gh release view "$TAG" --repo "$FORK_REPO" --json body --jq '.body')" \
   || die "could not read the release body for $TAG -- the release exists; verify the tap by hand"
-digest="$(printf '%s' "$release_body" | grep -oE '[0-9a-f]{64}' | head -1)"
+# grep exits 1 on no match; under pipefail that would end the script here,
+# before the die below can say what to do.
+digest="$(printf '%s' "$release_body" | grep -oE '[0-9a-f]{64}' | head -1 || true)"
 [ -n "$digest" ] || die "the release notes for $TAG carry no sha256 -- verify the tap by hand"
 printf 'OK    sha256=%s\n' "$digest"
 
