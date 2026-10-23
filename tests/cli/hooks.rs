@@ -306,6 +306,16 @@ printf '%s\n' '{"id":2,"result":{"thread":{"name":"Improve Codex-herdr integrati
         "Improve Codex-herdr integration"
     );
     assert!(request["params"].get("applies_to_source").is_none());
+
+    // An ephemeral session (SessionStart without a transcript) gets no title,
+    // even though the app-server would answer with one.
+    assert!(run_shell_hook_with_env(
+        "src/integration/assets/codex/herdr-agent-state.sh",
+        &["metadata"],
+        r#"{"hook_event_name":"SessionStart","session_id":"codex-session","transcript_path":null}"#,
+        &[("HERDR_CODEX_BIN_PATH", fake_codex.to_str().unwrap())],
+    )
+    .is_none());
     cleanup_test_base(&base);
 }
 
