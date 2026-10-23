@@ -521,6 +521,26 @@ impl AgentsSidebarConfig {
             .and_then(|agent| self.rows_by_agent.get(crate::detect::agent_label(agent)))
             .unwrap_or(&self.rows)
     }
+
+    /// Warns when `rows_by_agent` overrides are set alongside a `group_by`
+    /// that groups entries: `rows_for_agent` returns `grouped_rows` for every
+    /// grouped entry, so the overrides would otherwise do nothing silently.
+    /// The config is kept as written; this is a warning, not a rejection.
+    pub(crate) fn grouped_rows_by_agent_diagnostic(&self) -> Option<String> {
+        if !self.group_by.is_grouped() || self.rows_by_agent.is_empty() {
+            return None;
+        }
+        let ids = self
+            .rows_by_agent
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(
+            "ui.sidebar.agents.rows_by_agent is ignored while group_by groups entries \
+             (overrides for: {ids}); grouped entries use ui.sidebar.agents.grouped_rows"
+        ))
+    }
 }
 
 impl Default for AgentsSidebarConfig {
@@ -872,6 +892,89 @@ claude = [["workspace", "agent"]]
             "grouped rows must not repeat the workspace token a group header already shows: {resolved:?}"
         );
         assert_eq!(resolved, &vec![vec![AgentSidebarToken::Agent]]);
+    }
+
+    #[test]
+    fn grouped_rows_by_agent_diagnostic_names_ignored_overrides() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[ui.sidebar.agents]
+group_by = "workspace"
+
+[ui.sidebar.agents.rows_by_agent]
+codex = [["agent"]]
+claude = [["pane"]]
+"#,
+        )
+        .expect("grouped sidebar config with overrides");
+
+        let diagnostic = config
+            .ui
+            .sidebar
+            .agents
+            .grouped_rows_by_agent_diagnostic()
+            .expect("grouped overrides must be reported");
+        assert_eq!(
+            diagnostic,
+            "ui.sidebar.agents.rows_by_agent is ignored while group_by groups entries \
+             (overrides for: claude, codex); grouped entries use ui.sidebar.agents.grouped_rows"
+        );
+        assert!(
+            config.collect_diagnostics().contains(&diagnostic),
+            "collect_diagnostics must include the grouped override warning"
+        );
+        // The summary's file name follows the config path env var, which
+        // other tests change, so check only the impact wording.
+        let summary = crate::config::config_diagnostic_summary(std::slice::from_ref(&diagnostic))
+            .expect("summary for one diagnostic");
+        for rejected in ["using defaults", "keeping current config", "unknown keys"] {
+            assert!(
+                !summary.contains(rejected),
+                "the warning must not read as a rejected config: {summary}"
+            );
+        }
+
+        let token: crate::config::Config = toml::from_str(
+            "[ui.sidebar.agents]\ngroup_by = { token = \"project\" }\n\
+             [ui.sidebar.agents.rows_by_agent]\npi = [[\"agent\"]]\n",
+        )
+        .expect("token-grouped sidebar config with overrides");
+        assert!(token
+            .ui
+            .sidebar
+            .agents
+            .grouped_rows_by_agent_diagnostic()
+            .is_some_and(|diagnostic| diagnostic.contains("(overrides for: pi)")));
+    }
+
+    #[test]
+    fn grouped_rows_by_agent_diagnostic_is_absent_ungrouped_or_without_overrides() {
+        let ungrouped: crate::config::Config = toml::from_str(
+            "[ui.sidebar.agents]\ngroup_by = \"none\"\n\
+             [ui.sidebar.agents.rows_by_agent]\nclaude = [[\"agent\"]]\n",
+        )
+        .expect("ungrouped sidebar config with overrides");
+        assert_eq!(
+            ungrouped
+                .ui
+                .sidebar
+                .agents
+                .grouped_rows_by_agent_diagnostic(),
+            None
+        );
+
+        let no_overrides: crate::config::Config =
+            toml::from_str("[ui.sidebar.agents]\ngroup_by = \"workspace\"\n")
+                .expect("grouped sidebar config without overrides");
+        assert_eq!(
+            no_overrides
+                .ui
+                .sidebar
+                .agents
+                .grouped_rows_by_agent_diagnostic(),
+            None
+        );
+        assert!(no_overrides.collect_diagnostics().is_empty());
     }
 
     #[test]
