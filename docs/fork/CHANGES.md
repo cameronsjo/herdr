@@ -240,6 +240,15 @@ next sync is likely to conflict again:
 - **Replaces:** nothing upstream; the Codex title is the fork's (cameronsjo/herdr#26). The Windows hook measured and cut the title with `.Length` and `Substring`, which count UTF-16 units. A cut that landed inside an emoji's surrogate pair left half of it, which is not valid UTF-8, so herdr refused the argument and no title was reported. A title of 79 emoji (under the limit) was also cut. The `.sh` hook and the codex-lifecycle spec count characters ("over 80 characters to its first 77"); the `.ps1` now does too. `CODEX_INTEGRATION_VERSION` stays 11: it is already one past the last fork release (v0.9.3-palette.1 ships 10).
 - **Regression check:** no Windows runner covers the hook, so this was checked by hand with pwsh 7.4 against `Normalize-Title` on its own. Before: 79 emoji came back as 38 emoji, a lone surrogate and `...`, and `"a"*76 + "😀" + "b"*10` ended in a lone surrogate. After: 79 emoji pass unchanged, the second ends `a😀...` at 80 characters, and ASCII titles of 80, 81 and 200 characters are unchanged from before.
 - **Render scaling:** not affected; hook script only.
+## The OpenSpec wrapper guards `store`, and the release cut reads every remote spelling
+
+### fix: guard openspec store writes and accept ssh:// fork remotes
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/openspec.sh`, `scripts/test_openspec_wrapper.py` (new), `justfile` (`maintenance-test` runs it), `scripts/cut-fork-release.sh`, `AGENTS.md`
+- **Replaces:** nothing upstream; both scripts are the fork's. The wrapper's guard refused the subcommands that reach outside the repo, but not `store`, whose `setup`, `register`, `unregister` and `remove` change the per-user store registry, and `store remove --yes` deletes a folder elsewhere on disk. They now need `OPENSPEC_ALLOW_OUTSIDE=1`, like `feedback`; `store list|ls|doctor` still run without it. So does `--store <id>` on any command, which works in a registered store's folder instead of this repo. `cut-fork-release.sh` read the remote's slug with a sed that knew only `git@host:` and `https://host/`, so `ssh://git@github.com/cameronsjo/herdr.git` and a trailing-slash HTTPS URL were refused as some other repo, while any host (or a bare `cameronsjo/herdr` path) passed. It now accepts the scp-style, `ssh://` and HTTPS spellings of github.com only.
+- **Regression check:** `python3 -m unittest scripts.test_openspec_wrapper` (fails without the fix: the `store` writes reach the CLI). The slug check was run by hand: the github.com scp-style, `ssh://` (with and without `:22`) and HTTPS spellings, with and without `.git` or a trailing slash, give `cameronsjo/herdr`; `cameronsjo/herdr-mirror`, another host and a bare path are refused.
+- **Render scaling:** not affected; maintenance scripts only.
 
 ## The Codex metadata hook skips an ephemeral session again
 
