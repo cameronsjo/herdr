@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `rows_by_agent` set while grouped warns at config load (issue [#31](https://github.com/cameronsjo/herdr/issues/31))
+
+### feat(config): warn when rows_by_agent is ignored while grouped
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/config/sidebar.rs` (new `AgentsSidebarConfig::grouped_rows_by_agent_diagnostic`, two tests), `src/config.rs` (one `.chain(...)` line in `Config::collect_diagnostics`), `docs/next/website/src/content/docs/configuration.mdx` (one sentence, English only), `openspec/specs/agent-sidebar/spec.md` (via the archived `warn-rows-by-agent-while-grouped` change)
+- **Replaces:** nothing upstream. Since #23, `grouped_rows` wins over every `rows_by_agent` override while `group_by` groups entries, so an override did nothing with no signal. Config load now reports `ui.sidebar.agents.rows_by_agent is ignored while group_by groups entries (overrides for: <ids>); grouped entries use ui.sidebar.agents.grouped_rows`. The wording avoids `config_diagnostic_summary`'s "using defaults" and "keeping current config" classes, so the banner reads as a plain warning and the config loads as written.
+- **Regression check:** `cargo nextest run -E 'test(/grouped_rows_by_agent_diagnostic/)'`. Dropping the `.chain` line in `collect_diagnostics` reddens `grouped_rows_by_agent_diagnostic_names_ignored_overrides`. **Collision:** an upstream edit to `Config::collect_diagnostics`; keep the fork's `.chain(self.ui.sidebar.agents.grouped_rows_by_agent_diagnostic())` line.
+- **Render scaling:** not affected; runs once per config load.
+
 ## `parse_workspace_id` takes upstream's text again
 
 ### fix: use upstream's bound in parse_workspace_id
