@@ -3052,7 +3052,9 @@ mod tests {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    // The test pane's shell is `sh` (see `available_shell_name`), whose typed
+    // form differs on Windows; `unix` keeps `target_os` out of this module.
+    #[cfg(unix)]
     #[tokio::test]
     async fn agent_start_env_prefixes_the_typed_agent_command() {
         let (mut app, pane_id, terminal_id, mut receiver) = agent_start_env_app("agent-start-env");
@@ -3080,6 +3082,16 @@ mod tests {
             app.state.terminals[&terminal_id].agent_name.as_deref(),
             Some("worker")
         );
+    }
+
+    #[test]
+    fn agent_start_unsupported_shell_error_names_the_shell_only() {
+        let app = test_app();
+        let body = app.agent_start_error_body(super::agents::AgentStartError::EnvUnsupportedShell(
+            "nu".into(),
+        ));
+        assert_eq!(body.code, "agent_env_unsupported_shell");
+        assert!(body.message.contains("in a nu pane"), "{}", body.message);
     }
 
     #[tokio::test]

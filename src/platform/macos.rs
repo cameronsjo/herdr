@@ -231,6 +231,10 @@ pub(crate) fn interactive_shell_command_with_env(
     super::interactive_unix_shell_command_with_env(argv, env, shell_name, shell_quote)
 }
 
+pub(crate) fn agent_env_shell_supported(shell_name: &str) -> bool {
+    super::unix_agent_env_shell_supported(shell_name)
+}
+
 fn shell_quote(value: &str) -> String {
     if !value.is_empty()
         && value.chars().all(|ch| {

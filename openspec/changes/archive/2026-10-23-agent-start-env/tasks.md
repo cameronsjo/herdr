@@ -22,3 +22,10 @@
 ## 5. Ledger
 
 - [x] 5.1 Add the `docs/fork/CHANGES.md` entry, with its regression check
+
+## 6. Review follow-up (PR #124)
+
+- [x] 6.1 Limit `--env` to shells with verified quoting (sh family, fish with its own quoter, pwsh) and refuse the rest with `agent_env_unsupported_shell`
+- [x] 6.2 Real-shell round-trip tests with adversarial values for every supported shell that is installed
+- [x] 6.3 Refuse U+2028, U+2029 and format characters in values; keep a mistyped `env` out of `invalid_request` messages
+- [x] 6.4 Record that a restored agent does not keep its launch env

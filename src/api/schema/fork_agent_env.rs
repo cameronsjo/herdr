@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 /// The key grammar, quoted verbatim in error messages.
@@ -17,7 +18,9 @@ pub const AGENT_ENV_KEY_PATTERN: &str = "^[A-Za-z_][A-Za-z0-9_]*$";
 ///
 /// Serialized as a JSON object of string values. An empty map is the default
 /// and is omitted on the wire, so requests without `env` are unchanged.
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+// `Deserialize` is hand-written (below) so a wrongly typed `env` or value is
+// refused without serde quoting the offending value back to the caller.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct AgentEnv(pub BTreeMap<String, String>);
 
@@ -46,7 +49,7 @@ impl AgentEnv {
             if !valid_agent_env_key(key) {
                 return Err(AgentEnvError::InvalidKey);
             }
-            if value.chars().any(char::is_control) {
+            if !valid_agent_env_value(value) {
                 return Err(AgentEnvError::InvalidValue {
                     key: key.to_owned(),
                 });
@@ -91,7 +94,10 @@ impl fmt::Display for AgentEnvError {
             Self::MissingEquals => f.write_str("agent env entries must be KEY=VALUE"),
             Self::InvalidKey => write!(f, "agent env keys must match {AGENT_ENV_KEY_PATTERN}"),
             Self::InvalidValue { key } => {
-                write!(f, "agent env value for {key} contains control characters")
+                write!(
+                    f,
+                    "agent env value for {key} contains control, separator or format characters"
+                )
             }
         }
     }
@@ -114,12 +120,112 @@ pub fn parse_agent_env_pair(pair: &str) -> Result<(&str, &str), AgentEnvError> {
     if !valid_agent_env_key(key) {
         return Err(AgentEnvError::InvalidKey);
     }
-    if value.chars().any(char::is_control) {
+    if !valid_agent_env_value(value) {
         return Err(AgentEnvError::InvalidValue {
             key: key.to_owned(),
         });
     }
     Ok((key, value))
+}
+
+/// Refuses control characters (Cc, which includes U+0085), the line and
+/// paragraph separators U+2028/U+2029, and format characters (Cf: bidi
+/// overrides, zero-width), which could make the command echoed in the pane
+/// read differently from what runs.
+pub fn valid_agent_env_value(value: &str) -> bool {
+    !value.chars().any(|ch| {
+        ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') || crate::label::is_format_char(ch)
+    })
+}
+
+const ENV_TYPE_ERROR: &str = "agent env must be an object of string values";
+
+fn redacted_type_error<E: de::Error>() -> E {
+    E::custom(ENV_TYPE_ERROR)
+}
+
+/// Overrides every scalar `visit_*` that serde would otherwise report with
+/// the value quoted (`invalid type: string "..."`). Both visitors use
+/// `deserialize_any`, because serde_json reports a type mismatch on
+/// `deserialize_map`/`deserialize_string` itself, value included, without
+/// asking the visitor.
+macro_rules! refuse_scalars {
+    () => {
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_bytes<E: de::Error>(self, _: &[u8]) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Err(redacted_type_error())
+        }
+        fn visit_seq<A: de::SeqAccess<'de>>(self, _: A) -> Result<Self::Value, A::Error> {
+            Err(redacted_type_error())
+        }
+    };
+}
+
+struct EnvValue(String);
+
+impl<'de> Deserialize<'de> for EnvValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ValueVisitor;
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = EnvValue;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<EnvValue, E> {
+                Ok(EnvValue(value.to_owned()))
+            }
+            fn visit_string<E: de::Error>(self, value: String) -> Result<EnvValue, E> {
+                Ok(EnvValue(value))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, _: A) -> Result<EnvValue, A::Error> {
+                Err(redacted_type_error())
+            }
+            refuse_scalars!();
+        }
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentEnv {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EnvVisitor;
+        impl<'de> Visitor<'de> for EnvVisitor {
+            type Value = AgentEnv;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(ENV_TYPE_ERROR)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<AgentEnv, A::Error> {
+                let mut env = BTreeMap::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let EnvValue(value) = map.next_value()?;
+                    env.insert(key, value);
+                }
+                Ok(AgentEnv(env))
+            }
+            fn visit_str<E: de::Error>(self, _: &str) -> Result<AgentEnv, E> {
+                Err(redacted_type_error())
+            }
+            refuse_scalars!();
+        }
+        deserializer.deserialize_any(EnvVisitor)
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +295,59 @@ mod tests {
             Err(AgentEnvError::InvalidValue { key: "OK".into() })
         );
         assert_eq!(AgentEnv::from([("OK", "")]).validate(), Ok(()));
+    }
+
+    #[test]
+    fn values_refuse_separators_and_format_characters() {
+        for bad in [
+            "a\u{2028}b",
+            "a\u{2029}b",
+            "a\u{0085}b",
+            "a\u{202E}b",
+            "a\u{200B}b",
+            "a\u{2066}b",
+            "a\u{FEFF}b",
+            "a\rb",
+            "a\u{7F}b",
+        ] {
+            let pair = format!("K={bad}");
+            assert_eq!(
+                parse_agent_env_pair(&pair),
+                Err(AgentEnvError::InvalidValue { key: "K".into() }),
+                "{bad:?}"
+            );
+            assert!(AgentEnv::from([("K", bad)]).validate().is_err(), "{bad:?}");
+        }
+        assert!(valid_agent_env_value(
+            "plain ’quoted‘ $x `y` !z %p ^c ;# \\"
+        ));
+    }
+
+    #[test]
+    fn mistyped_env_is_refused_without_echoing_it() {
+        use crate::api::schema::Request;
+
+        for env in [
+            serde_json::json!(SECRET),
+            serde_json::json!({"K": 731_947_113_u64}),
+            serde_json::json!({"K": -731_947_113_i64}),
+            serde_json::json!({"K": true}),
+            serde_json::json!({"K": [SECRET]}),
+            serde_json::json!({"K": {"nested": SECRET}}),
+            serde_json::json!([SECRET]),
+            serde_json::json!(42),
+        ] {
+            let request = serde_json::json!({
+                "id": "start",
+                "method": "agent.start",
+                "params": {"name": "w", "kind": "claude", "pane_id": "1", "env": env},
+            })
+            .to_string();
+            let error = serde_json::from_str::<Request>(&request).unwrap_err();
+            let message = error.to_string();
+            assert!(!message.contains(SECRET), "{message}");
+            assert!(!message.contains("731947113"), "{message}");
+        }
     }
 
     #[test]

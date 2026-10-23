@@ -203,7 +203,9 @@ cli_params! {
         pub timeout_ms: Option<u64> => Field::new(None).input(bindings::timeout()
             .help("Wait for interactive readiness (default: 30000; max: 300000)")),
         /// Fork: environment variables for the agent process only. Keys must match
-        /// `^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control characters.
+        /// `^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control, line-separator
+        /// or format characters. Refused with `agent_env_unsupported_shell` in panes
+        /// whose shell has no verified quoting (nu, xonsh, elvish, csh, tcsh).
         /// Servers that accept this field advertise `capabilities.agent_start_env`.
         #[serde(default, skip_serializing_if = "super::fork_agent_env::AgentEnv::is_empty")]
         pub env: super::fork_agent_env::AgentEnv => Field::new(super::fork_agent_env::AgentEnv::default())

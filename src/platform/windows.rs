@@ -1265,6 +1265,12 @@ pub(crate) fn interactive_shell_command_with_env(
     }
 }
 
+/// Every Windows pane shell launches agents through a PowerShell script (cmd
+/// and others via `-EncodedCommand`), so the env wrapper applies to all.
+pub(crate) fn agent_env_shell_supported(_shell_name: &str) -> bool {
+    true
+}
+
 fn powershell_agent_script(argv: &[String]) -> Option<String> {
     let (program, args) = argv.split_first()?;
     if args.is_empty() {

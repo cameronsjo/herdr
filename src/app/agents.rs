@@ -189,6 +189,12 @@ impl App {
         let shell_name = available_shell_name(runtime)
             .ok_or_else(|| AgentStartError::TargetBusy(params.pane_id.clone()))?;
 
+        if !params.env.is_empty() && !crate::platform::agent_env_shell_supported(&shell_name) {
+            return Err(AgentStartError::EnvUnsupportedShell(
+                crate::platform::pane_shell_label(&shell_name),
+            ));
+        }
+
         let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
         argv.extend(params.args);
         let env = params.env.iter().collect::<Vec<_>>();
@@ -251,6 +257,12 @@ impl App {
             AgentStartError::InvalidEnv(error) => crate::api::schema::ErrorBody {
                 code: "invalid_agent_env".into(),
                 message: error.to_string(),
+            },
+            AgentStartError::EnvUnsupportedShell(shell) => crate::api::schema::ErrorBody {
+                code: "agent_env_unsupported_shell".into(),
+                message: format!(
+                    "agent start --env is not supported in a {shell} pane; supported shells: sh, bash, dash, zsh, ksh, mksh, fish, pwsh (and every shell on Windows)"
+                ),
             },
             AgentStartError::InvalidTimeout => crate::api::schema::ErrorBody {
                 code: "invalid_agent_timeout".into(),
@@ -476,6 +488,9 @@ pub(super) enum AgentStartError {
     UnsupportedKind(String),
     /// Fork (#103). Carries no env value, so the error body cannot leak one.
     InvalidEnv(crate::api::schema::AgentEnvError),
+    /// Fork (#103): the pane's shell has no verified env quoting. Carries the
+    /// shell's process name only.
+    EnvUnsupportedShell(String),
     InvalidArgument,
     InvalidTimeout,
     TargetNotFound(String),

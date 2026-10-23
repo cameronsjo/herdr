@@ -649,6 +649,43 @@ pub(crate) fn interactive_agent_shell_command(
     interactive_shell_command_with_env(argv, env, shell_name)
 }
 
+/// Shells whose env syntax and quoting `agent start --env` has been verified
+/// against the real shell, with adversarial values.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnixAgentEnvShell {
+    /// sh, bash, dash, zsh, ksh, mksh: `KEY='value' agent ...`.
+    Posix,
+    /// fish 3.1+: the same prefix form, with fish's own single-quote escapes.
+    Fish,
+    /// pwsh: a save-and-restore wrapper.
+    PowerShell,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn unix_agent_env_shell(shell_name: &str) -> Option<UnixAgentEnvShell> {
+    match normalized_process_name(shell_name).as_str() {
+        "sh" | "bash" | "dash" | "zsh" | "ksh" | "mksh" => Some(UnixAgentEnvShell::Posix),
+        "fish" => Some(UnixAgentEnvShell::Fish),
+        "pwsh" | "powershell" => Some(UnixAgentEnvShell::PowerShell),
+        // nu, xonsh, elvish, csh and tcsh each need their own quoting (and
+        // csh-family shells expand `!` even inside single quotes). None is
+        // verified, so `--env` is refused there rather than mis-quoted.
+        _ => None,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn unix_agent_env_shell_supported(shell_name: &str) -> bool {
+    unix_agent_env_shell(shell_name).is_some()
+}
+
+/// The pane shell's name as error messages show it (`-zsh` and `/bin/zsh`
+/// both read `zsh`).
+pub(crate) fn pane_shell_label(shell_name: &str) -> String {
+    normalized_process_name(shell_name)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn interactive_unix_shell_command_with_env(
     argv: &[String],
@@ -656,30 +693,41 @@ pub(crate) fn interactive_unix_shell_command_with_env(
     shell_name: &str,
     quote_posix_arg: fn(&str) -> String,
 ) -> Option<String> {
+    let shell = unix_agent_env_shell(shell_name)?;
     let command = interactive_unix_shell_command(argv, shell_name, quote_posix_arg)?;
-    if is_powershell_process_name(shell_name) {
-        return Some(powershell_env_script(&command, env));
-    }
+    let quote_value: fn(&str) -> String = match shell {
+        UnixAgentEnvShell::PowerShell => return Some(powershell_env_script(&command, env)),
+        UnixAgentEnvShell::Posix => quote_posix_arg,
+        UnixAgentEnvShell::Fish => fish_single_quoted,
+    };
     let assignments = env
         .iter()
-        .map(|(key, value)| format!("{key}={}", quote_posix_arg(value)))
+        .map(|(key, value)| format!("{key}={}", quote_value(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    // These shells have no `KEY=VALUE command` prefix syntax; `env` scopes the
-    // variables to the one process instead.
-    let prefix = if matches!(
-        normalized_process_name(shell_name).as_str(),
-        "csh" | "tcsh" | "elvish" | "xonsh"
-    ) {
-        "env "
-    } else {
-        ""
-    };
-    Some(format!("{prefix}{assignments} {command}"))
+    Some(format!("{assignments} {command}"))
+}
+
+/// fish single quotes treat `\'` as a quote and `\\` as a backslash, so both
+/// are escaped; nothing else is special inside them.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn fish_single_quoted(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '\'') {
+            quoted.push('\\');
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
 }
 
 /// Wraps a PowerShell agent command so `env` is set only while it runs, then
-/// restores each variable's previous value (or absence).
+/// restores each variable's previous value (or absence). The saved values sit
+/// in an ordinal (case-sensitive) dictionary, since Unix env names are
+/// case-sensitive and a PowerShell hashtable is not.
 pub(crate) fn powershell_env_script(command: &str, env: &[(&str, &str)]) -> String {
     let keys = env
         .iter()
@@ -697,7 +745,7 @@ pub(crate) fn powershell_env_script(command: &str, env: &[(&str, &str)]) -> Stri
         })
         .collect::<String>();
     format!(
-        "& {{$herdrEnv=@{{}};foreach($herdrKey in @({keys})){{$herdrEnv[$herdrKey]=[Environment]::GetEnvironmentVariable($herdrKey)}};try{{{assignments}{command}}}finally{{foreach($herdrKey in $herdrEnv.Keys){{[Environment]::SetEnvironmentVariable($herdrKey,$herdrEnv[$herdrKey])}}}}}}"
+        "& {{$herdrEnv=[System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal);foreach($herdrKey in @({keys})){{$herdrEnv[$herdrKey]=[Environment]::GetEnvironmentVariable($herdrKey)}};try{{{assignments}{command}}}finally{{foreach($herdrKey in $herdrEnv.Keys){{[Environment]::SetEnvironmentVariable($herdrKey,$herdrEnv[$herdrKey])}}}}}}"
     )
 }
 
@@ -1055,7 +1103,7 @@ mod tests {
     #[test]
     fn interactive_agent_shell_command_without_env_is_unchanged() {
         let argv = vec!["pi".to_string(), "two words".into()];
-        for shell in ["bash", "pwsh", "tcsh"] {
+        for shell in ["bash", "pwsh", "tcsh", "nu", "fish"] {
             assert_eq!(
                 interactive_agent_shell_command(&argv, &[], shell),
                 interactive_shell_command(&argv, shell)
@@ -1068,25 +1116,62 @@ mod tests {
     fn interactive_agent_shell_command_scopes_env_per_shell() {
         let argv = vec!["claude".to_string(), "--resume".into()];
         let env = [("CLAUDE_CONFIG_DIR", "~/.claude alt"), ("MODE", "x")];
+        for shell in ["sh", "bash", "-zsh", "/bin/dash", "ksh", "mksh"] {
+            assert_eq!(
+                interactive_agent_shell_command(&argv, &env, shell).as_deref(),
+                Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume"),
+                "{shell}"
+            );
+        }
         assert_eq!(
-            interactive_agent_shell_command(&argv, &env, "bash").as_deref(),
-            Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
-        );
-        assert_eq!(
-            interactive_agent_shell_command(&argv, &env, "-zsh").as_deref(),
-            Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
-        );
-        assert_eq!(
-            interactive_agent_shell_command(&argv, &env, "tcsh").as_deref(),
-            Some("env CLAUDE_CONFIG_DIR='~/.claude alt' MODE=x claude --resume")
+            interactive_agent_shell_command(&argv, &env, "fish").as_deref(),
+            Some("CLAUDE_CONFIG_DIR='~/.claude alt' MODE='x' claude --resume")
         );
         let pwsh = interactive_agent_shell_command(&argv, &env, "pwsh").unwrap();
         assert!(pwsh.starts_with("& {"));
+        assert!(pwsh.contains("[StringComparer]::Ordinal"));
         assert!(pwsh.contains("@('CLAUDE_CONFIG_DIR','MODE')"));
         assert!(pwsh.contains(
             "[Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR','~/.claude alt');"
         ));
         assert!(pwsh.contains("claude '--resume'}finally{"));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn interactive_agent_shell_command_refuses_unverified_shells() {
+        let argv = vec!["claude".to_string()];
+        let env = [("A", "1")];
+        for shell in [
+            "nu",
+            "xonsh",
+            "elvish",
+            "csh",
+            "tcsh",
+            "-tcsh",
+            "/usr/bin/nu",
+        ] {
+            assert!(!agent_env_shell_supported(shell), "{shell}");
+            assert_eq!(
+                interactive_agent_shell_command(&argv, &env, shell),
+                None,
+                "{shell}"
+            );
+        }
+        for shell in ["sh", "bash", "dash", "-zsh", "ksh", "mksh", "fish", "pwsh"] {
+            assert!(agent_env_shell_supported(shell), "{shell}");
+        }
+        assert_eq!(pane_shell_label("/usr/bin/nu"), "nu");
+        assert_eq!(pane_shell_label("-tcsh"), "tcsh");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn fish_quoting_escapes_backslash_and_quote() {
+        assert_eq!(fish_single_quoted(r"a\"), r"'a\\'");
+        assert_eq!(fish_single_quoted(r"\'"), r"'\\\''");
+        assert_eq!(fish_single_quoted("it's"), r"'it\'s'");
+        assert_eq!(fish_single_quoted(""), "''");
     }
 
     #[test]
@@ -1096,31 +1181,139 @@ mod tests {
             .contains("SetEnvironmentVariable('A','it''s \u{2019}\u{2019}q\u{2018}\u{2018}');"));
     }
 
-    /// Runs the generated command in a real `/bin/sh`: the agent process sees
-    /// each value literally, and the shell itself keeps its own environment.
+    /// Values that break naive quoting in at least one shell.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    #[test]
-    fn interactive_agent_shell_command_env_reaches_only_the_agent_process() {
-        let value = "a 'quoted' $HOME `x` \\ ;b=c";
-        let argv = vec![
-            "/bin/sh".to_string(),
-            "-c".into(),
-            "printf '<%s>' \"$HERDR_TEST_AGENT_ENV\"".into(),
-        ];
-        let command =
-            interactive_agent_shell_command(&argv, &[("HERDR_TEST_AGENT_ENV", value)], "sh")
-                .unwrap();
-        let script = format!("{command}; printf '[%s]' \"${{HERDR_TEST_AGENT_ENV-unset}}\"");
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
+    const ADVERSARIAL_ENV_VALUES: &[&str] = &[
+        "'",
+        "''",
+        r"\",
+        r"trailing\",
+        r"C:\Users\me\",
+        r"a\\b",
+        r"\'",
+        r"\' true; touch PWN; #",
+        "x' ; touch PWN ; '",
+        "$HOME 'x' ;b",
+        "$(touch PWN)",
+        "${HOME}",
+        "`touch PWN`",
+        "!",
+        "!!",
+        "!x",
+        "%PATH%",
+        "^&",
+        ";touch PWN;",
+        "# not a comment",
+        "\u{2018}typographic\u{2019} \u{201C}double\u{201D} \u{201A}\u{201B}",
+        "\"double\" & echo hi | cat > PWN",
+        "*?[a]{b,c}",
+        "~/.claude alt",
+        "a=b=c",
+        "  padded  ",
+        "@(1) $env:PATH",
+    ];
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
+        std::env::var_os("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join(name))
+                .find(|candidate| candidate.is_file())
+        })
+    }
+
+    /// Runs every adversarial value through the real shell named `shell`
+    /// (skipped when it is not installed): the agent process must receive the
+    /// value byte for byte, the shell must not keep it, and nothing may run.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn assert_env_round_trips_in(shell: &str, shell_args: &[&str], unset_check: &str) {
+        const KEY: &str = "HERDR_TEST_AGENT_ENV";
+        let Some(shell_path) = find_on_path(shell) else {
+            eprintln!("skipping agent env round trip: {shell} is not installed");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "herdr-agent-env-{}-{shell}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut values: Vec<&str> = ADVERSARIAL_ENV_VALUES.to_vec();
+        // PowerShell treats an empty value as "remove the variable".
+        if shell != "pwsh" {
+            values.push("");
+        }
+        let mut script = String::new();
+        for (index, value) in values.iter().enumerate() {
+            let out = dir.join(format!("out-{index}"));
+            let argv = vec![
+                "/bin/sh".to_string(),
+                "-c".into(),
+                format!("printf %s \"${KEY}\" > \"$0\""),
+                out.display().to_string(),
+            ];
+            let command = interactive_agent_shell_command(&argv, &[(KEY, value)], shell)
+                .unwrap_or_else(|| panic!("{shell} should support agent env"));
+            script.push_str(&command);
+            script.push_str(unset_check);
+            script.push('\n');
+        }
+        let output = std::process::Command::new(&shell_path)
+            .args(shell_args)
             .arg(&script)
-            .env_remove("HERDR_TEST_AGENT_ENV")
+            .current_dir(&dir)
+            .env_remove(KEY)
             .output()
             .unwrap();
-        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for (index, value) in values.iter().enumerate() {
+            let received = std::fs::read(dir.join(format!("out-{index}")));
+            assert_eq!(
+                received.as_deref().ok(),
+                Some(value.as_bytes()),
+                "{shell}: value {value:?} did not arrive intact; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         assert_eq!(
-            String::from_utf8(output.stdout).unwrap(),
-            format!("<{value}>[unset]")
+            stdout,
+            "[unset]".repeat(values.len()),
+            "{shell} kept the variable after the agent exited"
+        );
+        assert!(!dir.join("PWN").exists(), "{shell}: a value executed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    const POSIX_UNSET_CHECK: &str = "; printf '[%s]' \"${HERDR_TEST_AGENT_ENV-unset}\"";
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn agent_env_round_trips_in_real_posix_shells() {
+        for shell in ["sh", "bash", "dash", "zsh", "ksh", "mksh"] {
+            assert_env_round_trips_in(shell, &["-c"], POSIX_UNSET_CHECK);
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn agent_env_round_trips_in_real_fish() {
+        assert_env_round_trips_in(
+            "fish",
+            &["--no-config", "-c"],
+            "; if set -q HERDR_TEST_AGENT_ENV; printf '[set]'; else; printf '[unset]'; end",
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn agent_env_round_trips_in_real_pwsh() {
+        assert_env_round_trips_in(
+            "pwsh",
+            &["-NoProfile", "-NonInteractive", "-Command"],
+            "; if ($null -eq $env:HERDR_TEST_AGENT_ENV) { [Console]::Out.Write('[unset]') } else { [Console]::Out.Write('[set]') }",
         );
     }
 

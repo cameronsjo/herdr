@@ -6,7 +6,9 @@
 
 - `herdr agent start` takes a repeatable `--env KEY=VALUE` that sets a variable for the agent process only, not for the pane's shell.
 - `agent.start` gains an optional `env` object. Omitted or empty, a request behaves exactly as before.
-- Keys must match `^[A-Za-z_][A-Za-z0-9_]*$`, a pair without `=` is refused, and values may not contain control characters. No error, log or debug output repeats a value.
+- Supported in sh, bash, dash, zsh, ksh, mksh, fish and pwsh panes, and in every pane on Windows. Other shells (nu, xonsh, elvish, csh, tcsh) get `agent_env_unsupported_shell`.
+- Keys must match `^[A-Za-z_][A-Za-z0-9_]*$`, a pair without `=` is refused, and values may not contain control, line-separator or format characters. No error, log or debug output repeats a value.
+- A restored or resumed agent does not keep its launch env.
 - The server advertises `capabilities.agent_start_env`, and the CLI refuses to send `--env` to a server without it, because an older server would drop the field and still report success.
 
 ## Capabilities

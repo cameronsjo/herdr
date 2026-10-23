@@ -1463,7 +1463,7 @@
             },
             "env": {
               "$ref": "#/schemas/request/$defs/AgentEnv",
-              "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control characters.\nServers that accept this field advertise `capabilities.agent_start_env`."
+              "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control, line-separator\nor format characters. Refused with `agent_env_unsupported_shell` in panes\nwhose shell has no verified quoting (nu, xonsh, elvish, csh, tcsh).\nServers that accept this field advertise `capabilities.agent_start_env`."
             },
             "kind": {
               "type": "string"
