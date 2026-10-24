@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The Codex PowerShell hook keeps a quoted title in one argument
+
+### fix: escape a Codex title for Windows PowerShell's argument passing
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/integration/assets/codex/herdr-agent-state.ps1` (`ConvertTo-NativeArgument`, the `report-metadata` call)
+- **Replaces:** nothing upstream; the Codex title is the fork's (cameronsjo/herdr#26). The installed hook runs under Windows PowerShell 5.1, whose legacy native-argument passing does not escape a double quote inside an argument. A prompt like `fix "foo bar" now` reached herdr as `--title "fix foo" "bar now"`, a wrong title plus a stray argument, and `say "hi"` lost its quotes. The title is now escaped by the Windows argv rules when legacy passing applies (PowerShell 5.1, or `$PSNativeCommandArgumentPassing = "Legacy"`); under 5.1 a trailing backslash on a title with whitespace is doubled too. Standard passing in PowerShell 7.3+ already escapes, so the title goes through unchanged there. The `.sh` hook sends JSON and is unaffected. `CODEX_INTEGRATION_VERSION` stays 11: it is already one past the last fork release (v0.9.3-palette.1 ships 10).
+- **Regression check:** no Windows runner covers the hook, so this was checked by hand with pwsh 7.4 on Linux, running the real hook with a fake `herdr` that logs its argv and `$PSNativeCommandArgumentPassing` set to `Legacy` and then `Standard`. Before, under Legacy: `fix "foo bar" now` gave `["fix foo", "bar now"]`. After, both modes give `fix "foo bar" now`, `say "hi"` and `x\"y z` unchanged, and a plain title is untouched. The 5.1-only trailing-backslash doubling follows PowerShell issue 1995 and was not run on 5.1.
+- **Render scaling:** not affected; hook script only.
+
 ## The Codex PowerShell hook cuts a long title by character
 
 ### fix: count characters, not UTF-16 units, when cutting a Codex title
