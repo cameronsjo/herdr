@@ -231,6 +231,15 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The Codex PowerShell hook cuts a long title by character
+
+### fix: count characters, not UTF-16 units, when cutting a Codex title
+
+- **PR:** see the PR that adds this entry
+- **Files:** `src/integration/assets/codex/herdr-agent-state.ps1` (`Normalize-Title`)
+- **Replaces:** nothing upstream; the Codex title is the fork's (cameronsjo/herdr#26). The Windows hook measured and cut the title with `.Length` and `Substring`, which count UTF-16 units. A cut that landed inside an emoji's surrogate pair left half of it, which is not valid UTF-8, so herdr refused the argument and no title was reported. A title of 79 emoji (under the limit) was also cut. The `.sh` hook and the codex-lifecycle spec count characters ("over 80 characters to its first 77"); the `.ps1` now does too. `CODEX_INTEGRATION_VERSION` stays 11: it is already one past the last fork release (v0.9.3-palette.1 ships 10).
+- **Regression check:** no Windows runner covers the hook, so this was checked by hand with pwsh 7.4 against `Normalize-Title` on its own. Before: 79 emoji came back as 38 emoji, a lone surrogate and `...`, and `"a"*76 + "😀" + "b"*10` ended in a lone surrogate. After: 79 emoji pass unchanged, the second ends `a😀...` at 80 characters, and ASCII titles of 80, 81 and 200 characters are unchanged from before.
+- **Render scaling:** not affected; hook script only.
 ## The OpenSpec wrapper guards `store`, and the release cut reads every remote spelling
 
 ### fix: guard openspec store writes and accept ssh:// fork remotes
