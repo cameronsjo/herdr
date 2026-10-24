@@ -240,6 +240,15 @@ next sync is likely to conflict again:
 - **Replaces:** nothing upstream; the Codex title is the fork's (cameronsjo/herdr#26). The installed hook runs under Windows PowerShell 5.1, whose legacy native-argument passing does not escape a double quote inside an argument. A prompt like `fix "foo bar" now` reached herdr as `--title "fix foo" "bar now"`, a wrong title plus a stray argument, and `say "hi"` lost its quotes. The title is now escaped by the Windows argv rules when legacy passing applies (PowerShell 5.1, or `$PSNativeCommandArgumentPassing = "Legacy"`); under 5.1 a trailing backslash on a title with whitespace is doubled too. Standard passing in PowerShell 7.3+ already escapes, so the title goes through unchanged there. The `.sh` hook sends JSON and is unaffected. `CODEX_INTEGRATION_VERSION` stays 11: it is already one past the last fork release (v0.9.3-palette.1 ships 10).
 - **Regression check:** no Windows runner covers the hook, so this was checked by hand with pwsh 7.4 on Linux, running the real hook with a fake `herdr` that logs its argv and `$PSNativeCommandArgumentPassing` set to `Legacy` and then `Standard`. Before, under Legacy: `fix "foo bar" now` gave `["fix foo", "bar now"]`. After, both modes give `fix "foo bar" now`, `say "hi"` and `x\"y z` unchanged, and a plain title is untouched. The 5.1-only trailing-backslash doubling follows PowerShell issue 1995 and was not run on 5.1.
 - **Render scaling:** not affected; hook script only.
+## The commit-msg hook lets a merge commit through
+
+### fix: let the commit-msg hook pass merge commits
+
+- **PR:** see the PR that adds this entry
+- **Files:** `.githooks/commit-msg`, `scripts/test_commit_msg_hook.py` (new), `justfile` (`maintenance-test` runs it)
+- **Replaces:** upstream's hook, which checks every commit subject with `scripts/conventional_commits.py --message-file`. Upstream squashes, so it never meets git's own `Merge ...` subject; the fork merges upstream syncs, so with `just install-hooks` in place every merge was refused, and `scripts/sync-upstream.sh` exited 1 even on a clean merge. The hook now exits 0 while `MERGE_HEAD` exists, the same exemption `--range` mode already makes with `--no-merges`. A non-merge commit is still checked.
+- **Regression check:** `python3 -m unittest scripts.test_commit_msg_hook`: a clean `git merge --no-edit` and a merge committed after resolving a conflict both fail without the fix, and a non-conventional subject is still refused. On a sync that conflicts here, keep the `MERGE_HEAD` early exit.
+- **Render scaling:** not affected; git hook only.
 
 ## The Codex PowerShell hook cuts a long title by character
 
