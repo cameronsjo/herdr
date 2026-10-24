@@ -17,11 +17,14 @@ Every fork pull request MUST add an entry to `docs/fork/CHANGES.md` naming the P
 - **THEN** the ledger gains a conflict-resolution record for that sync naming the file and the behavior kept
 
 ### Requirement: sync-upstream merges upstream in its own worktree
-`scripts/sync-upstream.sh` SHALL fetch the upstream and fork remotes (`ORIGIN_REMOTE`, default `origin`; `FORK_REMOTE`, default `fork`), failing if either is missing, then create or reuse the worktree `../herdr-worktrees/sync-upstream-<YYYYMMDD>` on a branch of that name from the fork's `master`, and merge upstream `master` into it with `--no-commit`. Before committing, it MUST restore every file in its `FORK_OWNED` list from the fork's tip, whether or not it conflicted, and that list MUST match the one in `scripts/sync-upstream-ci.sh`.
+`scripts/sync-upstream.sh` SHALL fetch the upstream and fork remotes (`ORIGIN_REMOTE`, default `origin`; `FORK_REMOTE`, default `fork`), failing if either is missing, then create or reuse the worktree `../herdr-worktrees/sync-upstream-<YYYYMMDD>` on a branch of that name from the fork's `master`, and merge upstream `master` into it with `--no-commit`.
 
 #### Scenario: Clean merge
 - **WHEN** the script runs and upstream merges without conflicts
 - **THEN** the merge commit lands in the worktree and the next steps are printed
+
+### Requirement: sync-upstream keeps fork-owned files
+Before committing a merge, `scripts/sync-upstream.sh` MUST restore every file in its `FORK_OWNED` list from the fork's tip, whether or not it conflicted, and that list MUST match the one in `scripts/sync-upstream-ci.sh`.
 
 #### Scenario: Upstream edits a fork-owned file cleanly
 - **WHEN** upstream changes `.github/workflows/release.yml` in a region the fork never touched
