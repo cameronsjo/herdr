@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The commit-msg hook lets a merge commit through
+
+### fix: let the commit-msg hook pass merge commits
+
+- **PR:** see the PR that adds this entry
+- **Files:** `.githooks/commit-msg`, `scripts/test_commit_msg_hook.py` (new), `justfile` (`maintenance-test` runs it)
+- **Replaces:** upstream's hook, which checks every commit subject with `scripts/conventional_commits.py --message-file`. Upstream squashes, so it never meets git's own `Merge ...` subject; the fork merges upstream syncs, so with `just install-hooks` in place every merge was refused, and `scripts/sync-upstream.sh` exited 1 even on a clean merge. The hook now exits 0 while `MERGE_HEAD` exists, the same exemption `--range` mode already makes with `--no-merges`. A non-merge commit is still checked.
+- **Regression check:** `python3 -m unittest scripts.test_commit_msg_hook`: a clean `git merge --no-edit` and a merge committed after resolving a conflict both fail without the fix, and a non-conventional subject is still refused. On a sync that conflicts here, keep the `MERGE_HEAD` early exit.
+- **Render scaling:** not affected; git hook only.
+
 ## The Codex PowerShell hook cuts a long title by character
 
 ### fix: count characters, not UTF-16 units, when cutting a Codex title

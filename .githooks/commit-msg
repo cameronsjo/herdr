@@ -4,4 +4,12 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# A merge commit's subject is git's own ("Merge branch ..."), not a change
+# description, and the fork merges upstream syncs rather than squashing them.
+# scripts/conventional_commits.py skips merges in --range mode for the same
+# reason.
+if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+    exit 0
+fi
+
 python3 scripts/conventional_commits.py --message-file "$1"
