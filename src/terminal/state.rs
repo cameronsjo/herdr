@@ -132,7 +132,6 @@ pub struct TerminalState {
     pub detected_agent: Option<Agent>,
     pub fallback_state: AgentState,
     fallback_visible_blocker: bool,
-    fallback_visible_working: bool,
     fallback_observed_at: Option<Instant>,
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
@@ -173,7 +172,6 @@ impl TerminalState {
             detected_agent: None,
             fallback_state: AgentState::Unknown,
             fallback_visible_blocker: false,
-            fallback_visible_working: false,
             fallback_observed_at: None,
             hook_authority: None,
             agent_metadata: HashMap::new(),
@@ -364,7 +362,7 @@ impl TerminalState {
         fallback_state: AgentState,
         visible_blocker: bool,
         _visible_idle: bool,
-        visible_working: bool,
+        _visible_working: bool,
         process_exited: bool,
         now: Instant,
     ) -> TerminalStateMutation {
@@ -447,7 +445,6 @@ impl TerminalState {
         }
         self.fallback_state = fallback_state;
         self.fallback_visible_blocker = visible_blocker && fallback_state == AgentState::Blocked;
-        self.fallback_visible_working = visible_working && fallback_state == AgentState::Working;
         self.fallback_observed_at = Some(now);
         if process_exited {
             if let Some(agent) = agent {
@@ -734,15 +731,6 @@ impl TerminalState {
             FullLifecycleHookReportRoute::Ignore => return None,
         };
         if self.known_agent_label_conflicts_with_detected_agent(&agent_label) {
-            return None;
-        }
-        if (source.as_str(), agent_label.as_str()) == ("herdr:codex", "codex")
-            && session_ref.as_ref().is_some_and(|incoming| {
-                self.current_session_identity_for_persistence().is_some_and(
-                    |(_, _, kind, value)| kind != incoming.kind || value != incoming.value,
-                )
-            })
-        {
             return None;
         }
         let owner_conflicts = self.current_session_owner_conflicts(&source, &agent_label);
@@ -1663,16 +1651,6 @@ impl TerminalState {
         let previous_state = self.state;
         let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
         let previous_session = self.current_session_identity_for_persistence();
-        if (source.as_str(), agent_label.as_str()) == ("herdr:codex", "codex")
-            && session_replacement_allowed
-            && self.hook_authority.as_ref().is_some_and(|authority| {
-                authority.source == source
-                    && authority.agent_label == agent_label
-                    && authority.session_ref.as_ref() != Some(&session_ref)
-            })
-        {
-            self.hook_authority = None;
-        }
         if session_replacement_allowed || foreground_takeover_allowed {
             self.forget_stale_full_lifecycle_hook_session(&source, &agent_label, &session_ref);
         }
@@ -1874,7 +1852,6 @@ impl TerminalState {
             self.detected_agent = None;
             self.fallback_state = AgentState::Unknown;
             self.fallback_visible_blocker = false;
-            self.fallback_visible_working = false;
             self.fallback_observed_at = None;
             self.clear_agent_name();
         }
@@ -2106,22 +2083,6 @@ impl TerminalState {
             && self.fallback_not_older_than_hook()
             && self.hook_authority.as_ref().is_some_and(|authority| {
                 authority.state != AgentState::Blocked
-                    && crate::detect::parse_agent_label(&authority.agent_label)
-                        == self.detected_agent
-            })
-    }
-
-    fn visible_working_overrides_codex_hook(&self) -> bool {
-        if self.live_full_lifecycle_hook_authority() {
-            return false;
-        }
-        self.fallback_visible_working
-            && self.fallback_not_older_than_hook()
-            && self.hook_authority.as_ref().is_some_and(|authority| {
-                self.hook_authority_is_effective(authority)
-                    && authority.source == "herdr:codex"
-                    && authority.agent_label == "codex"
-                    && matches!(authority.state, AgentState::Idle | AgentState::Blocked)
                     && crate::detect::parse_agent_label(&authority.agent_label)
                         == self.detected_agent
             })
@@ -2394,7 +2355,6 @@ impl TerminalState {
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
-        self.fallback_visible_working = false;
         self.fallback_observed_at = None;
         self.hook_authority = None;
         self.persisted_agent_session = None;
@@ -2487,8 +2447,6 @@ impl TerminalState {
     ) -> Option<EffectiveStateChange> {
         let state = if self.visible_blocker_overrides_hook() {
             AgentState::Blocked
-        } else if self.visible_working_overrides_codex_hook() {
-            AgentState::Working
         } else {
             self.hook_authority
                 .as_ref()
@@ -4167,39 +4125,6 @@ mod tests {
     }
 
     #[test]
-    fn newer_visible_working_overrides_codex_hook_idle() {
-        let now = Instant::now();
-        let mut terminal = test_terminal();
-        terminal.set_detected_state(Some(Agent::Codex), AgentState::Idle);
-        terminal.set_hook_authority_at(
-            "herdr:codex".into(),
-            "codex".into(),
-            AgentState::Idle,
-            None,
-            None,
-            None,
-            now,
-        );
-
-        let change = terminal.set_detected_state_with_screen_signals_at(
-            Some(Agent::Codex),
-            AgentState::Working,
-            false,
-            false,
-            true,
-            false,
-            now + Duration::from_millis(1),
-        );
-
-        assert_eq!(terminal.fallback_state, AgentState::Working);
-        assert_eq!(terminal.state, AgentState::Working);
-        assert_eq!(
-            change.effective_state_change.unwrap().previous_state,
-            AgentState::Idle
-        );
-    }
-
-    #[test]
     fn visible_working_does_not_override_full_lifecycle_hook_idle() {
         let now = Instant::now();
         let mut terminal = test_terminal();
@@ -4309,42 +4234,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_working_does_not_hold_against_newer_codex_hook_idle() {
-        let now = Instant::now();
-        let mut terminal = test_terminal();
-        terminal.set_detected_state_with_screen_signals_at(
-            Some(Agent::Codex),
-            AgentState::Working,
-            false,
-            false,
-            true,
-            false,
-            now,
-        );
-
-        let change = terminal.set_hook_authority_at(
-            "herdr:codex".into(),
-            "codex".into(),
-            AgentState::Idle,
-            None,
-            None,
-            None,
-            now + Duration::from_millis(100),
-        );
-
-        assert_eq!(terminal.state, AgentState::Idle);
-        assert_eq!(
-            change
-                .unwrap()
-                .effective_state_change
-                .unwrap()
-                .previous_state,
-            AgentState::Working
-        );
-    }
-
-    #[test]
-    fn refreshed_visible_working_overrides_older_codex_hook_blocked() {
+    fn refreshed_visible_working_does_not_override_newer_hook_blocked() {
         let now = Instant::now();
         let mut terminal = test_terminal();
         terminal.set_detected_state_with_screen_signals_at(
@@ -4379,11 +4269,8 @@ mod tests {
         );
 
         assert_eq!(terminal.fallback_state, AgentState::Working);
-        assert_eq!(terminal.state, AgentState::Working);
-        assert_eq!(
-            change.effective_state_change.unwrap().previous_state,
-            AgentState::Blocked
-        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert!(change.effective_state_change.is_none());
     }
 
     #[test]
