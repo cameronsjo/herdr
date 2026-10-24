@@ -231,6 +231,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `sync-upstream.sh` keeps every fork-owned file, conflict or not
+
+### fix: restore fork-owned files after every manual upstream sync
+
+- **PR:** see the PR that adds this entry
+- **Files:** `scripts/sync-upstream.sh` (`FORK_OWNED` and the merge), `scripts/test_sync_upstream.py`, `openspec/specs/fork-maintenance/spec.md` (via the archived `sync-upstream-keeps-fork-owned-files` change)
+- **Replaces:** nothing upstream; the script is fork-only. `sync-upstream-ci.sh` already restores `README.md` and `.github/workflows/release.yml` from the fork's tip after every merge, because a conflict-only rule leaks. The manual script kept only `README.md`, and only on a conflict, so upstream's release workflow, or a README edit that merged cleanly, came through a manual sync. It now merges with `--no-commit --no-ff`, restores the same list (a test keeps the two lists equal), and then commits.
+- **Regression check:** `python3 -m unittest scripts.test_sync_upstream` (5 tests). `test_fork_owned_files_keep_the_forks_copy` (a conflicted README and a cleanly merged release workflow both keep the fork's copy) and the list-parity test were confirmed red against the old script. `shellcheck --severity=warning scripts/sync-upstream.sh` is clean.
+- **Render scaling:** not affected; maintenance script only.
+
 ## The Codex PowerShell hook keeps a quoted title in one argument
 
 ### fix: escape a Codex title for Windows PowerShell's argument passing

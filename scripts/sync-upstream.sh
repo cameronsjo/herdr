@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Rebuilds this fork's master on top of the current herdrdev/herdr master —
 # the periodic sync the fork's README promises. Automates the mechanical
-# part (fetch, worktree, merge, the always-keep-ours README.md conflict);
-# stops for you to resolve anything else by hand.
+# part (fetch, worktree, merge, keeping the fork's copy of every FORK_OWNED
+# file); stops for you to resolve anything else by hand.
 #
 # Usage: scripts/sync-upstream.sh
 # Env overrides: ORIGIN_REMOTE (default: origin), FORK_REMOTE (default: fork)
 set -euo pipefail
+
+# Files the fork owns outright: upstream's version is never wanted, so they are
+# restored from the fork's tip after every merge, conflict or not. Keep this
+# list the same as FORK_OWNED in sync-upstream-ci.sh (test_sync_upstream.py
+# checks).
+FORK_OWNED=(
+  "README.md"
+  ".github/workflows/release.yml"
+)
 
 # -P everywhere: `git worktree list` reports physical paths, so a logical one
 # here would fail the reuse check below and try to re-create the worktree.
@@ -87,24 +96,34 @@ if [[ -n "$(git status --porcelain)" ]] && ! "$merge_in_progress"; then
   exit 1
 fi
 
+# --no-commit so the fork-owned files can be restored before the merge commit
+# is written, the same way sync-upstream-ci.sh does it.
 merge_rc=0
 if "$merge_in_progress"; then
   echo "==> resuming the in-progress merge of $ORIGIN_REMOTE/master"
   merge_rc=1
 else
   echo "==> merging $ORIGIN_REMOTE/master"
-  git merge "$ORIGIN_REMOTE/master" --no-edit || merge_rc=$?
+  git merge "$ORIGIN_REMOTE/master" --no-commit --no-ff || merge_rc=$?
 fi
 
-if [[ "$merge_rc" -eq 0 ]]; then
-  echo "==> merge landed with no conflicts"
-else
-  status=$(git status --porcelain)
-  if command grep -q '^UU README.md$' <<<"$status"; then
-    echo "==> auto-resolving README.md conflict (keeping the fork's own notice)"
-    git checkout --ours README.md
-    git add README.md
+if [[ ! -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]]; then
+  if [[ "$merge_rc" -ne 0 ]]; then
+    echo "error: git merge failed before starting a merge (exit $merge_rc)" >&2
+    exit "$merge_rc"
   fi
+  echo "==> already current with $ORIGIN_REMOTE/master; nothing to merge"
+else
+  # Restore fork-owned files unconditionally, not just when they conflict: if
+  # upstream edits a region the fork left alone, git merges it cleanly and
+  # upstream's content lands in a file the fork owns. HEAD is still the fork's
+  # pre-merge tip while the merge is in progress, resumed or not.
+  for owned in "${FORK_OWNED[@]}"; do
+    git cat-file -e "HEAD:$owned" 2>/dev/null || continue
+    git checkout HEAD -- "$owned"
+    git add -- "$owned"
+    echo "==> kept the fork's $owned"
+  done
 
   # Every unmerged porcelain state, not just the three symmetric ones —
   # a rename/delete conflict is DU/UD/AU/UA and was silently omitted.
@@ -118,7 +137,11 @@ else
     exit 1
   fi
 
-  echo "==> all conflicts resolved, completing the merge commit"
+  if [[ "$merge_rc" -eq 0 ]]; then
+    echo "==> merge landed with no conflicts"
+  else
+    echo "==> all conflicts resolved, completing the merge commit"
+  fi
   git commit --no-edit
 fi
 
