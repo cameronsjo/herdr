@@ -203,15 +203,6 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
         10,
         None,
     )?;
-    for (event, action) in CODEX_STATE_HOOK_EVENTS {
-        ensure_command_hook(
-            hooks,
-            event,
-            hook_command(&hook_path, Some(action)),
-            10,
-            None,
-        )?;
-    }
     for (event, action) in CODEX_METADATA_HOOK_EVENTS {
         ensure_background_command_hook(
             hooks,

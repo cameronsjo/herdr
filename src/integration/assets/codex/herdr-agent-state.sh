@@ -13,7 +13,7 @@ trap 'rm -f "$hook_input_file"' EXIT HUP INT TERM
 cat >"$hook_input_file" 2>/dev/null || true
 
 case "$action" in
-  session|working|blocked|idle|metadata) ;;
+  session|metadata) ;;
   *) exit 0 ;;
 esac
 
@@ -38,9 +38,6 @@ SOURCE = "herdr:codex"
 AGENT = "codex"
 EXPECTED_EVENTS = {
     "session": {"SessionStart"},
-    "working": {"UserPromptSubmit", "PreToolUse", "PostToolUse"},
-    "blocked": {"PermissionRequest"},
-    "idle": {"Stop", "Interrupt"},
     "metadata": {"SessionStart", "UserPromptSubmit", "Stop"},
 }
 
@@ -179,7 +176,7 @@ session_id = hook_input.get("session_id")
 transcript_path = hook_input.get("transcript_path")
 if not isinstance(session_id, str) or not session_id:
     raise SystemExit(0)
-# Only SessionStart needs a transcript; Stop and Interrupt payloads may omit it.
+# Only SessionStart needs a transcript; Stop payloads may omit it.
 # Check the event, not the action: metadata also runs on SessionStart.
 if hook_event_name == "SessionStart" and (not isinstance(transcript_path, str) or not transcript_path.strip()):
     raise SystemExit(0)
@@ -216,7 +213,4 @@ elif action == "metadata":
                 "title": title,
             },
         )
-else:
-    common_params["state"] = action
-    send_request("pane.report_agent", common_params)
 PY

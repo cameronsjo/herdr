@@ -222,49 +222,28 @@ fn codex_hook_reports_persisted_root_session_and_ignores_ephemeral_or_nested_ses
         &[("CODEX_THREAD_ID", "parent-session")],
     )
     .is_none());
-
-    for (action, event) in [
-        ("working", "UserPromptSubmit"),
-        ("idle", "Stop"),
-        ("idle", "Interrupt"),
-    ] {
-        let request = run_codex_hook(
-            action,
-            &format!(r#"{{"hook_event_name":"{event}","session_id":"codex-session"}}"#),
-        )
-        .expect("Codex turn hook should report state");
-        assert_eq!(request["method"], "pane.report_agent");
-        assert_eq!(request["params"]["state"], action);
-        assert_eq!(request["params"]["agent_session_id"], "codex-session");
-    }
 }
 
 #[test]
-fn codex_hook_reports_lifecycle_states_from_matching_events() {
-    for (action, event, expected_state) in [
-        ("working", "UserPromptSubmit", "working"),
-        ("working", "PreToolUse", "working"),
-        ("working", "PostToolUse", "working"),
-        ("blocked", "PermissionRequest", "blocked"),
-        ("idle", "Stop", "idle"),
+fn codex_hook_sends_no_state_reports() {
+    // Screen detection owns Codex state (herdr:codex is a reserved native-state
+    // source), so a hook left over from an older integration reports nothing.
+    for (action, event) in [
+        ("working", "UserPromptSubmit"),
+        ("working", "PreToolUse"),
+        ("working", "PostToolUse"),
+        ("blocked", "PermissionRequest"),
+        ("idle", "Stop"),
+        ("idle", "Interrupt"),
     ] {
         let payload = format!(
             r#"{{"hook_event_name":"{event}","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl"}}"#
         );
-        let request = run_codex_hook(action, &payload).expect("matching event should report state");
-
-        assert_eq!(request["method"], "pane.report_agent");
-        assert_eq!(request["params"]["source"], "herdr:codex");
-        assert_eq!(request["params"]["agent"], "codex");
-        assert_eq!(request["params"]["state"], expected_state);
-        assert_eq!(request["params"]["agent_session_id"], "codex-session");
+        assert!(
+            run_codex_hook(action, &payload).is_none(),
+            "{action} on {event} reported state"
+        );
     }
-
-    assert!(run_codex_hook(
-        "idle",
-        r#"{"hook_event_name":"PreToolUse","session_id":"codex-session","transcript_path":"/tmp/codex-session.jsonl"}"#,
-    )
-    .is_none());
 }
 
 #[test]
