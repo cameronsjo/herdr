@@ -48,6 +48,21 @@ function Invoke-Herdr([string[]]$Arguments) {
     }
 }
 
+# Windows PowerShell 5.1 (the installed hook runs under `powershell`) passes a
+# native argument without escaping its double quotes, and wraps an argument
+# with whitespace in quotes without escaping a trailing backslash, so a title
+# like `fix "foo bar" now` reached herdr as two arguments. Escape it by the
+# Windows argv rules where that legacy passing applies (PowerShell issue 1995).
+function ConvertTo-NativeArgument([string]$Value) {
+    $legacy = $PSVersionTable.PSVersion.Major -lt 7 -or $PSNativeCommandArgumentPassing -eq "Legacy"
+    if (-not $legacy) { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    if ($PSVersionTable.PSVersion.Major -lt 7 -and $escaped -match '\s') {
+        $escaped = $escaped -replace '(\\+)$', '$1$1'
+    }
+    return $escaped
+}
+
 function Read-AppServerResponse($Process, [int]$Id, [DateTime]$Deadline) {
     while ([DateTime]::UtcNow -lt $Deadline) {
         $remaining = [int][Math]::Max(1, ($Deadline - [DateTime]::UtcNow).TotalMilliseconds)
@@ -165,7 +180,7 @@ if ($Action -eq "session") {
             "--source", "herdr:codex",
             "--agent", "codex",
             "--seq", "$seq",
-            "--title", $title
+            "--title", (ConvertTo-NativeArgument $title)
         )
     }
 } else {
