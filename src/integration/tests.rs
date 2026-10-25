@@ -1461,14 +1461,18 @@ fn install_codex_writes_hook_and_updates_hooks_and_config() {
         .as_str()
         .unwrap()
         .contains(" session"));
+    for event in [
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "Interrupt",
+    ] {
+        assert!(hooks["hooks"].get(event).is_none(), "{event} has a hook");
+    }
     for (event, expected_actions) in [
         ("SessionStart", &["session", "metadata"][..]),
-        ("UserPromptSubmit", &["working", "metadata"][..]),
-        ("PreToolUse", &["working"][..]),
-        ("PermissionRequest", &["blocked"][..]),
-        ("PostToolUse", &["working"][..]),
-        ("Stop", &["idle", "metadata"][..]),
-        ("Interrupt", &["idle"][..]),
+        ("UserPromptSubmit", &["metadata"][..]),
+        ("Stop", &["metadata"][..]),
     ] {
         let entries = hooks["hooks"][event].as_array().unwrap();
         let commands: Vec<&str> = entries
@@ -1493,6 +1497,79 @@ fn install_codex_writes_hook_and_updates_hooks_and_config() {
     assert!(config.contains("[features]"));
     assert!(config.contains("hooks = true"));
     assert!(!config.contains("codex_hooks"));
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_codex_removes_state_hooks_from_previous_integration() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let codex_dir = home.join(".codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    let hook_path = codex_dir.join(CODEX_HOOK_INSTALL_NAME);
+    let hook = |action| json!({"type": "command", "command": hook_command(&hook_path, Some(action)), "timeout": 10});
+    let hooks = json!({
+        "hooks": {
+            "SessionStart": [{"hooks": [hook("session")]}],
+            "UserPromptSubmit": [{"hooks": [
+                hook("working"),
+                {"type": "command", "command": "echo keep", "timeout": 10}
+            ]}],
+            "PreToolUse": [{"hooks": [hook("working")]}],
+            "PermissionRequest": [{"hooks": [hook("blocked")]}],
+            "PostToolUse": [{"hooks": [hook("working")]}],
+            "Stop": [{"hooks": [hook("idle")]}],
+            "Interrupt": [{"hooks": [hook("idle")]}]
+        }
+    });
+    fs::write(
+        codex_dir.join("hooks.json"),
+        serde_json::to_string(&hooks).unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("HOME", &home);
+
+    install_codex().unwrap();
+
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(codex_dir.join("hooks.json")).unwrap()).unwrap();
+    let commands = |event: &str| -> Vec<String> {
+        hooks["hooks"][event]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .flat_map(|entry| entry["hooks"].as_array().unwrap())
+                    .map(|hook| hook["command"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for event in [
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "Interrupt",
+    ] {
+        assert!(hooks["hooks"].get(event).is_none(), "{event} kept a hook");
+    }
+    for event in ["SessionStart", "UserPromptSubmit", "Stop"] {
+        for command in commands(event) {
+            assert!(
+                !command.ends_with(" working")
+                    && !command.ends_with(" blocked")
+                    && !command.ends_with(" idle"),
+                "{event} kept state hook {command}"
+            );
+        }
+    }
+    assert!(commands("UserPromptSubmit")
+        .iter()
+        .any(|c| c == "echo keep"));
+    assert!(commands("Stop").iter().any(|c| c.ends_with(" metadata")));
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
@@ -1541,19 +1618,9 @@ fn install_codex_is_idempotent_for_hook_entries_and_feature_flag() {
     assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
     assert_eq!(
         hooks["hooks"]["UserPromptSubmit"].as_array().unwrap().len(),
-        2
-    );
-    assert_eq!(hooks["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        hooks["hooks"]["PermissionRequest"]
-            .as_array()
-            .unwrap()
-            .len(),
         1
     );
-    assert_eq!(hooks["hooks"]["PostToolUse"].as_array().unwrap().len(), 1);
-    assert_eq!(hooks["hooks"]["Stop"].as_array().unwrap().len(), 2);
-    assert_eq!(hooks["hooks"]["Interrupt"].as_array().unwrap().len(), 1);
+    assert_eq!(hooks["hooks"]["Stop"].as_array().unwrap().len(), 1);
     assert_eq!(config.matches("hooks = true").count(), 1);
     assert!(!config.contains("codex_hooks"));
     assert!(config.contains("other = true"));

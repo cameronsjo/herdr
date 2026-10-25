@@ -1,56 +1,31 @@
 # codex-lifecycle Specification
 
 ## Purpose
-The fork's Codex integration reports Codex turn state and a pane title through hooks while screen detection stays active to correct stale reports, a hybrid kept deliberately against upstream's screen-only Codex state.
+The fork's Codex integration reports the Codex session and a pane title through hooks. Codex state comes from screen detection alone, as upstream.
 
 ## Requirements
 
-### Requirement: The Codex hook reports lifecycle state
-`herdr integration install codex` SHALL install a hook script in the Codex config directory (`CODEX_HOME`, default `~/.codex`) and register it in `hooks.json`: `UserPromptSubmit`, `PreToolUse` and `PostToolUse` report `working`, `PermissionRequest` reports `blocked`, `Stop` and `Interrupt` report `idle`, and `SessionStart` reports the session. State MUST be reported through `pane.report_agent` as source `herdr:codex`, agent `codex`.
-
-#### Scenario: Turn lifecycle
-- **WHEN** Codex runs in a herdr pane with the integration installed and the user submits a prompt, then Codex asks for a permission, then the turn stops
-- **THEN** the pane's agent state goes `working`, then `blocked`, then `idle`
-
 ### Requirement: Reinstalling the Codex hook replaces its entries
-Reinstalling the Codex integration MUST replace herdr's earlier `hooks.json` entries rather than duplicating them.
+Reinstalling the Codex integration MUST replace herdr's earlier `hooks.json` entries rather than duplicating them, and MUST remove the `working`, `blocked` and `idle` entries an older fork integration installed, leaving other commands on those events in place.
 
 #### Scenario: Reinstall
 - **WHEN** `herdr integration install codex` is run twice
 - **THEN** `hooks.json` holds one herdr entry per event and action
 
-### Requirement: Codex hook reports are honored
-The server MUST accept `herdr:codex` state reports for the `codex` agent; `herdr:codex` MUST NOT be treated as a reserved native-state source whose reports are discarded. A report whose session id differs from the pane's current Codex session MUST be ignored.
-
-#### Scenario: Hook report reaches the pane
-- **WHEN** the Codex hook reports `working` for its pane's current session
-- **THEN** the pane's agent state becomes `working`
-
-#### Scenario: Report from another session
-- **WHEN** a Codex hook report carries a session id different from the one the pane already holds
-- **THEN** the report is ignored and the pane's state does not change
-
-### Requirement: Screen detection corrects stale Codex reports
-Because Codex runs hooks concurrently and emits no approval-resolved hook, screen detection SHALL stay active alongside the hook. A visible working signal not older than the hook report MUST override a Codex `idle` or `blocked` report and show `working`, and a visible blocker not older than the hook report MUST override a non-blocked report and show `blocked`.
-
-#### Scenario: Stale Stop during a running turn
-- **WHEN** the Codex hook last reported `idle` but the screen now shows Codex working
-- **THEN** the pane's state is `working`
-
-#### Scenario: Stale working during an approval
-- **WHEN** the Codex hook last reported `working` but the screen shows an approval prompt
-- **THEN** the pane's state is `blocked`
+#### Scenario: Upgrade from the hybrid integration
+- **WHEN** `hooks.json` holds the fork's v11 `working`, `blocked` and `idle` entries and a user command on `UserPromptSubmit`, and the integration is reinstalled
+- **THEN** no `PreToolUse`, `PermissionRequest`, `PostToolUse` or `Interrupt` entry remains, and the user command is kept
 
 ### Requirement: The hook ignores events outside its contract
-The hook script MUST exit without reporting when it runs outside a herdr pane (`HERDR_ENV` is not `1`, or `HERDR_PANE_ID` or, for the shell script, `HERDR_SOCKET_PATH` is empty), when the payload's `hook_event_name` does not match its installed action, when the payload has no `session_id`, when a `SessionStart` payload has no transcript path, or when `CODEX_THREAD_ID` is set to a different session (a nested Codex). `Stop` and `Interrupt` MUST still report without a transcript path.
+The hook script SHALL accept only the `session` and `metadata` actions and MUST exit without reporting for any other action, when it runs outside a herdr pane (`HERDR_ENV` is not `1`, or `HERDR_PANE_ID` or, for the shell script, `HERDR_SOCKET_PATH` is empty), when the payload's `hook_event_name` does not match its installed action, when the payload has no `session_id`, when a `SessionStart` payload has no transcript path, or when `CODEX_THREAD_ID` is set to a different session (a nested Codex).
 
 #### Scenario: Nested Codex session
 - **WHEN** a hook fires with a `session_id` different from the inherited `CODEX_THREAD_ID`
 - **THEN** the hook sends no report
 
-#### Scenario: Interrupt without a transcript
-- **WHEN** an `Interrupt` payload omits `transcript_path`
-- **THEN** the hook still reports `idle`
+#### Scenario: Leftover state hook
+- **WHEN** a hook from an older integration runs with the `working` action on `UserPromptSubmit`
+- **THEN** the hook sends no report
 
 ### Requirement: The Codex hook reports a pane title
 On `SessionStart`, `UserPromptSubmit` and `Stop`, the hook SHALL report a title through `pane.report_metadata`, read from the thread's name or preview over Codex's app-server protocol, or on `UserPromptSubmit` the submitted prompt. The title MUST drop leading `[Image #N]` markers, collapse whitespace, and cut anything over 80 characters to its first 77 with trailing whitespace stripped, plus `...`. It MUST NOT change Codex's thread id, and nothing is sent when no title can be derived.

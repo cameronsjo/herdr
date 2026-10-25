@@ -8,9 +8,6 @@ param([string]$Action = "")
 
 $expectedEvents = @{
     session = @("SessionStart")
-    working = @("UserPromptSubmit", "PreToolUse", "PostToolUse")
-    blocked = @("PermissionRequest")
-    idle = @("Stop", "Interrupt")
     metadata = @("SessionStart", "UserPromptSubmit", "Stop")
 }
 
@@ -33,7 +30,7 @@ if ($expectedEvents[$Action] -notcontains $hookEventName) { exit 0 }
 
 $sessionId = [string]$payload.session_id
 if ([string]::IsNullOrWhiteSpace($sessionId)) { exit 0 }
-# Only SessionStart needs a transcript; Stop and Interrupt payloads may omit it.
+# Only SessionStart needs a transcript; Stop payloads may omit it.
 # Check the event, not the action: metadata also runs on SessionStart.
 if ($hookEventName -eq "SessionStart" -and [string]::IsNullOrWhiteSpace([string]$payload.transcript_path)) { exit 0 }
 if (-not [string]::IsNullOrWhiteSpace($env:CODEX_THREAD_ID) -and $env:CODEX_THREAD_ID -ne $sessionId) { exit 0 }
@@ -183,6 +180,4 @@ if ($Action -eq "session") {
             "--title", (ConvertTo-NativeArgument $title)
         )
     }
-} else {
-    Invoke-Herdr (@("pane", "report-agent") + $commonArgs + @("--state", $Action))
 }
