@@ -235,7 +235,7 @@ next sync is likely to conflict again:
 
 ### fix: drop the Codex state hooks and keep the title hook
 
-- **PR:** see the PR that adds this entry
+- **PR:** [cameronsjo/herdr#136](https://github.com/cameronsjo/herdr/pull/136)
 - **Files:** `src/agent_resume.rs`, `src/app/actions.rs`, `src/terminal/state.rs`, `tests/cli/hooks.rs` (upstream's #5278 state side re-applied), `src/integration/{targets,tests}.rs`, `src/integration/assets/codex/herdr-agent-state.{sh,ps1}`, `docs/next/website/src/content/docs/{agents,integrations}.mdx`, `openspec/specs/codex-lifecycle/spec.md` (via the archived `codex-screen-only-state` change)
 - **Replaces:** the 2026-10-15 sync's full revert of upstream #5278. `herdr:codex` is a reserved native-state source again and the fork's visible-working override in `TerminalState` is gone, so those three files match upstream for Codex. Install no longer registers the `working`, `blocked` and `idle` hooks and removes them from an older install; the hook scripts accept only `session` and `metadata`. The fork's pane title (cameronsjo/herdr#26) is kept. Reason: both sides ship the same `codex.toml`, which reads Codex's terminal title (`Action Required`, the spinner) first, the screen already won every disagreement in the hybrid, and a shared Codex daemon misroutes hooks. `CODEX_INTEGRATION_VERSION` stays 11, unreleased (v0.9.3-palette.1 ships 10).
 - **Collision:** only the title hook now: the Codex hook scripts, `CODEX_METADATA_HOOK_EVENTS` and the Codex install and uninstall in `targets.rs`.
