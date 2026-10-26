@@ -11,7 +11,8 @@ every section still in the fork, before the sync merge is pushed.
 One line each — these replace no fork behavior, they just pull upstream
 forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 
-- (pending) PR — merge upstream through `5bd900d` (3 commits); merged cleanly, no conflicts
+- (pending) PR — merge upstream through `5608de0` (7 commits); no conflicts, one deletion refused (below)
+- `1162b4b` PR [#123](https://github.com/cameronsjo/herdr/pull/123) (2026-10-22) — merge upstream through `5bd900d` (3 commits); merged cleanly, no conflicts
 - `ef1489e` PR [#111](https://github.com/cameronsjo/herdr/pull/111) (2026-10-19) — merge upstream through `143bf5f` (4 commits); merged cleanly, no conflicts
 - `2cf4d2c` PR [#109](https://github.com/cameronsjo/herdr/pull/109) (2026-10-15) — merge upstream through `916fcf8` (21 commits); conflict record below
 - `746b19a` PR [#105](https://github.com/cameronsjo/herdr/pull/105) (2026-10-12) — merge upstream through `dc6b6e5` (16 commits); conflict record below
@@ -32,6 +33,19 @@ forward. Full history: `git log --oneline --merges origin/master..HEAD`.
 - `8e36a62f` (2026-08-13) — merge `origin/master` into `sync-upstream-20260813`
 - `7beb3323` (2026-08-06) — merge `origin/master` into `sync-upstream-20260806`
 - `8a6f4248` (2026-08-05) — merge `origin/master` into `chore/sync-upstream`
+
+### 2026-10-26 sync: conflict resolutions
+
+Nothing conflicted. Upstream's `b796ca6` deletes the `CLAUDE.md` symlink to
+`AGENTS.md`, and the fork keeps it: Claude Code reads `CLAUDE.md`, not
+`AGENTS.md`, so without the link fork sessions and the sync routine lose the
+fork operating rule (never write to `herdrdev/herdr`) and the fork working
+notes. Upstream's deletion is now in the merge history, so later syncs carry
+the link forward with no further step unless upstream re-adds the file.
+
+- **Collision:** `CLAUDE.md` is a fork-kept symlink upstream deleted. If a
+  later sync shows it deleted or replaced, restore it with
+  `git checkout HEAD -- CLAUDE.md`.
 
 ### 2026-10-15 sync: conflict resolutions
 
