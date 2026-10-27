@@ -27,7 +27,7 @@ Panes can be split right or down. They can be renamed manually, read from the CL
 
 Herdr is mouse-native. You can click panes, tabs, workspaces, and agents. You can drag split borders, select text, and use right-click menus. Everything below is also reachable by mouse; keyboard bindings are an optional layer.
 
-Moving and reordering are mouse work too. Right-click a workspace, tab, or pane for move and reorder entries; picking `Move to space...` opens the search picker, so you never need to know an id. Drag a tab along the tab bar to reorder it, or onto a workspace in the sidebar to move the whole tab to that space. Drag an agent row in the sidebar onto a workspace to move its pane into a new tab there, or onto a tab to split it against that tab; Herdr asks which way the split goes.
+Moving and reordering are mouse work too. Right-click a workspace, tab, or pane for move and reorder entries; picking `Move to space...` opens the search picker, so you never need to know an id. Drag a tab along the tab bar to reorder it, or onto a workspace in the sidebar to move the whole tab to that space. To rearrange panes, press on a pane's border (anywhere but the split line you resize with) and drag it onto another pane in the same tab; the two swap places, and the pane under the pointer is outlined while you drag. Releasing without dragging just focuses the pane. Drag a pane's border, or an agent row in the sidebar, onto a workspace to move the pane into a new tab there, or onto a tab to split it against that tab; Herdr asks which way the split goes. With `ui.pane_borders = "off"` panes have no border to grab, so use the agent row.
 
 If you prefer keyboard-only control, or you want Herdr to stop capturing mouse input, disable mouse capture:
 
