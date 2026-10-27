@@ -1347,11 +1347,14 @@ impl ClientShellState {
                     .max(mouse.row.abs_diff(press.start_row));
                 if delta >= 1 {
                     let pane_id = press.pane_id.clone();
-                    if let Some(target) = self.pane_drop_target_at(point, &pane_id) {
-                        self.chrome_drag = Some(ClientChromeDrag::Pane {
-                            pane_id,
-                            target: Some(target),
-                        });
+                    let left_source_pane =
+                        press.from_frame
+                            && !self.hits.panes.iter().any(|hit| {
+                                hit.pane_id == pane_id && super::contains(hit.rect, point)
+                            });
+                    let target = self.pane_drop_target_at(point, &pane_id);
+                    if target.is_some() || left_source_pane {
+                        self.chrome_drag = Some(ClientChromeDrag::Pane { pane_id, target });
                         outcome.repaint = true;
                     }
                 }
@@ -2464,6 +2467,7 @@ impl ClientShellState {
                         pane_id,
                         start_column: mouse.column,
                         start_row: mouse.row,
+                        from_frame: false,
                     });
                     return;
                 }
@@ -2558,6 +2562,7 @@ impl ClientShellState {
                             pane_id: hit.pane_id,
                             start_column: mouse.column,
                             start_row: mouse.row,
+                            from_frame: true,
                         });
                         return;
                     }

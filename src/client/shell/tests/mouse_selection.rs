@@ -1799,3 +1799,37 @@ fn pane_from_another_tab_dropped_on_a_pane_asks_which_way_it_splits() {
     ));
     assert!(state.chrome_drag.is_none());
 }
+
+#[test]
+fn pane_frame_drag_released_off_every_target_cancels_without_focus() {
+    let (projected, surface) = two_framed_panes();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[1].rect;
+    // Below both panes: inside the pane surface, but no pane, tab or space.
+    let empty = (source.x + 1, source.bottom() + 2);
+    assert!(state
+        .hits
+        .panes
+        .iter()
+        .all(|hit| !super::super::contains(hit.rect, empty)));
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (source.x + 1, source.y),
+    )]);
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        empty,
+    )]);
+    let release = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        empty,
+    )]);
+    assert!(
+        release.actions.is_empty(),
+        "an off-target release cancels instead of focusing"
+    );
+}

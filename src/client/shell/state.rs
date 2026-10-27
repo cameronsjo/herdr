@@ -203,6 +203,9 @@ pub(super) struct ClientAgentPress {
     pub(super) pane_id: String,
     pub(super) start_column: u16,
     pub(super) start_row: u16,
+    /// The press started on the pane's own frame, so leaving that pane is
+    /// already a drag: a release off every target then cancels, not focuses.
+    pub(super) from_frame: bool,
 }
 
 /// Where a dragged pane would land. A workspace row means a new tab in that
