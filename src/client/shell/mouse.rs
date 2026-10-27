@@ -542,7 +542,11 @@ impl ClientShellState {
 
     /// Where a dragged pane would land: a tab in the tab bar, or a workspace row
     /// in the sidebar. Both come straight from published hit rects.
-    fn pane_drop_target_at(&self, point: (u16, u16)) -> Option<ClientPaneDropTarget> {
+    fn pane_drop_target_at(
+        &self,
+        point: (u16, u16),
+        source_pane_id: &str,
+    ) -> Option<ClientPaneDropTarget> {
         if let Some(tab_id) = self
             .hits
             .tabs
@@ -552,8 +556,29 @@ impl ClientShellState {
         {
             return Some(ClientPaneDropTarget::Tab(tab_id));
         }
+        // The pane under the pointer, frame included. The dragged pane itself
+        // is no target, so a drag that never leaves it stays a press.
+        if let Some(hit) = self
+            .hits
+            .panes
+            .iter()
+            .find(|hit| !hit.popup && super::contains(hit.rect, point))
+        {
+            return (hit.pane_id != source_pane_id)
+                .then(|| ClientPaneDropTarget::Pane(hit.pane_id.clone()));
+        }
         self.sidebar_workspace_at(point)
             .map(ClientPaneDropTarget::Workspace)
+    }
+
+    /// The tab `pane_id` lives in, from the current snapshot.
+    fn pane_tab_id(&self, pane_id: &str) -> Option<String> {
+        self.snapshot
+            .as_deref()?
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == pane_id)
+            .map(|pane| pane.tab_id.clone())
     }
 
     fn workspace_drop_target_at(&self, point: (u16, u16)) -> Option<(Option<String>, u16)> {
@@ -1249,8 +1274,8 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                Some(ClientChromeDrag::Pane { .. }) => {
-                    let target = self.pane_drop_target_at(point);
+                Some(ClientChromeDrag::Pane { pane_id, .. }) => {
+                    let target = self.pane_drop_target_at(point, pane_id);
                     if let Some(ClientChromeDrag::Pane {
                         target: current, ..
                     }) = self.chrome_drag.as_mut()
@@ -1322,11 +1347,14 @@ impl ClientShellState {
                     .max(mouse.row.abs_diff(press.start_row));
                 if delta >= 1 {
                     let pane_id = press.pane_id.clone();
-                    if let Some(target) = self.pane_drop_target_at(point) {
-                        self.chrome_drag = Some(ClientChromeDrag::Pane {
-                            pane_id,
-                            target: Some(target),
-                        });
+                    let left_source_pane =
+                        press.from_frame
+                            && !self.hits.panes.iter().any(|hit| {
+                                hit.pane_id == pane_id && super::contains(hit.rect, point)
+                            });
+                    let target = self.pane_drop_target_at(point, &pane_id);
+                    if target.is_some() || left_source_pane {
+                        self.chrome_drag = Some(ClientChromeDrag::Pane { pane_id, target });
                         outcome.repaint = true;
                     }
                 }
@@ -1426,7 +1454,7 @@ impl ClientShellState {
                         // The release point is what decides, not the last drag
                         // target: a drag that ends off every target is a
                         // cancel, exactly as a tab reorder is.
-                        match self.pane_drop_target_at(point) {
+                        match self.pane_drop_target_at(point, &pane_id) {
                             Some(ClientPaneDropTarget::Workspace(workspace_id)) => {
                                 // `PaneMoveDestination` has no bare workspace
                                 // variant, so a pane dropped on a space lands
@@ -1454,6 +1482,45 @@ impl ClientShellState {
                                 });
                                 if !same_tab {
                                     self.open_pane_split_direction_overlay(pane_id, tab_id, None);
+                                }
+                            }
+                            Some(ClientPaneDropTarget::Pane(target_pane_id)) => {
+                                let source_tab_id = self.pane_tab_id(&pane_id);
+                                let target_tab_id = self.pane_tab_id(&target_pane_id);
+                                match (source_tab_id, target_tab_id) {
+                                    (Some(source), Some(target)) if source == target => {
+                                        // Swap keeps the layout's shape and
+                                        // trades the two cells, the in-place
+                                        // reorder a drag within a tab means.
+                                        self.push_endpoint_method(
+                                            crate::api::schema::Method::PaneSwap(
+                                                crate::api::schema::PaneSwapParams {
+                                                    pane_id: None,
+                                                    direction: None,
+                                                    source_pane_id: Some(pane_id.clone()),
+                                                    target_pane_id: Some(target_pane_id),
+                                                },
+                                            ),
+                                            outcome,
+                                        );
+                                        self.push_endpoint_method(
+                                            crate::api::schema::Method::PaneFocus(
+                                                crate::api::schema::PaneTarget { pane_id },
+                                            ),
+                                            outcome,
+                                        );
+                                    }
+                                    // A pane from another tab (an agent row
+                                    // dragged in) joins this one beside the
+                                    // target; the picker asks which way.
+                                    (Some(_), Some(target)) => {
+                                        self.open_pane_split_direction_overlay(
+                                            pane_id,
+                                            target,
+                                            Some(target_pane_id),
+                                        );
+                                    }
+                                    _ => {}
                                 }
                             }
                             None => {}
@@ -2400,6 +2467,7 @@ impl ClientShellState {
                         pane_id,
                         start_column: mouse.column,
                         start_row: mouse.row,
+                        from_frame: false,
                     });
                     return;
                 }
@@ -2478,6 +2546,26 @@ impl ClientShellState {
                     .find(|hit| super::contains(hit.rect, point))
                     .cloned();
                 if let Some(hit) = pane_hit {
+                    // The scrollbar lane sits just right of `inner_rect` and is
+                    // published only while there is scrollback, so an idle lane
+                    // looks like frame. The right side beside the terminal rows
+                    // never starts a drag; the other three sides do.
+                    let beside_terminal_rows = point.1 >= hit.inner_rect.y
+                        && point.1 < hit.inner_rect.bottom()
+                        && point.0 >= hit.inner_rect.right();
+                    let on_frame = !super::contains(hit.inner_rect, point) && !beside_terminal_rows;
+                    if !hit.popup && on_frame {
+                        // A press on the frame can grow into a drag that
+                        // rearranges the pane, so focus waits for the release
+                        // the way an agent row's does.
+                        self.agent_press = Some(ClientAgentPress {
+                            pane_id: hit.pane_id,
+                            start_column: mouse.column,
+                            start_row: mouse.row,
+                            from_frame: true,
+                        });
+                        return;
+                    }
                     if hit.mouse_reporting && super::contains(hit.inner_rect, point) {
                         self.push_pane_mouse_event(&hit, mouse, mouse.modifiers, outcome);
                         self.pane_mouse_gesture = Some(ClientPaneMouseGesture {

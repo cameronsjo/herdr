@@ -196,21 +196,27 @@ pub(super) struct ClientTabPress {
     pub(super) start_row: u16,
 }
 
-/// A press on an agent sidebar row. The row stands for a pane, so the press is
-/// what a pane drag-move grows out of; releasing without a drag focuses it.
+/// A press on an agent sidebar row or on a pane's frame. Both stand for a pane,
+/// so the press is what a pane drag-move grows out of; releasing without a drag
+/// focuses it.
 pub(super) struct ClientAgentPress {
     pub(super) pane_id: String,
     pub(super) start_column: u16,
     pub(super) start_row: u16,
+    /// The press started on the pane's own frame, so leaving that pane is
+    /// already a drag: a release off every target then cancels, not focuses.
+    pub(super) from_frame: bool,
 }
 
 /// Where a dragged pane would land. A workspace row means a new tab in that
 /// space; a tab means a split against that tab, whose direction the picker
-/// asks for on drop.
+/// asks for on drop. A pane in the same tab swaps places with the dragged one;
+/// a pane in another tab is split against, like a tab drop.
 #[derive(Clone, Debug)]
 pub(super) enum ClientPaneDropTarget {
     Workspace(String),
     Tab(String),
+    Pane(String),
 }
 
 pub(super) enum ClientChromeDrag {

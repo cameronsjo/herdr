@@ -1528,3 +1528,308 @@ fn pane_dropped_back_on_its_own_tab_is_a_no_op() {
     assert!(release.actions.is_empty());
     assert!(state.overlay.is_none());
 }
+
+/// One tab split into `pane_1 | pane_2`, each a 6x4 pane with a one-cell frame
+/// around its 4x2 terminal, so a press can land on a frame.
+fn two_framed_panes() -> (ClientShellSnapshot, PaneSurfaceFrame) {
+    let mut projected = snapshot();
+    let mut second = projected.panes[0].clone();
+    second.pane_id = "pane_2".into();
+    projected.panes.push(second);
+    let mut surface = surface();
+    surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::with_lines([
+            "┌────┐┌────┐",
+            "│LIVE││TWO │",
+            "│PANE││    │",
+            "└────┘└────┘",
+        ]),
+        None,
+        &[],
+    );
+    let framed = |pane_id: &str, x: u16, focused: bool| PaneSurfacePane {
+        pane_id: pane_id.into(),
+        rect: SurfaceRect {
+            x,
+            y: 0,
+            width: 6,
+            height: 4,
+        },
+        inner_rect: SurfaceRect {
+            x: x + 1,
+            y: 1,
+            width: 4,
+            height: 2,
+        },
+        focused,
+        ..surface.panes[0].clone()
+    };
+    surface.panes = vec![framed("pane_1", 0, true), framed("pane_2", 6, false)];
+    (projected, surface)
+}
+
+fn left_mouse(kind: MouseEventKind, (column, row): (u16, u16)) -> RawInputEvent {
+    RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::empty(),
+    })
+}
+
+#[test]
+fn pane_frame_dragged_onto_a_pane_in_the_same_tab_swaps_them() {
+    let (projected, surface) = two_framed_panes();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[0].rect;
+    let target = state.hits.panes[1].rect;
+    let frame_cell = (source.x + 2, source.y);
+    let inside_target = (target.x + 2, target.y + 1);
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        frame_cell,
+    )]);
+    assert!(
+        state.selection.is_none(),
+        "a frame press is not a text selection"
+    );
+    // Moving along its own frame keeps it a press: the source is no target.
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        (source.x + 3, source.y),
+    )]);
+    assert!(state.chrome_drag.is_none());
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        inside_target,
+    )]);
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::Pane {
+            ref pane_id,
+            target: Some(ClientPaneDropTarget::Pane(ref target_pane_id)),
+        }) if pane_id == "pane_1" && target_pane_id == "pane_2"
+    ));
+
+    // The target's outline carries the drop-target highlight.
+    let highlighted = state
+        .compose(106, 20)
+        .expect("drag frame")
+        .frame
+        .to_ratatui_buffer()
+        .expect("drag buffer");
+    assert_eq!(
+        highlighted[(target.x, target.y)].bg,
+        state.config.palette.selection_bg
+    );
+    assert_ne!(
+        highlighted[(target.x + 2, target.y + 1)].bg,
+        state.config.palette.selection_bg,
+        "only the outline is highlighted, not the terminal inside"
+    );
+
+    let release = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        inside_target,
+    )]);
+    let methods = release
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(&request.method),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        methods[..],
+        [
+            crate::api::schema::Method::PaneSwap(ref swap),
+            crate::api::schema::Method::PaneFocus(ref focus),
+        ] if swap.source_pane_id.as_deref() == Some("pane_1")
+            && swap.target_pane_id.as_deref() == Some("pane_2")
+            && swap.direction.is_none()
+            && focus.pane_id == "pane_1"
+    ));
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn pane_frame_click_without_a_drag_still_focuses_the_pane() {
+    let (projected, surface) = two_framed_panes();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let frame_cell = (state.hits.panes[1].rect.x, state.hits.panes[1].rect.y + 1);
+
+    let press = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        frame_cell,
+    )]);
+    assert!(
+        press.actions.is_empty(),
+        "focus waits for the release so the press can become a drag"
+    );
+    let release = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        frame_cell,
+    )]);
+    assert!(release.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_2"
+            )
+    )));
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn pane_frame_drag_released_back_on_its_own_pane_does_nothing() {
+    let (projected, surface) = two_framed_panes();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[0].rect;
+    let target = state.hits.panes[1].rect;
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (source.x + 1, source.y),
+    )]);
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        (target.x + 1, target.y + 1),
+    )]);
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        (source.x + 1, source.y + 1),
+    )]);
+    let release = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        (source.x + 1, source.y + 1),
+    )]);
+    assert!(!release.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(request.method, crate::api::schema::Method::PaneSwap(_))
+    )));
+}
+
+#[test]
+fn idle_scrollbar_lane_is_not_a_pane_frame() {
+    let (projected, mut surface) = two_framed_panes();
+    // pane_1's terminal gives up its last column to a scrollbar lane, which the
+    // server leaves unpublished while there is no scrollback.
+    surface.panes[0].inner_rect.width = 3;
+    surface.panes[0].scrollbar_rect = None;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let inner = state.hits.panes[0].inner_rect;
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (inner.right(), inner.y),
+    )]);
+    assert!(state.agent_press.is_none());
+}
+
+#[test]
+fn pane_frame_press_on_a_mouse_reporting_pane_is_not_forwarded() {
+    let (projected, mut surface) = two_framed_panes();
+    surface.panes[0].mouse_reporting = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[0].rect;
+
+    let press = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (source.x + 1, source.y),
+    )]);
+    assert!(press.actions.is_empty());
+    assert!(state.pane_mouse_gesture.is_none());
+    assert!(state.agent_press.is_some());
+}
+
+#[test]
+fn pane_from_another_tab_dropped_on_a_pane_asks_which_way_it_splits() {
+    let (mut projected, surface) = two_framed_panes();
+    let mut other_tab = projected.tabs[0].clone();
+    other_tab.tab_id = "tab_2".into();
+    other_tab.focused = false;
+    projected.tabs.push(other_tab);
+    let mut far = projected.panes[0].clone();
+    far.pane_id = "pane_9".into();
+    far.tab_id = "tab_2".into();
+    projected.panes.push(far);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let target = state.hits.panes[1].rect;
+    state.chrome_drag = Some(ClientChromeDrag::Pane {
+        pane_id: "pane_9".into(),
+        target: None,
+    });
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        (target.x + 2, target.y + 1),
+    )]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Chooser(ref chooser))
+            if matches!(
+                chooser.choices.first().map(|choice| &choice.outcome),
+                Some(ChooserOutcome::PaneSplit { pane_id, tab_id, target_pane_id, .. })
+                    if pane_id == "pane_9"
+                        && tab_id == "tab_1"
+                        && target_pane_id.as_deref() == Some("pane_2")
+            )
+    ));
+    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn pane_frame_drag_released_off_every_target_cancels_without_focus() {
+    let (projected, surface) = two_framed_panes();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[1].rect;
+    // Below both panes: inside the pane surface, but no pane, tab or space.
+    let empty = (source.x + 1, source.bottom() + 2);
+    assert!(state
+        .hits
+        .panes
+        .iter()
+        .all(|hit| !super::super::contains(hit.rect, empty)));
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (source.x + 1, source.y),
+    )]);
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        empty,
+    )]);
+    let release = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        empty,
+    )]);
+    assert!(
+        release.actions.is_empty(),
+        "an off-target release cancels instead of focusing"
+    );
+}

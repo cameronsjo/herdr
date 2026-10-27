@@ -433,6 +433,26 @@ impl ClientShellState {
             }
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
+        if let Some(ClientChromeDrag::Pane {
+            target: Some(ClientPaneDropTarget::Pane(target_pane_id)),
+            ..
+        }) = &self.chrome_drag
+        {
+            if let Some(hit) = self
+                .hits
+                .panes
+                .iter()
+                .find(|hit| &hit.pane_id == target_pane_id)
+            {
+                let cursor = frame.cursor.clone();
+                let mut composed = frame.to_ratatui_buffer()?;
+                render_pane_drop_target(&mut composed, hit.rect, &self.config.palette);
+                for edge in rect_edges(hit.rect) {
+                    occlusion.cover(edge);
+                }
+                frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
+            }
+        }
         self.render_link_hover(&mut frame, &mut occlusion);
         if self.mode == ClientShellMode::Copy {
             frame.cursor = None;
@@ -840,5 +860,37 @@ fn client_popup_size(size: crate::protocol::ClientShellPopupSize) -> crate::popu
         crate::protocol::ClientShellPopupSize::Percent(percent) => {
             crate::popup_size::PopupSize::Percent(percent)
         }
+    }
+}
+
+/// The four one-cell edges of `rect`: top, bottom, left, right. Empty edges
+/// are skipped, and a one-row or one-column rect yields its cells once.
+fn rect_edges(rect: Rect) -> Vec<Rect> {
+    if rect.width == 0 || rect.height == 0 {
+        return Vec::new();
+    }
+    let mut edges = vec![Rect::new(rect.x, rect.y, rect.width, 1)];
+    if rect.height > 1 {
+        edges.push(Rect::new(rect.x, rect.bottom() - 1, rect.width, 1));
+    }
+    if rect.height > 2 {
+        edges.push(Rect::new(rect.x, rect.y + 1, 1, rect.height - 2));
+        if rect.width > 1 {
+            edges.push(Rect::new(rect.right() - 1, rect.y + 1, 1, rect.height - 2));
+        }
+    }
+    edges
+}
+
+/// Outline the pane a dragged pane would swap with, in the same drop-target
+/// colors the tab bar uses, so the landing spot reads the same everywhere.
+fn render_pane_drop_target(buffer: &mut Buffer, rect: Rect, palette: &Palette) {
+    let rect = rect.intersection(buffer.area);
+    let style = Style::default()
+        .fg(palette.text)
+        .bg(palette.selection_bg)
+        .add_modifier(Modifier::BOLD);
+    for edge in rect_edges(rect) {
+        buffer.set_style(edge, style);
     }
 }
