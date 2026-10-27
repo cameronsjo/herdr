@@ -4,7 +4,7 @@ Herdr can swap two panes from keys, the palette and the pane context menu, and a
 
 ## What Changes
 
-- A left press on a pane's frame (its border, off any split handle) can grow into a pane drag. Released in place it still focuses the pane, now on release instead of on press.
+- A left press on a pane's top, bottom or left frame (off any split handle; the right side is the scrollbar lane) can grow into a pane drag. Released in place it still focuses the pane, now on release instead of on press.
 - While a pane is dragged, any other pane under the pointer, frame included, is a drop target and is outlined in the tab bar's drop-target colors.
 - Dropping on a pane in the same tab sends `pane.swap` with explicit source and target, then focuses the dragged pane. Dropping on a pane in another tab (only reachable from an agent-row drag) opens the split-direction chooser against that pane.
 - Frame drags reuse every existing pane-drag drop: a tab opens the split chooser, a space row moves the pane to a new tab there, a release off every target cancels.

@@ -2542,12 +2542,14 @@ impl ClientShellState {
                     .find(|hit| super::contains(hit.rect, point))
                     .cloned();
                 if let Some(hit) = pane_hit {
-                    // An idle scrollbar lane sits outside `inner_rect` but is
-                    // terminal space, not frame, so it never starts a drag.
-                    let on_frame = !super::contains(hit.inner_rect, point)
-                        && !hit
-                            .scrollbar_rect
-                            .is_some_and(|rect| super::contains(rect, point));
+                    // The scrollbar lane sits just right of `inner_rect` and is
+                    // published only while there is scrollback, so an idle lane
+                    // looks like frame. The right side beside the terminal rows
+                    // never starts a drag; the other three sides do.
+                    let beside_terminal_rows = point.1 >= hit.inner_rect.y
+                        && point.1 < hit.inner_rect.bottom()
+                        && point.0 >= hit.inner_rect.right();
+                    let on_frame = !super::contains(hit.inner_rect, point) && !beside_terminal_rows;
                     if !hit.popup && on_frame {
                         // A press on the frame can grow into a drag that
                         // rearranges the pane, so focus waits for the release

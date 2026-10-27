@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Mouse moves
-Dragging a tab onto another space's sidebar row SHALL move the tab to that space. Dragging from an agent row in the sidebar, or from a pane's frame off any split handle, SHALL move that pane: a drop on a space row sends it to a new tab there, a drop on another tab opens the split-direction chooser, and a release off every target cancels. An agent-row or pane-frame press released without dragging MUST focus that pane the same way an ordinary click does.
+Dragging a tab onto another space's sidebar row SHALL move the tab to that space. Dragging from an agent row in the sidebar, or from a pane's top, bottom or left frame off any split handle, SHALL move that pane: a drop on a space row sends it to a new tab there, a drop on another tab opens the split-direction chooser, and a release off every target cancels. An agent-row or pane-frame press released without dragging MUST focus that pane the same way an ordinary click does.
 
 #### Scenario: Tab dropped on a sidebar space
 - **WHEN** a tab is dragged from the tab bar and released over another space in the sidebar

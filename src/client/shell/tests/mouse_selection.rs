@@ -1725,23 +1725,19 @@ fn pane_frame_drag_released_back_on_its_own_pane_does_nothing() {
 #[test]
 fn idle_scrollbar_lane_is_not_a_pane_frame() {
     let (projected, mut surface) = two_framed_panes();
-    // pane_1's terminal gives up its last column to an empty scrollbar lane.
+    // pane_1's terminal gives up its last column to a scrollbar lane, which the
+    // server leaves unpublished while there is no scrollback.
     surface.panes[0].inner_rect.width = 3;
-    surface.panes[0].scrollbar_rect = Some(SurfaceRect {
-        x: 4,
-        y: 1,
-        width: 1,
-        height: 2,
-    });
+    surface.panes[0].scrollbar_rect = None;
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface);
     state.compose(106, 20).expect("two panes");
-    let lane = state.hits.panes[0].scrollbar_rect.expect("scrollbar lane");
+    let inner = state.hits.panes[0].inner_rect;
 
     state.handle_raw_events(vec![left_mouse(
         MouseEventKind::Down(MouseButton::Left),
-        (lane.x, lane.y),
+        (inner.right(), inner.y),
     )]);
     assert!(state.agent_press.is_none());
 }
