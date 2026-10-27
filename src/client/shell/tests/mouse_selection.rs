@@ -1721,3 +1721,85 @@ fn pane_frame_drag_released_back_on_its_own_pane_does_nothing() {
             if matches!(request.method, crate::api::schema::Method::PaneSwap(_))
     )));
 }
+
+#[test]
+fn idle_scrollbar_lane_is_not_a_pane_frame() {
+    let (projected, mut surface) = two_framed_panes();
+    // pane_1's terminal gives up its last column to an empty scrollbar lane.
+    surface.panes[0].inner_rect.width = 3;
+    surface.panes[0].scrollbar_rect = Some(SurfaceRect {
+        x: 4,
+        y: 1,
+        width: 1,
+        height: 2,
+    });
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let lane = state.hits.panes[0].scrollbar_rect.expect("scrollbar lane");
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (lane.x, lane.y),
+    )]);
+    assert!(state.agent_press.is_none());
+}
+
+#[test]
+fn pane_frame_press_on_a_mouse_reporting_pane_is_not_forwarded() {
+    let (projected, mut surface) = two_framed_panes();
+    surface.panes[0].mouse_reporting = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let source = state.hits.panes[0].rect;
+
+    let press = state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (source.x + 1, source.y),
+    )]);
+    assert!(press.actions.is_empty());
+    assert!(state.pane_mouse_gesture.is_none());
+    assert!(state.agent_press.is_some());
+}
+
+#[test]
+fn pane_from_another_tab_dropped_on_a_pane_asks_which_way_it_splits() {
+    let (mut projected, surface) = two_framed_panes();
+    let mut other_tab = projected.tabs[0].clone();
+    other_tab.tab_id = "tab_2".into();
+    other_tab.focused = false;
+    projected.tabs.push(other_tab);
+    let mut far = projected.panes[0].clone();
+    far.pane_id = "pane_9".into();
+    far.tab_id = "tab_2".into();
+    projected.panes.push(far);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface);
+    state.compose(106, 20).expect("two panes");
+    let target = state.hits.panes[1].rect;
+    state.chrome_drag = Some(ClientChromeDrag::Pane {
+        pane_id: "pane_9".into(),
+        target: None,
+    });
+
+    state.handle_raw_events(vec![left_mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        (target.x + 2, target.y + 1),
+    )]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Chooser(ref chooser))
+            if matches!(
+                chooser.choices.first().map(|choice| &choice.outcome),
+                Some(ChooserOutcome::PaneSplit { pane_id, tab_id, target_pane_id, .. })
+                    if pane_id == "pane_9"
+                        && tab_id == "tab_1"
+                        && target_pane_id.as_deref() == Some("pane_2")
+            )
+    ));
+    assert!(state.chrome_drag.is_none());
+}
