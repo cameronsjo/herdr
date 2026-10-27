@@ -249,7 +249,7 @@ next sync is likely to conflict again:
 
 ### feat: drag a pane by its frame to swap it with another pane
 
-- **PR:** (pending)
+- **PR:** [cameronsjo/herdr#138](https://github.com/cameronsjo/herdr/pull/138)
 - **Files:** `src/client/shell/{mouse,state,composition}.rs`, `src/client/shell/tests/mouse_selection.rs`, `docs/next/website/src/content/docs/concepts.mdx`, `openspec/specs/layout-moves/spec.md` (via the archived `drag-pane-to-rearrange` change)
 - **Adds:** a left press on a pane's frame (off any split handle) becomes the same pane press an agent row makes, so it focuses on release or grows into a pane drag. `ClientPaneDropTarget::Pane` makes every other pane a drop target, outlined in the tab bar's drop-target colors; a same-tab drop sends `pane.swap` (explicit source and target) then `pane.focus`, a cross-tab drop opens the split chooser against that pane. Client only, built on existing methods, so it is a candidate to offer upstream.
 - **Collision:** `pane_drop_target_at` (now takes the source pane id) and the left-press pane branch in `mouse.rs`, `ClientPaneDropTarget` in `state.rs`, the drop-target overlay pass before `render_link_hover` in `composition.rs`, and the agent-row sentence in `concepts.mdx`.
