@@ -359,10 +359,10 @@ pub(super) fn empty_agent_list_message(
     view_active: bool,
     config: &ClientShellConfig,
 ) -> Option<&'static str> {
-    if view_active {
-        Some(" no matching agents")
-    } else if config.agents.needs_me_only {
+    if config.agents.needs_me_only {
         Some(" no agents need you")
+    } else if view_active {
+        Some(" no matching agents")
     } else {
         None
     }

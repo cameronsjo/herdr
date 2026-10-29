@@ -718,3 +718,14 @@ fn mobile_switcher_says_when_needs_me_hides_every_agent() {
     assert!(text.contains("agents · needs me"), "{text}");
     assert!(text.contains("no agents need you"), "{text}");
 }
+
+#[test]
+fn the_needs_me_empty_message_wins_over_an_active_view() {
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    let message = super::super::agent_sidebar::empty_agent_list_message;
+    assert_eq!(message(false, &config), None);
+    assert_eq!(message(true, &config), Some(" no matching agents"));
+    config.agents.needs_me_only = true;
+    assert_eq!(message(false, &config), Some(" no agents need you"));
+    assert_eq!(message(true, &config), Some(" no agents need you"));
+}
