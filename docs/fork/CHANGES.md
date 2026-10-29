@@ -246,6 +246,16 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `agent prompt` reports whether the text reached the agent (issue [#102](https://github.com/cameronsjo/herdr/issues/102), Linear CAM-436)
+
+### feat(agent): report prompt delivery as typed, queued or unknown
+
+- **PR:** [cameronsjo/herdr#141](https://github.com/cameronsjo/herdr/pull/141)
+- **Files:** new fork files `src/api/fork_prompt_delivery.rs` (baseline capture, the post-write poll, the echo needle and `with_delivery`) and `src/api/schema/fork_prompt_delivery.rs` (`PromptDelivery`); `src/api/mod.rs` and `src/api/schema.rs` (module lines); `src/api/schema/response.rs` (`AgentPrompted.delivered`); `src/api/wait.rs` (`prompt_agent` captures a baseline on both paths and observes after the write; `agent_prompt_success` takes the delivery); `src/app/api/agents.rs` (`delivered: None` from the app; the server fills it); `tests/cli/agents.rs`; `docs/next/api/herdr-api.schema.json`; `cli-reference.mdx` and `agent-automation.mdx` (English only); `openspec/specs/agent-registry/`.
+- **Replaces:** nothing upstream. Upstream's success means the bytes were written. The fork then watches for up to 1.5 seconds (capped by a `--wait` timeout, which also bounds each app call in the window): a non-working agent whose pane reports working or blocked (replayed from the event hub, so a sub-poll turn counts) or shows the prompt's opening text is `typed`; an already working agent that shows it, or settles and starts another turn, is `queued`; otherwise `unknown`. With `--wait`, the window counts toward the five-second `agent_prompt_stalled` gate. **Compatibility:** `delivered` is optional and an unknown value reads as `unknown`; no parameter, method or capability changes. **Worth knowing:** a prompt with no evidence returns up to 1.5 seconds later than upstream's; collapsed pastes never echo, so a long prompt to a working agent reads `unknown`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_prompt_delivery/) + test(agent_start_command_works)'`. On a sync, any upstream change to `prompt_agent` or the `AgentPrompted` variant must keep `delivered` on both prompt paths. **Collision:** `prompt_agent` and `agent_prompt_success` in `src/api/wait.rs`, the `AgentPrompted` variant, and the `agent prompt` paragraphs of the two docs pages.
+- **Render scaling:** not affected; the check runs once per `agent.prompt` call, off the render path.
+
 ## `pane send-text --paste` sends a bracketed paste (issue [#121](https://github.com/cameronsjo/herdr/issues/121), Linear CAM-432)
 
 ### feat: opt-in bracketed paste for pane send-text
