@@ -75,6 +75,7 @@ fn default_capabilities() -> Option<ServerCapabilities> {
         health_check: true,
         ssh_agent_registration: false,
         agent_start_env: true,
+        agent_start_exec: true,
     })
 }
 
@@ -1503,6 +1504,7 @@ mod tests {
                 health_check: true,
                 ssh_agent_registration: false,
                 agent_start_env: false,
+                agent_start_exec: false,
             }),
             None,
             None,

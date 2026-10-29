@@ -1465,6 +1465,13 @@
               "$ref": "#/schemas/request/$defs/AgentEnv",
               "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control, line-separator\nor format characters. Refused with `agent_env_unsupported_shell` in panes\nwhose shell has no verified quoting (nu, xonsh, elvish, csh, tcsh).\nServers that accept this field advertise `capabilities.agent_start_env`."
             },
+            "exec": {
+              "description": "Fork: the path of the executable to launch in place of the kind's\ndefault. It must contain a `/` and only ASCII letters, digits and\n`_ . / : + -`, start with a letter, `_`, `/`, `./` or `../`, and not\nend in `/`, `.` or `..`, so a shell never runs a builtin such as\n`exit` in its place; use a symlink for other paths. Detection\nstill needs the process to identify as `kind`, by a built-in name or\n`[advanced] agent_process_names`.\nServers that accept this field advertise `capabilities.agent_start_exec`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "type": "string"
             },
@@ -11135,6 +11142,11 @@
             "agent_start_env": {
               "default": false,
               "description": "Fork (cameronsjo/herdr#103): `agent.start` honors its optional `env`\nfield. A server without this flag would ignore `env` and still succeed.",
+              "type": "boolean"
+            },
+            "agent_start_exec": {
+              "default": false,
+              "description": "Fork (cameronsjo/herdr#110): `agent.start` honors its optional `exec`\nfield. A server without this flag would ignore `exec` and launch the\nkind's default executable.",
               "type": "boolean"
             },
             "detached_server_daemon": {
