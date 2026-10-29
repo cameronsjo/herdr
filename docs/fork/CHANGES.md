@@ -257,6 +257,25 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run -E 'test(/location_token/)'`; `location_token_resolves_only_outside_the_focused_workspace` covers the hidden-tab case. Dropping the `outside_focused_workspace` gate reddens `location_token_names_workspace_and_tab_only_outside_the_focused_workspace` (the focused agent's row gains its workspace).
 - **Render scaling:** one string comparison per agent row; the token formats a string only for configured, out-of-workspace agents.
 
+## Peek a pane from another tab as a temporary overlay (issue [#95](https://github.com/cameronsjo/herdr/issues/95), Linear CAM-438)
+
+### feat(pane): close a peek with the prefix key
+
+- **PR:** [cameronsjo/herdr#148](https://github.com/cameronsjo/herdr/pull/148)
+- **Files:** `src/server/{headless,pane_input,clients}.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `peek-prefix-dismiss` change)
+- **Adds:** in the `ClientShellPopupInput` arm, when the popup is a peek, `first_prefix_press` finds the first press of a configured prefix key; that event and everything after it in the batch are dropped, the peek closes, and tab geometry is reapplied. Presses the client still holds in the peeked pane (a modifier pressed before the prefix) are released first through `drain_shell_held_inputs_for`, so the pane's program never sees a key stuck down. Plugin popups still receive the prefix. Only a key press counts as the prefix, not the same character committed as text.
+- **Collision:** the `ClientShellPopupInput` arm of `handle_server_event` in `headless.rs`.
+- **Regression check:** `cargo nextest run -E 'test(/prefix_key_/)'`. Live: open a peek, type into it, press the prefix key; the overlay closes and the key does not reach the pane.
+
+### feat(pane): show a pane from another tab as a temporary overlay
+
+- **PR:** [cameronsjo/herdr#147](https://github.com/cameronsjo/herdr/pull/147)
+- **Files:** `src/app/{popup,state,runtime,api}.rs`, `src/app/api/panes.rs`, `src/api/schema{,/operations}.rs`, `src/cli/pane{,/bindings}.rs`, `src/server/{client_shell,headless/client_views,headless/render}.rs`, `src/ui/panes.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `pane-peek` change)
+- **Adds:** `pane.peek` / `herdr pane peek <pane_id>` shows a pane from another tab or space in the popup overlay over the current tab, with input and mouse routed to it; `pane.peek_close` / `herdr pane peek --close` closes it. `PopupPaneState.peek` marks a popup that borrows a tiled pane's terminal instead of owning one, so closing it shuts nothing down. `AppState::tab_resize_locked` keeps tab layout from resizing a peeked terminal, and a public request that opens or closes a peek reapplies tab geometry so the pane gets its layout size back. A peek closes when its terminal shuts down, and the popup branch of `PaneDied` no longer skips the pane's own exit handling for a peek. `reconcile_client_shell_locations` closes a peek whose pane was moved into the overlay's own tab, and reapplies geometry whenever it closes a peek; `remove_unattached_terminal_ids` drops a peek of a closed pane at once; the kitty graphics surface builds a popup target only for a client that shows the popup, so a client on the peeked pane's own tab keeps its pane target. The title always carries the pane's public id. Server only: the client already renders and routes popups, so no wire codec changes.
+- **Collision:** `PopupPaneState` and `close_popup_pane` in `src/app/{state,popup}.rs`, the popup branch of `PaneDied` in `src/app/api.rs`, `shutdown_terminal_runtime` in `src/app/runtime.rs`, `any_shell_surface_contains_pane` in `render.rs`, the popup target in `src/kitty_graphics/surface.rs`, `remove_unattached_terminal_ids` in `src/app/actions.rs`, the popup branch of `reconcile_client_shell_locations`, `public_request_may_change_geometry` and the end of `handle_api_request_with_shutdown_check` in `client_views.rs`, the popup title in `render_popup_surface`, and the four `tab_resize_locked` checks in `src/ui/panes.rs`. The popup invariant in `assert_invariants_for_test` now allows an attached terminal only for a peek.
+- **Regression check:** `cargo nextest run -E 'test(/peek/)'`. Live: with an agent in tab 2, run `herdr pane peek <its pane id>` from tab 1; the agent shows in an overlay titled `peek: …`, keys reach it, and `herdr pane peek --close` returns it to tab 2 at its layout size.
+- **Render scaling:** none added to pane loops; the lock check is one hash lookup and one comparison per pane resize.
+
 ## A `name` token shows the herdr agent name in sidebar rows (issue [#97](https://github.com/cameronsjo/herdr/issues/97), Linear CAM-434)
 
 ### feat: add a name token to agent sidebar rows
