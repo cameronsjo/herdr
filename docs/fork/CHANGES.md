@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## A `name` token shows the herdr agent name in sidebar rows (issue [#97](https://github.com/cameronsjo/herdr/issues/97), Linear CAM-434)
+
+### feat: add a name token to agent sidebar rows
+
+- **PR:** (pending)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `sidebar-name-token` change)
+- **Adds:** `AgentSidebarToken::Name` (`"name"`), resolved from the agent's herdr name only through a new `agent_name` field on `AgentTokenContext`, and drawn as `ResolvedTokenKind::Agent` so it styles like `agent`. Omitted for an unnamed agent. `agent` (display name, then name, kind, title) and the default rows are unchanged, so herdr-bridge's `claude · <session>` display still shows; `["name", "agent"]` puts the herdr name beside it.
+- **Collision:** the `AgentSidebarToken` enum and its name/parse tables in `config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `ui/sidebar/tokens.rs`, and the `AgentTokenContext` construction in `agent_row`.
+- **Regression check:** `cargo nextest run -E 'test(/name_token/) | test(parses_builtin_and_arbitrary_custom_tokens)'`. Live: with `rows = [["state_icon", "name", "agent"]]`, an agent started as `cos-cadence` shows `cos-cadence · claude · <branch>`.
+- **Render scaling:** not affected; one more `Option<&str>` per row build.
+
 ## `pane focus <pane_id>` jumps to a pane from anywhere (issue [#94](https://github.com/cameronsjo/herdr/issues/94), Linear CAM-433)
 
 ### feat: jump to a pane by id with pane focus
