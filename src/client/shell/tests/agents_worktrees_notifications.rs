@@ -2578,6 +2578,38 @@ fn priority_order_and_interleaving_views_suspend_grouping() {
 }
 
 #[test]
+fn the_agent_a_token_group_is_named_after_leads_it() {
+    // `agent start --parent three` tags workers one and four, and three itself.
+    let mut projected = grouped_agents_snapshot();
+    for index in [0, 2, 3] {
+        projected.agents[index].tokens = vec![("parent".into(), "three".into())];
+    }
+    projected.agents[3].agent_status = AgentStatus::Blocked;
+    let mut config = Config::default();
+    config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Token("parent".into());
+    config.ui.sidebar.agents.blocked_first = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 40).expect("parent-grouped sidebar");
+
+    assert_eq!(
+        state
+            .hits
+            .agents
+            .iter()
+            .map(|(_, pane_id)| pane_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["pane_3", "pane_4", "pane_1", "pane_2"],
+        "the parent leads its workers, blocked ones next; untagged agents keep their run"
+    );
+    assert_eq!(
+        agent_headers(&state, &frame)[0],
+        ("pane_3".to_owned(), " three".to_owned())
+    );
+}
+
+#[test]
 fn the_sort_toggle_cycles_through_needs_me_which_shows_only_blocked_agents() {
     let mut projected = grouped_agents_snapshot();
     projected.agents[1].agent_status = AgentStatus::Blocked;

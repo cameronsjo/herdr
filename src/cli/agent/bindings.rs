@@ -288,6 +288,8 @@ pub(crate) fn command() -> Command {
             .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")
             .after_help("If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match."))
         .subcommand(leaf("start", AgentStartProjection::arguments(), "Start a supported interactive agent in an existing pane")
+            .arg(clap::Arg::new("parent").long("parent").value_name("NAME")
+                .help("Record the agent that launched this one, as the pane token `parent` (fork)"))
             .override_usage("herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]")
             .after_help("The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait"))
         .subcommand(leaf("attach", AttachProjection::arguments(), "Attach directly to an agent terminal")

@@ -66,6 +66,24 @@ A server that honors `agent.start`'s `env` SHALL report `capabilities.agent_star
 - **WHEN** `herdr agent start worker --kind claude --pane 1 --env A=1` runs against a server whose capabilities lack `agent_start_env`
 - **THEN** the command fails with `agent_start_env_unsupported` and no agent is started
 
+### Requirement: agent start checks the launching agent first
+`herdr agent start` SHALL accept `--parent NAME` (also `--parent=NAME`) among its options before `--`, where NAME matches `[a-z][a-z0-9_-]{0,31}`. It MUST resolve NAME with `agent.get` before starting, and fail without typing into the pane when NAME is not a live agent. `agent.start` itself is unchanged.
+
+#### Scenario: Unknown parent
+- **WHEN** `--parent ghost` names no live agent
+- **THEN** the command prints the `agent.get` error and starts nothing
+
+### Requirement: agent start records the launching agent
+After an agent started with `--parent NAME` is ready, the CLI SHALL set the pane metadata token `parent=NAME`, source `herdr:parent`, on the new agent's pane, and on the parent's pane when that pane has no `parent` token yet.
+
+#### Scenario: Worker started under an orchestrator
+- **WHEN** `herdr agent start worker-1 --kind claude --pane p_2_1 --parent orch` succeeds and `orch` has no `parent` token
+- **THEN** both `worker-1`'s pane and `orch`'s pane report token `parent = orch`
+
+#### Scenario: Recording fails after the start
+- **WHEN** the agent starts but a `pane.report_metadata` call for the `parent` token fails
+- **THEN** the command still prints the start result, with the failure under `result.parent_error`, warns on stderr, and exits as a successful start
+
 ### Requirement: agent start can launch another executable
 `agent.start` SHALL accept an optional `exec`, and `herdr agent start` SHALL accept `--exec PATH`. It MUST replace the default executable in the typed command and start the reported `argv`; a session started this way MUST NOT be recorded for resume. An `exec` that holds no `/`, holds anything but ASCII letters, digits and `_ . / : + -`, starts with anything but a letter, `_`, `/`, `./` or `../`, or ends in `/`, `.` or `..` MUST fail with `invalid_agent_exec` before anything is typed.
 

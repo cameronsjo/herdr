@@ -3289,3 +3289,39 @@ fn aggregate_dragging_respects_endpoint_ownership_and_release_position() {
     assert!(activated.actions.iter().any(|action| matches!(action, ClientShellAction::ActivateEndpoint { endpoint_id, .. } if *endpoint_id == remote_id)));
     assert!(state.agent_press.is_none());
 }
+
+#[test]
+fn aggregate_rows_put_a_token_group_leader_first() {
+    use crate::api::schema::AgentStatus;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut selected = snapshot();
+    let tagged = |name: &str, status, pane: &str| {
+        let mut row = agent(name, status, 1);
+        row.pane_id = pane.into();
+        row.tokens = vec![("parent".into(), "orch".into())];
+        row
+    };
+    selected.agents = vec![
+        tagged("w1", AgentStatus::Idle, "pane_1"),
+        tagged("w2", AgentStatus::Blocked, "pane_2"),
+        tagged("orch", AgentStatus::Idle, "pane_3"),
+    ];
+    state.set_snapshot(Box::new(selected));
+
+    let config = crate::config::AgentsSidebarConfig {
+        group_by: crate::config::AgentGroupBy::Token("parent".into()),
+        blocked_first: true,
+        ..Default::default()
+    };
+    let names = aggregate_navigation::aggregate_agent_rows(
+        &state.endpoints,
+        &state.active_endpoint_id,
+        crate::config::AgentPanelSortConfig::Spaces,
+        &config,
+    )
+    .into_iter()
+    .map(|row| row.agent.name.as_deref().expect("agent name"))
+    .collect::<Vec<_>>();
+    assert_eq!(names, ["orch", "w2", "w1"]);
+}

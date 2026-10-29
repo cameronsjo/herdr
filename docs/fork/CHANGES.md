@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Workers group under the agent that launched them (Linear CAM-442, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(agent): record an agent's launcher with agent start --parent
+
+- **PR:** [cameronsjo/herdr#153](https://github.com/cameronsjo/herdr/pull/153)
+- **Files:** `src/cli/fork_agent_parent.rs` (new), `src/cli.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/client/shell/{agent_sidebar,aggregate_navigation}.rs`, `src/client/shell/tests/{agents_worktrees_notifications,endpoints}.rs`, `docs/next/website/src/content/docs/{cli-reference,configuration}.mdx`, `openspec/specs/{agent-launch,agent-sidebar}/spec.md` (via the archived `agent-start-parent` change)
+- **Adds:** `run_agent_command` takes `--parent NAME` out of `agent start`'s options (before `--`) ahead of clap, so `AgentStartParams` and the endpoint shapes are untouched; the clap leaf lists it for help only. `agent_start` resolves the parent with `agent.get` before typing anything and, once the agent is ready, sends `pane.report_metadata` with `parent=NAME` (source `herdr:parent`) for the new pane and for the parent's pane when it has no `parent` token. A failed report after the start does not fail it: `parent_record_failure` attaches the error as `result.parent_error` and warns on stderr. In the sidebar, `leads_its_token_group` moves the agent a token group is named after to the front of its run in `ordered_agent_pane_ids` and `aggregate_agent_rows`, after `blocked_first`. No server change.
+- **Collision:** the start branch at the top of `run_agent_command` and the success arm of `agent_start` in `src/cli/agent.rs`, the `start` leaf in `bindings.rs`, and the tails of `ordered_agent_pane_ids` and `aggregate_agent_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/parent_/) | test(/token_group_is_named_after/) | test(/token_group_leader/)'`. Dropping the leader pass reddens `the_agent_a_token_group_is_named_after_leads_it` (local) and `aggregate_rows_put_a_token_group_leader_first` (multi-machine). Live: `herdr agent start w1 --kind claude --pane <id> --parent <orchestrator>` with `group_by = { token = "parent" }`; the orchestrator heads one group with `w1` under it.
+- **Render scaling:** one more stable sort over the gathered list per frame while token grouping is on, which computes each agent's group key twice more (run key and leader check); off otherwise.
+
 ## The Agent panel can show only the agents that need you (Linear CAM-441, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
 
 ### feat(sidebar): add a needs-me filter that lists only blocked agents
