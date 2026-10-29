@@ -250,7 +250,7 @@ next sync is likely to conflict again:
 
 ### feat(pane): close a peek with the prefix key
 
-- **PR:** (pending)
+- **PR:** [cameronsjo/herdr#148](https://github.com/cameronsjo/herdr/pull/148)
 - **Files:** `src/server/{headless,pane_input}.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `peek-prefix-dismiss` change)
 - **Adds:** in the `ClientShellPopupInput` arm, when the popup is a peek, `first_prefix_press` finds the first press of a configured prefix key; that event and everything after it in the batch are dropped, the peek closes, and tab geometry is reapplied. Plugin popups still receive the prefix.
 - **Collision:** the `ClientShellPopupInput` arm of `handle_server_event` in `headless.rs`.
