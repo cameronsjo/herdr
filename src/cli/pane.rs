@@ -928,6 +928,24 @@ mod tests {
     }
 
     #[test]
+    fn pane_projection_send_text_paste_flag_precedes_the_text() {
+        let json =
+            serde_json::to_value(request("send-text", &["--paste", "pane", "a", "b"]).unwrap())
+                .unwrap();
+        assert_eq!(
+            json["params"],
+            serde_json::json!({"pane_id": "pane", "text": "a b", "paste": true})
+        );
+        // After the text starts, `--paste` is text like any other word.
+        let json =
+            serde_json::to_value(request("send-text", &["pane", "a", "--paste"]).unwrap()).unwrap();
+        assert_eq!(
+            json["params"],
+            serde_json::json!({"pane_id": "pane", "text": "a --paste"})
+        );
+    }
+
+    #[test]
     fn pane_projection_resume_presence_and_metadata_patches() {
         for name in ["report-agent", "report-agent-session"] {
             for (suffix, expected) in [
