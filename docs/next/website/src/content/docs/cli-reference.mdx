@@ -254,7 +254,8 @@ answer a prompt without leaving where you are. Neither tab's layout changes:
 the pane is shown at overlay size while peeked and gets its layout size back
 when the peek closes. Press the prefix key, or run `pane peek --close`, to
 close it; it also closes on its own when the pane exits. The prefix key does
-not reach a peeked pane, so a program in it never sees that key. Peeking
+not reach a peeked pane, so a program in it never sees that key; only a key
+press counts, not the same character typed through an input method. Peeking
 another pane replaces an open peek; a plugin popup blocks it. A pane in the
 current tab is refused with `pane_visible`, and a peek closes if its pane is
 moved into the tab it is shown over. The title always shows the pane id, so a

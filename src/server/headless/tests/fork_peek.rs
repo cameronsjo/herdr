@@ -233,3 +233,54 @@ async fn prefix_key_closes_a_peek_and_never_reaches_the_pane() {
     assert!(server.app.terminal_runtimes.get(&worker_terminal).is_some());
     shutdown_test_runtimes(&mut server);
 }
+
+#[tokio::test]
+async fn prefix_key_still_reaches_a_plugin_popup() {
+    let mut server = test_headless_server();
+    server.app.state.workspaces = vec![crate::workspace::Workspace::test_new("popup")];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    let popup_terminal = crate::terminal::TerminalId::alloc();
+    let (runtime, mut popup_input) = crate::terminal::TerminalRuntime::test_with_channel(80, 23);
+    server
+        .app
+        .terminal_runtimes
+        .insert(popup_terminal.clone(), runtime);
+    server.app.state.popup_pane = Some(crate::app::state::PopupPaneState {
+        pane_id: crate::layout::PaneId::alloc(),
+        terminal_id: popup_terminal.clone(),
+        width: None,
+        height: None,
+        peek: None,
+    });
+    let (control, _render) = connect_test_shell(&mut server, 44, 100, 30);
+    control.recv().unwrap();
+    server.popup_owner_tab_id = server.app.public_tab_id(0, 0);
+
+    server.handle_server_event(ServerEvent::ClientShellPopupInput {
+        client_id: 44,
+        terminal_id: popup_terminal.to_string(),
+        events: vec![
+            crate::protocol::ClientPaneInputEvent::from_terminal_key(
+                crate::input::TerminalKey::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+            )
+            .unwrap(),
+            crate::protocol::ClientPaneInputEvent::TextCommit("after".into()),
+        ],
+    });
+
+    assert!(server.app.state.popup_pane.is_some());
+    let mut received = Vec::new();
+    while let Ok(bytes) = popup_input.try_recv() {
+        received.extend_from_slice(&bytes);
+    }
+    assert!(
+        received.ends_with(b"after"),
+        "a plugin popup keeps the prefix and what follows it: {received:?}"
+    );
+    server.app.state.popup_pane = None;
+    server.app.terminal_runtimes.remove(&popup_terminal);
+    shutdown_test_runtimes(&mut server);
+}

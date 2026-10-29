@@ -10,3 +10,7 @@
 #### Scenario: Prefix key dismisses the peek
 - **WHEN** the operator presses the prefix key while a peek is open
 - **THEN** the overlay closes, the key is not sent to the peeked pane, and the pane goes back to its layout size
+
+#### Scenario: A plugin popup keeps the prefix key
+- **WHEN** a plugin popup is open and the operator presses the prefix key
+- **THEN** the popup stays open and the key reaches it as before

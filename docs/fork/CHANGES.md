@@ -251,10 +251,10 @@ next sync is likely to conflict again:
 ### feat(pane): close a peek with the prefix key
 
 - **PR:** [cameronsjo/herdr#148](https://github.com/cameronsjo/herdr/pull/148)
-- **Files:** `src/server/{headless,pane_input}.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `peek-prefix-dismiss` change)
-- **Adds:** in the `ClientShellPopupInput` arm, when the popup is a peek, `first_prefix_press` finds the first press of a configured prefix key; that event and everything after it in the batch are dropped, the peek closes, and tab geometry is reapplied. Plugin popups still receive the prefix.
+- **Files:** `src/server/{headless,pane_input,clients}.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `peek-prefix-dismiss` change)
+- **Adds:** in the `ClientShellPopupInput` arm, when the popup is a peek, `first_prefix_press` finds the first press of a configured prefix key; that event and everything after it in the batch are dropped, the peek closes, and tab geometry is reapplied. Presses the client still holds in the peeked pane (a modifier pressed before the prefix) are released first through `drain_shell_held_inputs_for`, so the pane's program never sees a key stuck down. Plugin popups still receive the prefix. Only a key press counts as the prefix, not the same character committed as text.
 - **Collision:** the `ClientShellPopupInput` arm of `handle_server_event` in `headless.rs`.
-- **Regression check:** `cargo nextest run -E 'test(/prefix_key_closes_a_peek/)'`. Live: open a peek, type into it, press the prefix key; the overlay closes and the key does not reach the pane.
+- **Regression check:** `cargo nextest run -E 'test(/prefix_key_/)'`. Live: open a peek, type into it, press the prefix key; the overlay closes and the key does not reach the pane.
 
 ### feat(pane): show a pane from another tab as a temporary overlay
 
