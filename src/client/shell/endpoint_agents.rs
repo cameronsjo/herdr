@@ -66,7 +66,7 @@ pub(super) fn render_expanded(
         buffer,
         area,
         &rows,
-        agent_view_label.map(|_| " no matching agents"),
+        super::agent_sidebar::empty_agent_list_message(agent_view_label.is_some(), config),
         config,
         agent_scroll,
         hits,

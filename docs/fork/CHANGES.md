@@ -246,6 +246,18 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## The Agent panel can show only the agents that need you (Linear CAM-441, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(sidebar): add a needs-me filter that lists only blocked agents
+
+- **PR:** [cameronsjo/herdr#150](https://github.com/cameronsjo/herdr/pull/150)
+- **Files:** `src/config/{sidebar,keybinds,model}.rs`, `src/input/{keybindings,keybind_help}.rs`, `src/main.rs`, `src/client/shell/{agent_sidebar,aggregate_navigation,endpoint_agents,actions,config,mouse,mobile,sidebar}.rs`, `src/client/shell/tests/{palette,agents_worktrees_notifications,mobile}.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/data/config-reference.json`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-needs-me-filter` change)
+- **Adds:** `AgentsSidebarConfig::needs_me_only`, a `#[serde(skip)]` runtime field (never read from or written to config) that `ordered_agent_pane_ids` and `aggregate_agent_rows` use to keep only blocked agents. The header's order toggle cycles grouped → priority → needs me; `KeybindAction::ToggleNeedsMe` (`core:toggle-needs-me`) serves the palette and an optional `keys.toggle_needs_me`. `apply_live_config` carries the flag across a reload, and turning it on (or reloading with it on) sets the priority sort. The empty panel and the mobile list say ` no agents need you` (`empty_agent_list_message`); the mobile section is titled `agents · needs me`, and the collapsed sidebar draws an accent `!` on its divider. Client only.
+- **Replaces:** upstream's two-state sort toggle click in `mouse.rs` becomes three-state.
+- **Collision:** the sort-toggle branch in `ClientShellState` mouse handling, the `sort_label` match in `render_agent_panel_header`, the empty-list message in `render_agent_panel` and `endpoint_agents::render_expanded`, the `clear_agent_view` neighbours in the keybinding tables, and the head of `aggregate_agent_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/needs_me/)'`. Removing the `retain` in `ordered_agent_pane_ids` reddens `the_sort_toggle_cycles_through_needs_me_which_shows_only_blocked_agents`; dropping the palette entry or the priority sort in `toggle_needs_me` reddens `the_palette_toggles_the_needs_me_filter`; dropping the mobile title reddens `mobile_switcher_says_when_needs_me_hides_every_agent`.
+- **Render scaling:** while on, a `retain` over the agent list before ordering, which shrinks the per-agent work after it; off, one bool check per frame.
+
 ## Agent rows can say where an agent lives (Linear CAM-440, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
 
 ### feat(sidebar): add a location token for agents outside the focused workspace

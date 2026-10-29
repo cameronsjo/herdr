@@ -2578,6 +2578,58 @@ fn priority_order_and_interleaving_views_suspend_grouping() {
 }
 
 #[test]
+fn the_sort_toggle_cycles_through_needs_me_which_shows_only_blocked_agents() {
+    let mut projected = grouped_agents_snapshot();
+    projected.agents[1].agent_status = AgentStatus::Blocked;
+    let blocked = projected.agents[1].pane_id.clone();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 40).expect("plain sidebar");
+    let everyone = state.hits.agents.len();
+    assert!(everyone > 1);
+
+    for (label, needs_me) in [("priority", false), ("needs me", true), ("grouped", false)] {
+        let toggle = state.hits.agent_sort_toggle;
+        let clicked = click(&mut state, toggle);
+        assert!(
+            !clicked
+                .actions
+                .iter()
+                .any(|action| matches!(action, ClientShellAction::Endpoint { .. })),
+            "the filter is client-side and sends nothing"
+        );
+        assert_eq!(state.config.agents.needs_me_only, needs_me, "{label}");
+        let frame = state.compose(106, 40).expect("toggled sidebar");
+        assert_eq!(
+            frame_row(&frame, state.hits.agent_sort_toggle, 0),
+            label,
+            "header after the click"
+        );
+        let shown = state
+            .hits
+            .agents
+            .iter()
+            .map(|(_, pane_id)| pane_id.clone())
+            .collect::<Vec<_>>();
+        if needs_me {
+            assert_eq!(shown, vec![blocked.clone()]);
+        } else {
+            assert_eq!(shown.len(), everyone, "{label}");
+        }
+    }
+
+    // With nothing blocked the filtered panel says so instead of going blank.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(grouped_agents_snapshot()));
+    state.set_pane_surface(surface());
+    state.config.agents.needs_me_only = true;
+    let frame = state.compose(106, 40).expect("empty filtered sidebar");
+    assert!(state.hits.agents.is_empty());
+    assert!(frame_rows(&frame).join("\n").contains("no agents need you"));
+}
+
+#[test]
 fn location_token_names_workspace_and_tab_only_outside_the_focused_workspace() {
     let mut projected = snapshot();
     let mut away = projected.workspaces[0].clone();
