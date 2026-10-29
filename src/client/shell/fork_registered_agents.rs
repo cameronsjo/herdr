@@ -97,9 +97,12 @@ fn registered_agent(info: &RegisteredAgentInfo) -> ClientShellAgent {
         agent_status: info.status,
         state_change_seq: 0,
         state_labels: Vec::new(),
+        // A registered agent has no pane to pin, so a token named like the
+        // pin is dropped rather than read as one.
         tokens: info
             .tokens
             .iter()
+            .filter(|(key, _)| key.as_str() != crate::fork_agent_pin::PIN_TOKEN)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
         focused: false,

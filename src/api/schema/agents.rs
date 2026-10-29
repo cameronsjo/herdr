@@ -266,6 +266,11 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_cwd: Option<String>,
     pub revision: u64,
+    /// Fork: present while the agent is pinned to the top of the agents panel
+    /// (`agent.pin`). Pinned agents are listed in ascending `pin_order`, so the
+    /// first agent pinned stays first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

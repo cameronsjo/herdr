@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Pin an agent to the top of the agents panel (issue [#96](https://github.com/cameronsjo/herdr/issues/96), Linear CAM-435)
+
+### feat: pin an agent to the top of the agents panel
+
+- **PR:** (pending)
+- **Files:** `src/fork_agent_pin.rs`, `src/app/api/fork_agent_pin.rs`, `src/cli/fork_agent_pin.rs`, `src/client/shell/tests/fork_agent_pin.rs` (fork-owned); `src/api/schema.rs`, `src/api/schema/{agents,operations}.rs`, `src/app/{agents,api}.rs`, `src/terminal/state.rs`, `src/server/client_shell.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/client/shell/{agent_sidebar,aggregate_navigation,fork_registered_agents}.rs`, `docs/next/api/herdr-api.schema.json`, `cli-reference.mdx`, `configuration.mdx`, `openspec/specs/{agent-pin,agent-sidebar}/spec.md` (via the archived `pin-agents` change)
+- **Adds:** API methods `agent.pin` and `agent.unpin` (agent target in, `AgentInfo` out, which gains an optional `pin_order`), CLI `herdr agent pin|unpin <TARGET>|--current`, and `herdr agent start --pin`, which the CLI does as an `agent.pin` call after a successful start, so `agent.start`'s params are unchanged and an older server refuses the pin instead of ignoring it. The pin is `TerminalState::pin_order`, so it follows the agent when its pane moves. The agents panel lists pinned agents first in pin order in every sort and view, as one `AgentGroupKey::Pinned` run under a `pinned` header when grouped; `blocked_first` never moves an agent above or within it. **Endpoint contract:** the pin reaches client shells as the reserved agent token `herdr:pinned` (value: the pin order). Pane token keys cannot contain `:`, so no reporter can set it, and registered agents' tokens drop it; older clients ignore it like any unknown token. No snapshot codec, digest, or method-shape fixture changes (neither method is a client-shell method). Not yet: a TUI keybinding, and keeping pins across session restore.
+- **Collision:** the `define_operations!` table and `operation_ui_impact_preserves_existing_classification`, `AgentInfo` and `App::agent_info`, `TerminalState`'s fields, the token sort in `src/server/client_shell.rs`, `ordered_agent_pane_ids`, `aggregate_agent_rows` and `ungathered_agent_rows`, and `run_agent_command` / `agent_start` in `src/cli/agent.rs`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_agent_pin/)'`. Live: start two agents, `herdr agent pin <second>`; it moves to the top of the agents panel and stays there as the other changes state.
+- **Render scaling:** one extra stable sort per ordering pass (per snapshot order, not per cell), and a token-list scan per agent where the group key is computed; token lists are a handful of entries.
+
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
 
 ### feat: drag a pane by its frame to swap it with another pane

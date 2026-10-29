@@ -27,8 +27,17 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Some("register") => return super::fork_registered_agents::agent_register(&args[1..]),
         Some("unregister") => return super::fork_registered_agents::agent_unregister(&args[1..]),
         Some("registered") => return super::fork_registered_agents::agent_registered(&args[1..]),
+        Some("pin") => return super::fork_agent_pin::agent_pin(&args[1..], true),
+        Some("unpin") => return super::fork_agent_pin::agent_pin(&args[1..], false),
         _ => {}
     }
+    // Fork: `start --pin` is the CLI's own step after a start, not an
+    // `agent.start` field, so it is taken out before the shared parser runs.
+    let (start_args, pin) = match args.first().map(String::as_str) {
+        Some("start") => super::fork_agent_pin::take_start_pin(args),
+        _ => (Vec::new(), false),
+    };
+    let args = if pin { &start_args[..] } else { args };
 
     // `explain` and `wait` historically treat a bare `help` operand after the target as help.
     let help_args;
@@ -68,7 +77,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::Rename(params) => agent_rename(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
-        Operation::Start(params) => agent_start(params),
+        Operation::Start(params) => agent_start(params, pin),
         Operation::Attach(params) => agent_attach(params),
         Operation::Explain(params) => agent_explain(params),
     }
@@ -260,7 +269,7 @@ fn matched_rule_region_preview<'a>(
         .filter(|preview| !preview.is_empty())
 }
 
-fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
+fn agent_start(params: AgentStartParams, pin: bool) -> std::io::Result<i32> {
     let AgentStartParams {
         name,
         kind,
@@ -354,6 +363,9 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
     match waited {
         Ok(Ok(agent)) => {
             response["result"]["agent"] = agent;
+            if pin {
+                return pin_started_agent(response);
+            }
             super::print_response(&response)
         }
         Ok(Err(error)) => super::print_response(&error),
@@ -361,6 +373,35 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
             print_agent_transport_error(err, "cli:agent:start", "agent_start_transport_failed")
         }
     }
+}
+
+/// Fork (cameronsjo/herdr#96): pins an agent `agent start --pin` just started,
+/// by its pane. A server without `agent.pin` refuses the method, so the agent
+/// is left running and the error says why it is not pinned.
+fn pin_started_agent(mut response: serde_json::Value) -> std::io::Result<i32> {
+    let Some(pane_id) = response["result"]["agent"]["pane_id"].as_str() else {
+        return super::print_response(&cli_agent_error(
+            "cli:agent:start",
+            "agent_pin_failed",
+            "the agent started, but the start response did not include its pane_id to pin",
+        ));
+    };
+    let pinned = super::send_request(&super::fork_agent_pin::pin_request(
+        pane_id.to_owned(),
+        true,
+    ))?;
+    if let Some(error) = pinned.get("error") {
+        return super::print_response(&cli_agent_error(
+            "cli:agent:start",
+            error["code"].as_str().unwrap_or("agent_pin_failed"),
+            format!(
+                "the agent started, but pinning it failed: {}",
+                error["message"].as_str().unwrap_or("unknown error")
+            ),
+        ));
+    }
+    response["result"]["agent"] = pinned["result"]["agent"].clone();
+    super::print_response(&response)
 }
 
 /// Fork (#103): a server that predates `env` would drop it and still report

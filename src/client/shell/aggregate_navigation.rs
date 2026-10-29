@@ -91,11 +91,44 @@ pub(super) fn aggregate_agent_rows<'a>(
                     )),
                 )
             },
-            |row| (row.endpoint.endpoint_index, None),
-            |row| row.agent.agent_status == crate::api::schema::AgentStatus::Blocked,
+            // Each machine's pinned agents stay one run ahead of its rest.
+            |row| {
+                (
+                    row.endpoint.endpoint_index,
+                    pin_order(row).map(|_| super::agent_sidebar::AgentGroupKey::Pinned),
+                )
+            },
+            |row| {
+                row.agent.agent_status == crate::api::schema::AgentStatus::Blocked
+                    && pin_order(row).is_none()
+            },
         );
     }
     rows
+}
+
+fn pin_order(row: &AggregateAgentRow<'_>) -> Option<u64> {
+    crate::fork_agent_pin::pin_order(&row.agent.tokens)
+}
+
+/// Fork: pinned agents lead an order that mixes machines, by machine and then
+/// pin order. Space order keeps each machine's own pinned run instead, from
+/// `ordered_agent_pane_ids`, so machine runs stay whole.
+fn pinned_first_across_machines(rows: &mut [AggregateAgentRow<'_>]) {
+    super::agent_sidebar::pinned_first(rows, |row| {
+        pin_order(row).map(|order| (row.endpoint.endpoint_index, order))
+    });
+}
+
+/// Fork: pinned agents lead each machine's run of a space-ordered list whose
+/// rows come in machine order.
+fn pinned_first_per_machine(rows: &mut [AggregateAgentRow<'_>]) {
+    rows.sort_by_key(|row| {
+        (
+            row.endpoint.endpoint_index,
+            pin_order(row).map_or((true, None), |order| (false, Some(order))),
+        )
+    });
 }
 
 fn ungathered_agent_rows<'a>(
@@ -169,10 +202,16 @@ fn ungathered_agent_rows<'a>(
                         &view.sort,
                     )
                 });
+                pinned_first_across_machines(&mut rows);
                 return rows;
             }
         }
         sort_aggregate_rows(&mut rows, sort);
+        if sort == crate::config::AgentPanelSortConfig::Priority {
+            pinned_first_across_machines(&mut rows);
+        } else {
+            pinned_first_per_machine(&mut rows);
+        }
         return rows;
     }
 
@@ -199,6 +238,9 @@ fn ungathered_agent_rows<'a>(
         })
         .collect::<Vec<_>>();
     sort_aggregate_rows(&mut rows, sort);
+    if sort == crate::config::AgentPanelSortConfig::Priority {
+        pinned_first_across_machines(&mut rows);
+    }
     rows
 }
 

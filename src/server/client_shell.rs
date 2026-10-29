@@ -161,6 +161,13 @@ pub(super) fn snapshot_with_completions(
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
+            // Fork: the pin rides in a reserved token; see `crate::fork_agent_pin`.
+            if let Some(order) = agent.pin_order {
+                tokens.push((
+                    crate::fork_agent_pin::PIN_TOKEN.to_owned(),
+                    order.to_string(),
+                ));
+            }
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
             protocol::ClientShellAgent {
                 pane_id,

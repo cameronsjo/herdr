@@ -508,6 +508,10 @@ of the whole list when the panel is not grouped. Every other agent keeps its
 place, so groups stay whole. It applies in **grouped** (space) order, including
 under an agent view; **priority** order already puts blocked agents first.
 
+Agents pinned with `herdr agent pin` lead the list in every order, under a
+`pinned` header when the panel is grouped, and `blocked_first` never moves an
+agent above them.
+
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 
 ```toml

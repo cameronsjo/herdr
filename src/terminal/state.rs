@@ -162,6 +162,9 @@ pub struct TerminalState {
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
     pub restore_error: Option<String>,
+    /// Fork: set while the agent is pinned to the top of the agents panel.
+    /// Lower values were pinned earlier. See `crate::fork_agent_pin`.
+    pub pin_order: Option<u64>,
 }
 
 impl TerminalState {
@@ -202,6 +205,7 @@ impl TerminalState {
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
             restore_error: None,
+            pin_order: None,
         }
     }
 

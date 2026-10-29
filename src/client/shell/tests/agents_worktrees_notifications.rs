@@ -1868,7 +1868,7 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
 }
 
 /// Two workspaces, two agent panes each, in space order.
-fn grouped_agents_snapshot() -> ClientShellSnapshot {
+pub(super) fn grouped_agents_snapshot() -> ClientShellSnapshot {
     let mut projected = snapshot();
     projected.workspaces[0].label = "alpha".into();
     projected.workspaces.push(ClientShellWorkspace {
@@ -1928,13 +1928,13 @@ fn grouped_agents_snapshot() -> ClientShellSnapshot {
     projected
 }
 
-fn grouped_config() -> Config {
+pub(super) fn grouped_config() -> Config {
     let mut config = Config::default();
     config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Workspace;
     config
 }
 
-fn frame_row(frame: &FrameData, rect: ratatui::layout::Rect, offset: u16) -> String {
+pub(super) fn frame_row(frame: &FrameData, rect: ratatui::layout::Rect, offset: u16) -> String {
     let y = usize::from(rect.y.saturating_add(offset));
     let start = y * usize::from(frame.width) + usize::from(rect.x);
     frame.cells[start..start + usize::from(rect.width)]
@@ -2112,7 +2112,7 @@ fn scrolling_into_a_run_keeps_headers_and_hit_rects_aligned() {
 /// `grouped_agents_snapshot` with `project=x` on the first agent of each
 /// workspace, so the token group spans both workspaces and is not adjacent
 /// in space order.
-fn token_agents_snapshot() -> ClientShellSnapshot {
+pub(super) fn token_agents_snapshot() -> ClientShellSnapshot {
     let mut projected = grouped_agents_snapshot();
     for agent in &mut projected.agents {
         if matches!(agent.pane_id.as_str(), "pane_1" | "pane_3") {
@@ -2122,13 +2122,13 @@ fn token_agents_snapshot() -> ClientShellSnapshot {
     projected
 }
 
-fn token_config() -> Config {
+pub(super) fn token_config() -> Config {
     let mut config = Config::default();
     config.ui.sidebar.agents.group_by = crate::config::AgentGroupBy::Token("project".into());
     config
 }
 
-fn agent_headers(state: &ClientShellState, frame: &FrameData) -> Vec<(String, String)> {
+pub(super) fn agent_headers(state: &ClientShellState, frame: &FrameData) -> Vec<(String, String)> {
     state
         .hits
         .agents

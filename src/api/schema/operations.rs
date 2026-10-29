@@ -177,6 +177,8 @@ mod tests {
             "layout.apply",
             "layout.set_split_ratio",
             "agent.rename",
+            "agent.pin",
+            "agent.unpin",
             "agent.view.set",
             "agent.view.clear",
             "agent.focus",
