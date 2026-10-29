@@ -3368,6 +3368,10 @@
             "pane_id": {
               "type": "string"
             },
+            "paste": {
+              "description": "Fork: wrap the text in bracketed paste when the pane has enabled\nit, so an agent's input reads it as one paste, not typing.",
+              "type": "boolean"
+            },
             "text": {
               "type": "string"
             }
@@ -9644,6 +9648,26 @@
             }
           ]
         },
+        "PromptDelivery": {
+          "description": "What herdr saw after writing a prompt into an agent's pane.\n\nHerdr cannot look inside the agent, so this is screen and status evidence,\nnot an acknowledgement from the agent.",
+          "oneOf": [
+            {
+              "const": "typed",
+              "description": "The agent was not working, and it started working or its screen\nshowed the prompt.",
+              "type": "string"
+            },
+            {
+              "const": "queued",
+              "description": "The agent was already working and its screen showed the prompt, so the\nagent holds it for after the current turn.",
+              "type": "string"
+            },
+            {
+              "const": "unknown",
+              "description": "Neither showed up in time. The bytes were written; a resend may\ndeliver the prompt twice.",
+              "type": "string"
+            }
+          ]
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -10063,6 +10087,17 @@
               "properties": {
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
+                },
+                "delivered": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/PromptDelivery"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Fork (cameronsjo/herdr#102): whether the prompt reached the\nagent's input. Absent from servers that do not check."
                 },
                 "type": {
                   "const": "agent_prompted",
