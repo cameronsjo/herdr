@@ -1,5 +1,6 @@
 pub mod client;
 mod event_hub;
+mod fork_prompt_delivery;
 pub mod schema;
 mod server;
 mod status;

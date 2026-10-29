@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use regex::Regex;
 
+use crate::api::fork_prompt_delivery::{with_delivery, DeliveryBaseline, PROMPT_DELIVERY_WINDOW};
 use crate::api::schema::{
     ErrorBody, ErrorResponse, EventData, EventEnvelope, EventKind, EventMatch, EventsWaitParams,
     Method, Request, ResponseResult, Subscription, SubscriptionEventData,
@@ -183,14 +184,34 @@ pub(super) fn prompt_agent(
     running: &Arc<AtomicBool>,
 ) -> std::io::Result<Option<String>> {
     let Some(wait) = params.wait.clone() else {
-        return Ok(Some(dispatch_to_app_with_timeout(
+        // Fork (cameronsjo/herdr#102): a target that cannot be read here gets
+        // the prompt's own error from the app, so it is dispatched unchanged.
+        let baseline = agent_get(&request_id, &params.target, api_tx)
+            .ok()
+            .map(|before| DeliveryBaseline::capture(&request_id, &before, &params.text, api_tx));
+        let target = params.target.clone();
+        let response = dispatch_to_app_with_timeout(
             Request {
-                id: request_id,
+                id: request_id.clone(),
                 method: Method::AgentPrompt(params),
             },
             api_tx,
             None,
-        )));
+        );
+        let Some(baseline) = baseline else {
+            return Ok(Some(response));
+        };
+        if agent_from_response(&request_id, &response).is_err() {
+            return Ok(Some(response));
+        }
+        let delivery = baseline.observe(
+            &request_id,
+            &target,
+            api_tx,
+            running,
+            std::time::Instant::now() + PROMPT_DELIVERY_WINDOW,
+        );
+        return Ok(Some(with_delivery(response, delivery)));
     };
 
     let wait_started = std::time::Instant::now();
@@ -210,6 +231,8 @@ pub(super) fn prompt_agent(
     };
     let prompt_started_working =
         before_prompt.agent_status == crate::api::schema::AgentStatus::Working;
+    let delivery_baseline =
+        DeliveryBaseline::capture(&request_id, &before_prompt, &params.text, api_tx);
     let target = params.target.clone();
     if let Some(prompt_wait) = params.wait.as_mut() {
         prompt_wait.submission_deadline = wait
@@ -240,6 +263,13 @@ pub(super) fn prompt_agent(
     ) {
         return agent_wait_not_running(request_id).map(Some);
     }
+    let delivery_deadline = std::time::Instant::now() + PROMPT_DELIVERY_WINDOW;
+    let delivery_deadline = wait
+        .timeout_ms
+        .map(|timeout_ms| wait_started + std::time::Duration::from_millis(timeout_ms))
+        .map_or(delivery_deadline, |timeout| timeout.min(delivery_deadline));
+    let delivery =
+        delivery_baseline.observe(&request_id, &target, api_tx, running, delivery_deadline);
 
     let prompt_activity_observed = prompt_started_working
         || matches!(
@@ -289,7 +319,7 @@ pub(super) fn prompt_agent(
         };
     }
     if agent_wait_matches(&initial, &until, None) {
-        return agent_prompt_success(request_id, initial).map(Some);
+        return agent_prompt_success(request_id, initial, delivery).map(Some);
     }
 
     let Some(outcome) = wait_for_resolved_agent(
@@ -318,7 +348,7 @@ pub(super) fn prompt_agent(
         AgentWaitOutcome::Matched(agent) => *agent,
         AgentWaitOutcome::Response(response) => return Ok(Some(response)),
     };
-    agent_prompt_success(request_id, agent).map(Some)
+    agent_prompt_success(request_id, agent, delivery).map(Some)
 }
 
 fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> Option<u64> {
@@ -331,10 +361,14 @@ fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> O
 fn agent_prompt_success(
     request_id: String,
     agent: crate::api::schema::AgentInfo,
+    delivery: crate::api::schema::PromptDelivery,
 ) -> std::io::Result<String> {
     serde_json::to_string(&SuccessResponse {
         id: request_id,
-        result: ResponseResult::AgentPrompted { agent },
+        result: ResponseResult::AgentPrompted {
+            agent,
+            delivered: Some(delivery),
+        },
     })
     .map_err(std::io::Error::other)
 }
