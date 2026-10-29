@@ -443,6 +443,10 @@ where
     Ok(rows_by_agent)
 }
 
+/// Pane metadata token holding an agent's one-line task, set by the fork's
+/// `herdr agent task` and drawn by the default agent rows as `$task`.
+pub const AGENT_TASK_TOKEN: &str = "task";
+
 /// How the expanded Agent sidebar panel groups its entries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -563,12 +567,19 @@ impl Default for AgentsSidebarConfig {
                     AgentSidebarToken::Tab,
                 ],
                 vec![AgentSidebarToken::Agent],
+                // Fork: the task an agent set with `herdr agent task`. A row
+                // whose tokens are all unset is dropped, so it costs no line
+                // until a task is set.
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
             ],
-            grouped_rows: vec![vec![
-                AgentSidebarToken::StateIcon,
-                AgentSidebarToken::Tab,
-                AgentSidebarToken::Agent,
-            ]],
+            grouped_rows: vec![
+                vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Tab,
+                    AgentSidebarToken::Agent,
+                ],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
+            ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             group_by: AgentGroupBy::None,
@@ -621,15 +632,19 @@ mod tests {
                     AgentSidebarToken::Tab,
                 ],
                 vec![AgentSidebarToken::Agent],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
             ]
         );
         assert_eq!(
             config.agents.grouped_rows,
-            vec![vec![
-                AgentSidebarToken::StateIcon,
-                AgentSidebarToken::Tab,
-                AgentSidebarToken::Agent,
-            ]]
+            vec![
+                vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Tab,
+                    AgentSidebarToken::Agent,
+                ],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
+            ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);

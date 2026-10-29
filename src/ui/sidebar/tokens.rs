@@ -269,6 +269,42 @@ mod tests {
     }
 
     #[test]
+    fn default_rows_draw_the_task_line_only_once_a_task_is_set() {
+        let config = AgentsSidebarConfig::default();
+        let mut entry = entry();
+        for grouped in [false, true] {
+            let rows = agent_rows(&config, context(&entry), "working", grouped);
+            assert!(
+                rows.iter()
+                    .flatten()
+                    .all(|token| !matches!(token.kind, ResolvedTokenKind::Custom(_))),
+                "grouped={grouped}"
+            );
+        }
+        let untasked = agent_rows(&config, context(&entry), "working", false).len();
+        entry.tokens.insert(
+            crate::config::AGENT_TASK_TOKEN.into(),
+            "fixing homelab#1093".into(),
+        );
+        for grouped in [false, true] {
+            let rows = agent_rows(&config, context(&entry), "working", grouped);
+            assert_eq!(
+                rows.last().map(|row| row.as_slice()),
+                Some(
+                    &[ResolvedToken::unstyled(ResolvedTokenKind::Custom(
+                        "fixing homelab#1093".into()
+                    ))][..]
+                ),
+                "grouped={grouped}"
+            );
+        }
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working", false).len(),
+            untasked + 1
+        );
+    }
+
+    #[test]
     fn conditional_styles_merge_first_match_and_keep_missing_values_absent() {
         let config: AgentsSidebarConfig = toml::from_str(r##"
 rows = [["state_icon", { token = "machine", fg = "#fff", bold = true, dim = true, rules = [{ equals = "Local", fg = "#f00", bold = false }, { contains = "Loc", fg = "#0f0", dim = false }] }], [{ token = "$missing", rules = [{ equals = "", bold = true }] }]]
