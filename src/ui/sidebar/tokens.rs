@@ -244,6 +244,24 @@ mod tests {
     }
 
     #[test]
+    fn location_token_resolves_only_outside_the_focused_workspace() {
+        let config: AgentsSidebarConfig = toml::from_str(r#"rows = [["location"]]"#).unwrap();
+        let mut entry = entry();
+        assert!(agent_rows(&config, context(&entry), "idle", false).is_empty());
+        for (tab, expected) in [(None, "repo"), (Some("review"), "repo · review")] {
+            entry.tab = tab.map(str::to_owned);
+            let mut context = context(&entry);
+            context.outside_focused_workspace = true;
+            assert_eq!(
+                agent_rows(&config, context, "idle", false),
+                vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                    expected.into()
+                ))]]
+            );
+        }
+    }
+
+    #[test]
     fn conditional_styles_merge_first_match_and_keep_missing_values_absent() {
         let config: AgentsSidebarConfig = toml::from_str(r##"
 rows = [["state_icon", { token = "machine", fg = "#fff", bold = true, dim = true, rules = [{ equals = "Local", fg = "#f00", bold = false }, { contains = "Loc", fg = "#0f0", dim = false }] }], [{ token = "$missing", rules = [{ equals = "", bold = true }] }]]

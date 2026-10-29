@@ -250,11 +250,11 @@ next sync is likely to conflict again:
 
 ### feat(sidebar): add a location token for agents outside the focused workspace
 
-- **PR:** _pending_
-- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `src/client/shell/tests/agents_worktrees_notifications.rs`, `docs/next/website/src/content/docs/{,ja/,zh-cn/}configuration.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-location-token` change)
+- **PR:** [cameronsjo/herdr#145](https://github.com/cameronsjo/herdr/pull/145)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `src/client/shell/tests/agents_worktrees_notifications.rs`, `docs/next/website/src/content/docs/{,ja/,zh-cn/}configuration.mdx`, the `DEFAULT_CONFIG` token list in `src/main.rs`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-location-token` change)
 - **Adds:** `AgentSidebarToken::Location`, written `location`. It resolves to a `Workspace`-styled `workspace · tab` (or the workspace alone when the tab label is hidden) when the agent's workspace is not the snapshot's `focused_workspace_id`, and to nothing otherwise. `AgentTokenContext` gains `outside_focused_workspace`. Defaults are unchanged. Client only.
 - **Collision:** the `AgentSidebarToken` enum and `agent_token_name` / parse table in `src/config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `src/ui/sidebar/tokens.rs`, and the context literal in `agent_row`.
-- **Regression check:** `cargo nextest run -E 'test(/location_token/)'`. Dropping the `outside_focused_workspace` gate reddens `location_token_names_workspace_and_tab_only_outside_the_focused_workspace` (the focused agent's row gains its workspace).
+- **Regression check:** `cargo nextest run -E 'test(/location_token/)'`; `location_token_resolves_only_outside_the_focused_workspace` covers the hidden-tab case. Dropping the `outside_focused_workspace` gate reddens `location_token_names_workspace_and_tab_only_outside_the_focused_workspace` (the focused agent's row gains its workspace).
 - **Render scaling:** one string comparison per agent row; the token formats a string only for configured, out-of-workspace agents.
 
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
