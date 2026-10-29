@@ -2424,17 +2424,23 @@ impl TerminalState {
         }
     }
 
+    /// The pane's border title. An agent name outranks the agent's own title,
+    /// which a session often derives from its first prompt, so a pane started
+    /// or renamed as `reviewer` reads `reviewer` everywhere it is drawn.
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
-        self.effective_title().or_else(|| {
-            self.manual_label.clone().or_else(|| {
-                show_agent_labels
-                    .then(|| {
-                        self.effective_display_agent()
-                            .or_else(|| self.effective_agent_label().map(str::to_string))
-                    })
-                    .flatten()
+        self.agent_name
+            .clone()
+            .or_else(|| self.effective_title())
+            .or_else(|| {
+                self.manual_label.clone().or_else(|| {
+                    show_agent_labels
+                        .then(|| {
+                            self.effective_display_agent()
+                                .or_else(|| self.effective_agent_label().map(str::to_string))
+                        })
+                        .flatten()
+                })
             })
-        })
     }
 
     fn recompute_effective_state(
@@ -4354,6 +4360,19 @@ mod tests {
         terminal.set_manual_label("reviewer".into());
         terminal.clear_manual_label();
         assert_eq!(terminal.border_label(true).as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn border_label_prefers_agent_name_over_every_other_label() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        terminal.set_manual_label("notes".into());
+        terminal.set_agent_name("reviewer".into());
+
+        assert_eq!(terminal.border_label(false).as_deref(), Some("reviewer"));
+
+        terminal.clear_agent_name();
+        assert_eq!(terminal.border_label(false).as_deref(), Some("notes"));
     }
 
     #[test]

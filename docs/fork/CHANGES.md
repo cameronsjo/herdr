@@ -300,6 +300,17 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run -E 'test(/pane_frame/) | test(/agent_row_click/) | test(/pane_dragged_onto/)'`. Live: in a two-pane tab, drag one pane's top border onto the other; the target is outlined, and on release the panes trade places.
 - **Render scaling:** the overlay pass runs only while a pane drag has a pane target, once per frame, over one pane's outline.
 
+## One name follows one agent (issue [#97](https://github.com/cameronsjo/herdr/issues/97))
+
+### feat: keep tab labels, pane labels and the pane title in sync with the agent name
+
+- **PR:** (pending)
+- **Files:** `src/app/agents.rs`, `src/app/api/tabs.rs`, `src/terminal/state.rs`, tests in `src/app/api/agents.rs`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/labels/spec.md` (via the archived `sync-agent-name-labels` change)
+- **Replaces:** upstream's pane border, which puts the agent's reported title over everything, and upstream's independent tab and agent names. A named agent now titles its pane. A tab holding exactly one named agent follows its name while auto-named or labeled with it: `agent start` and `agent rename` relabel it, and `tab rename` to a valid, free agent name renames the agent. A pane label equal to the old name follows `agent rename`. A label that differs is left alone, so upstream's `agent_rename_does_not_replace_the_pane_label` still passes. The sidebar half of #97 is the `name` token.
+- **Collision:** `rename_agent_target` and `start_agent` in `agents.rs`, `handle_tab_rename` (now split into `set_tab_label`) in `tabs.rs`, and `TerminalState::border_label`.
+- **Regression check:** `cargo nextest run -E 'test(/agent_rename|tab_rename|border_label/)'`. Live: `herdr tab create --label w1`, `herdr agent start w1 --kind claude --pane <its pane>`, `herdr agent rename w1 w2`; the tab and the pane border both read `w2`.
+- **Render scaling:** not affected; `border_label` checks one more field per drawn border.
+
 ## Codex state comes from screen detection only, as upstream (issue [#114](https://github.com/cameronsjo/herdr/issues/114))
 
 ### fix: drop the Codex state hooks and keep the title hook

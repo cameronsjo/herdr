@@ -1103,6 +1103,191 @@ mod tests {
         }
     }
 
+    fn name_agent(app: &mut App, pane_id: crate::layout::PaneId, name: &str) {
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        terminal.set_agent_name(name.into());
+    }
+
+    fn rename_agent(app: &mut App, target: &str, name: &str) {
+        let response = app.handle_agent_rename(
+            "req".into(),
+            AgentRenameParams {
+                target: target.into(),
+                name: Some(name.into()),
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(matches!(success.result, ResponseResult::AgentInfo { .. }));
+    }
+
+    fn rename_tab(app: &mut App, label: &str) {
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+        let response = app.handle_tab_rename(
+            "req".into(),
+            crate::api::schema::TabRenameParams {
+                tab_id,
+                label: label.into(),
+            },
+        );
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+    }
+
+    fn agent_name_of(app: &App, pane_id: crate::layout::PaneId) -> Option<String> {
+        let terminal_id = &app.state.workspaces[0].tabs[0].panes[&pane_id].attached_terminal_id;
+        app.state.terminals[terminal_id].agent_name.clone()
+    }
+
+    #[test]
+    fn agent_rename_carries_a_tab_label_that_spells_the_old_name() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("cos-cadence".into());
+        name_agent(&mut app, pane_id, "cos-cadence");
+
+        rename_agent(&mut app, "cos-cadence", "cos-forge");
+
+        assert_eq!(
+            app.state.workspaces[0].tab_display_name(0).as_deref(),
+            Some("cos-forge")
+        );
+    }
+
+    #[test]
+    fn agent_rename_names_an_auto_named_tab() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_agent(&mut app, "reviewer", "planner");
+
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("planner")
+        );
+    }
+
+    #[test]
+    fn agent_rename_keeps_a_tab_label_of_the_users_own() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("backend".into());
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_agent(&mut app, "reviewer", "planner");
+
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("backend")
+        );
+    }
+
+    #[test]
+    fn agent_rename_leaves_a_tab_with_two_named_agents_alone() {
+        let mut app = app_with_agent();
+        let first = app.state.workspaces[0].tabs[0].root_pane;
+        let second = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        name_agent(&mut app, first, "reviewer");
+        name_agent(&mut app, second, "planner");
+
+        rename_agent(&mut app, "reviewer", "critic");
+
+        assert_eq!(app.state.workspaces[0].tabs[0].custom_name, None);
+    }
+
+    #[test]
+    fn agent_rename_carries_a_pane_label_that_spells_the_old_name() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        name_agent(&mut app, pane_id, "reviewer");
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_manual_label("reviewer".into());
+
+        rename_agent(&mut app, "reviewer", "planner");
+
+        assert_eq!(
+            app.state.terminals[&terminal_id].manual_label.as_deref(),
+            Some("planner")
+        );
+    }
+
+    #[test]
+    fn tab_rename_renames_the_tabs_only_named_agent() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("reviewer".into());
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_tab(&mut app, "planner");
+
+        assert_eq!(agent_name_of(&app, pane_id).as_deref(), Some("planner"));
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("planner")
+        );
+    }
+
+    #[test]
+    fn tab_rename_to_a_label_no_agent_may_carry_renames_only_the_tab() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_tab(&mut app, "Code Review");
+
+        assert_eq!(agent_name_of(&app, pane_id).as_deref(), Some("reviewer"));
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("Code Review")
+        );
+    }
+
+    #[test]
+    fn tab_rename_leaves_an_agent_under_a_label_of_the_users_own() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("backend".into());
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_tab(&mut app, "planner");
+
+        assert_eq!(agent_name_of(&app, pane_id).as_deref(), Some("reviewer"));
+    }
+
+    #[test]
+    fn tab_rename_to_a_taken_name_renames_only_the_tab() {
+        let mut app = app_with_agent();
+        app.state.workspaces.push(Workspace::test_new("other"));
+        app.state.ensure_test_terminals();
+        let first = app.state.workspaces[0].tabs[0].root_pane;
+        name_agent(&mut app, first, "reviewer");
+        let elsewhere = app.state.workspaces[1].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[1].tabs[0].panes[&elsewhere]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+        terminal.set_agent_name("planner".into());
+
+        rename_tab(&mut app, "planner");
+
+        assert_eq!(agent_name_of(&app, first).as_deref(), Some("reviewer"));
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("planner")
+        );
+    }
+
     #[test]
     fn agent_name_stops_routing_once_no_agent_backs_it() {
         let mut app = app_with_agent();

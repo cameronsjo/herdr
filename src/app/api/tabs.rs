@@ -153,6 +153,40 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
             return tab_not_found(id, &params.tab_id);
         };
+        // Read the link before the label changes: the tab's only named agent
+        // follows the rename while the tab is auto-named or carries its name.
+        let linked_agent = self
+            .sole_named_agent_in_tab(ws_idx, tab_idx)
+            .filter(|(_, name)| {
+                self.state.workspaces[ws_idx].tabs[tab_idx]
+                    .custom_name
+                    .as_deref()
+                    .is_none_or(|label| label == name)
+            });
+        self.set_tab_label(ws_idx, tab_idx, params.label.clone());
+        if let Some((pane_id, name)) = linked_agent {
+            // Checked on the raw label, as every agent-name path is. A label
+            // that is no valid or free agent name renames only the tab.
+            if params.label != name && crate::label::valid_agent_name(&params.label) {
+                if let Some(target) = self.public_pane_id(ws_idx, pane_id) {
+                    if self
+                        .rename_agent_target(&target, Some(params.label))
+                        .is_err()
+                    {
+                        tracing::info!(pane = %target, "tab rename left the agent name unchanged");
+                    }
+                }
+            }
+        }
+        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
+
+        encode_success(id, ResponseResult::TabInfo { tab })
+    }
+
+    /// Stores a tab label and announces it. Sanitized once and reused: the
+    /// event must carry what was actually stored, or subscribers receive the
+    /// unfiltered string.
+    pub(crate) fn set_tab_label(&mut self, ws_idx: usize, tab_idx: usize, label: String) {
         let workspace_id = self.state.workspaces[ws_idx].id.clone();
         let tab_id = self.public_tab_id(ws_idx, tab_idx).unwrap_or_else(|| {
             crate::workspace::public_tab_id_for_number(&workspace_id, tab_idx + 1)
@@ -163,25 +197,20 @@ impl App {
             .get_mut(ws_idx)
             .and_then(|ws| ws.tabs.get_mut(tab_idx))
         else {
-            return tab_not_found(id, &params.tab_id);
+            return;
         };
-        // Sanitize once and reuse: the event must carry what was actually
-        // stored, or subscribers receive the unfiltered string.
-        let label = sanitize_label(params.label.clone());
+        let label = sanitize_label(label);
         tab.set_custom_name(label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         self.schedule_session_save();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
             data: EventData::TabRenamed {
-                tab_id: self.public_tab_id(ws_idx, tab_idx).unwrap(),
+                tab_id,
                 workspace_id: self.public_workspace_id(ws_idx),
                 label,
             },
         });
-        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
-
-        encode_success(id, ResponseResult::TabInfo { tab })
     }
 
     pub(super) fn handle_tab_move(&mut self, id: String, params: TabMoveParams) -> String {
