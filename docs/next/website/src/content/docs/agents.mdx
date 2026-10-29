@@ -154,6 +154,8 @@ herdr pane report-metadata w1:p1 \
 
 Agent sidebar rows can also opt into `terminal_title` or `terminal_title_stripped`; neither appears in the default rows. The first shows the latest safety-normalized OSC 0/2 terminal title. The second removes one recognized leading activity or spinner glyph and following whitespace. Herdr owns these values on the server; they are ephemeral across a cold restart and remain independent of metadata titles and semantic agent state. Spinner animation can therefore update the raw title without producing a pane update when the stripped text stays the same.
 
+Rows can also opt into `name`, which shows only the agent's herdr name (the one `agent start <name>` or `agent rename` sets) and is left out for an unnamed agent. The `agent` token prefers a display name over it, so `["name", "agent"]` shows both.
+
 ## Attach directly to an agent
 
 Attach your current terminal to one agent terminal instead of the full Herdr UI:

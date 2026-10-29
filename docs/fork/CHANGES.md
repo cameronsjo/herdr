@@ -251,7 +251,7 @@ next sync is likely to conflict again:
 ### feat: add a name token to agent sidebar rows
 
 - **PR:** [cameronsjo/herdr#146](https://github.com/cameronsjo/herdr/pull/146)
-- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `sidebar-name-token` change)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `sidebar-name-token` change)
 - **Adds:** `AgentSidebarToken::Name` (`"name"`), resolved from the agent's herdr name only through a new `agent_name` field on `AgentTokenContext`, and drawn as `ResolvedTokenKind::Agent` so it styles like `agent`. Omitted for an unnamed agent. `agent` (display name, then name, kind, title) and the default rows are unchanged, so herdr-bridge's `claude · <session>` display still shows; `["name", "agent"]` puts the herdr name beside it.
 - **Collision:** the `AgentSidebarToken` enum and its name/parse tables in `config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `ui/sidebar/tokens.rs`, and the `AgentTokenContext` construction in `agent_row`.
 - **Regression check:** `cargo nextest run -E 'test(/name_token/) | test(parses_builtin_and_arbitrary_custom_tokens)'`. Live: with `rows = [["state_icon", "name", "agent"]]`, an agent started as `cos-cadence` shows `cos-cadence · claude · <branch>`.
