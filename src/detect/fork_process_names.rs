@@ -45,7 +45,7 @@ pub(crate) fn extra_process_names(
         };
         for entry in entries {
             let name = super::normalized_agent_lookup_name(entry);
-            if name.is_empty() || name.contains(['/', '\\']) {
+            if name.is_empty() || name.starts_with('-') || name.contains(['/', '\\']) {
                 diagnostics.push(format!(
                     "invalid process name `{entry}` for `{kind}` in [advanced] agent_process_names; use a bare executable name"
                 ));
@@ -78,10 +78,12 @@ pub(crate) fn extra_process_names(
                 None => {
                     // Linux reports a process name cut to 15 bytes, so a longer
                     // configured name also matches its cut form.
-                    if let Some(cut) = name.get(..LINUX_COMM_MAX_BYTES) {
-                        if name.len() > LINUX_COMM_MAX_BYTES && super::parse_agent_label(cut).is_none() {
-                            names.entry(cut.to_string()).or_insert(agent);
-                        }
+                    let cut = name
+                        .get(..LINUX_COMM_MAX_BYTES)
+                        .filter(|cut| cut.len() < name.len())
+                        .filter(|cut| super::parse_agent_label(cut).is_none());
+                    if let Some(cut) = cut {
+                        names.entry(cut.to_string()).or_insert(agent);
                     }
                     names.insert(name, agent);
                 }
@@ -109,6 +111,12 @@ fn is_shell_or_launcher(name: &str) -> bool {
                 | "screen"
                 | "deno"
                 | "npx"
+                | "npm"
+                | "pnpm"
+                | "yarn"
+                | "uv"
+                | "uvx"
+                | "pipx"
                 | "bunx"
                 | "env"
                 | "sudo"
@@ -183,7 +191,10 @@ mod tests {
     #[test]
     fn extra_process_names_reports_and_drops_bad_entries() {
         let (names, diagnostics) = extra_process_names(&config(&[
-            ("claude", &["codex", "", "bin/cc", "claude-code", "shared"]),
+            (
+                "claude",
+                &["codex", "", "bin/cc", "-zsh", "claude-code", "shared"],
+            ),
             ("codex", &["shared"]),
             ("not-a-kind", &["whatever"]),
         ]));
@@ -193,13 +204,14 @@ mod tests {
         assert!(joined.contains("`codex` in [advanced] agent_process_names already names `codex`"));
         assert!(joined.contains("invalid process name `` for `claude`"));
         assert!(joined.contains("invalid process name `bin/cc` for `claude`"));
+        assert!(joined.contains("invalid process name `-zsh` for `claude`"));
         assert!(joined.contains("listed under `claude` and `codex`; keeping `claude`"));
         assert!(joined.contains("unknown agent kind `not-a-kind`"));
         assert!(
             !joined.contains("claude-code"),
             "a built-in alias of the same kind is accepted silently"
         );
-        assert_eq!(diagnostics.len(), 5, "{diagnostics:?}");
+        assert_eq!(diagnostics.len(), 6, "{diagnostics:?}");
     }
 
     #[test]
