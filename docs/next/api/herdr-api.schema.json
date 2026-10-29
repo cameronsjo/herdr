@@ -3368,6 +3368,10 @@
             "pane_id": {
               "type": "string"
             },
+            "paste": {
+              "description": "Fork: wrap the text in bracketed paste when the pane has enabled\nit, so an agent's input reads it as one paste, not typing.",
+              "type": "boolean"
+            },
             "text": {
               "type": "string"
             }
