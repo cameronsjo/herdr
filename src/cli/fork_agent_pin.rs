@@ -74,6 +74,12 @@ pub(super) fn take_start_pin(args: &[String]) -> (Vec<String>, bool) {
 /// Runs `herdr agent pin` (`pin = true`) or `herdr agent unpin`.
 pub(super) fn agent_pin(args: &[String], pin: bool) -> std::io::Result<i32> {
     let usage = if pin { PIN_USAGE } else { UNPIN_USAGE };
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        let [pin_command, unpin_command] = commands();
+        let mut command = if pin { pin_command } else { unpin_command };
+        println!("{}", command.render_help());
+        return Ok(0);
+    }
     let target = match parse_target(args, super::target::caller_pane_id()) {
         Ok(target) => target,
         Err(message) => {

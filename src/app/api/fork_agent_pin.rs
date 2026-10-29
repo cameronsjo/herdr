@@ -10,6 +10,10 @@ impl App {
     /// Pins or unpins the target agent. Pinning an agent that is already
     /// pinned keeps its place, and unpinning one that is not pinned is a no-op;
     /// both report the agent as it stands.
+    ///
+    /// Unpin also takes a pane id whose agent is no longer detected, so a pin
+    /// left behind by detection uncertainty can always be removed; it clears
+    /// the pin and still reports `agent_not_found`.
     pub(super) fn handle_agent_pin(
         &mut self,
         id: String,
@@ -18,7 +22,12 @@ impl App {
     ) -> String {
         let resolved = match self.resolve_agent_target(&target.target) {
             Ok(resolved) => resolved,
-            Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
+            Err(err) => {
+                if !pin {
+                    self.clear_pin_on_pane(&target.target);
+                }
+                return encode_error_body(id, self.agent_target_error_body(err));
+            }
         };
         let next = crate::fork_agent_pin::next_pin_order(
             self.state
@@ -61,6 +70,24 @@ impl App {
                     target: target.target,
                 }),
             ),
+        }
+    }
+
+    fn clear_pin_on_pane(&mut self, target: &str) {
+        let Some((ws_idx, pane_id)) = self.parse_current_public_pane_id(target) else {
+            return;
+        };
+        let terminal_id = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone());
+        let Some(terminal) = terminal_id.and_then(|id| self.state.terminals.get_mut(&id)) else {
+            return;
+        };
+        if terminal.pin_order.take().is_some() {
+            self.emit_pane_updated(ws_idx, pane_id);
         }
     }
 }
@@ -131,6 +158,37 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>(),
             [2, 3].into(),
         );
+    }
+
+    #[test]
+    fn unpin_clears_a_pin_left_on_a_pane_whose_agent_is_gone() {
+        let mut app = app_with_two_agents();
+        assert_eq!(pin_order(&mut app, 0, true), Some(1));
+        let target = target(&app, 0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(None, AgentState::Unknown);
+
+        let response = app.handle_agent_pin("req".into(), target, false);
+        let error: ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "agent_not_found");
+        assert_eq!(app.state.terminals[&terminal_id].pin_order, None);
+    }
+
+    #[test]
+    fn a_respawned_terminal_drops_its_pin() {
+        let mut app = app_with_two_agents();
+        assert_eq!(pin_order(&mut app, 0, true), Some(1));
+        for terminal in app.state.terminals.values_mut() {
+            terminal.clear_agent_runtime_identity_after_respawn();
+        }
+        assert!(app.state.terminals.values().all(|t| t.pin_order.is_none()));
     }
 
     #[test]

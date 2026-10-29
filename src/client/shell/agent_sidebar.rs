@@ -116,6 +116,10 @@ fn is_pinned(agent: &ClientShellAgent) -> bool {
 /// in one leading run, so the hit-test, scrolling and agent navigation see the
 /// pinned agents where they are drawn.
 pub(super) fn pinned_first<T, O: Ord>(items: &mut [T], order: impl Fn(&T) -> Option<O>) {
+    // Most panels pin nothing; skip the sort for them.
+    if !items.iter().any(|item| order(item).is_some()) {
+        return;
+    }
     // Unpinned items share one key, and `sort_by_key` is stable.
     items.sort_by_key(|item| match order(item) {
         Some(order) => (false, Some(order)),

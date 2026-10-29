@@ -162,6 +162,8 @@ pub(super) fn snapshot_with_completions(
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
             // Fork: the pin rides in a reserved token; see `crate::fork_agent_pin`.
+            // Only the server sets it, so any reported copy is dropped first.
+            tokens.retain(|(key, _)| key != crate::fork_agent_pin::PIN_TOKEN);
             if let Some(order) = agent.pin_order {
                 tokens.push((
                     crate::fork_agent_pin::PIN_TOKEN.to_owned(),
@@ -789,6 +791,43 @@ mod tests {
         app.state.integration_recommendations[0].state =
             crate::integration::IntegrationStatusKind::Outdated;
         assert!(snapshot(&app, "boot", 2, None, None).integration_updates_available);
+    }
+
+    #[test]
+    fn snapshot_carries_an_agent_pin_as_the_reserved_token() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("pinned")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        for terminal in app.state.terminals.values_mut() {
+            terminal.set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+            terminal.pin_order = Some(4);
+        }
+
+        let snapshot = snapshot(&app, "boot", 1, None, None);
+
+        let [agent] = &snapshot.agents[..] else {
+            panic!("expected one agent, got {:?}", snapshot.agents);
+        };
+        assert_eq!(crate::fork_agent_pin::pin_order(&agent.tokens), Some(4));
+        assert_eq!(
+            agent
+                .tokens
+                .iter()
+                .filter(|(key, _)| key == crate::fork_agent_pin::PIN_TOKEN)
+                .count(),
+            1
+        );
     }
 
     #[test]

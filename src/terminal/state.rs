@@ -642,6 +642,8 @@ impl TerminalState {
         // leaves the pane - a recorded exit with no agent detected any more.
         if agent.is_none() && self.recent_agent_process_exit.is_some() {
             self.clear_agent_name();
+            // Fork: a pin is the agent's, so it goes with the agent too.
+            self.pin_order = None;
         }
         let effective_state_change = self.recompute_effective_state(
             previous_agent_label,
@@ -2356,6 +2358,7 @@ impl TerminalState {
     }
 
     pub fn clear_agent_runtime_identity_after_respawn(&mut self) {
+        self.pin_order = None;
         self.detected_agent = None;
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
@@ -5998,6 +6001,36 @@ mod tests {
             "the name must still resolve once the agent is observed alive again"
         );
         assert_eq!(terminal.detected_agent, Some(Agent::Pi));
+    }
+
+    #[test]
+    fn a_pin_goes_with_its_agent_but_not_on_a_mere_exit_observation() {
+        let now = Instant::now();
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
+        terminal.pin_order = Some(1);
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            now,
+        );
+        assert_eq!(terminal.pin_order, Some(1));
+
+        terminal.set_detected_state_with_screen_signals_at(
+            None,
+            AgentState::Unknown,
+            false,
+            false,
+            false,
+            false,
+            now + Duration::from_secs(1),
+        );
+        assert_eq!(terminal.pin_order, None);
     }
 
     #[test]

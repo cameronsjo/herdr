@@ -113,10 +113,13 @@ fn pin_order(row: &AggregateAgentRow<'_>) -> Option<u64> {
 
 /// Fork: pinned agents lead an order that mixes machines, by machine and then
 /// pin order. Space order keeps each machine's own pinned run instead, from
-/// `ordered_agent_pane_ids`, so machine runs stay whole.
+/// `ordered_agent_pane_ids`, so machine runs stay whole. A disconnected
+/// machine's pins stay where the sort put them, after the live agents.
 fn pinned_first_across_machines(rows: &mut [AggregateAgentRow<'_>]) {
     super::agent_sidebar::pinned_first(rows, |row| {
-        pin_order(row).map(|order| (row.endpoint.endpoint_index, order))
+        pin_order(row)
+            .filter(|_| !row.endpoint.stale())
+            .map(|order| (row.endpoint.endpoint_index, order))
     });
 }
 

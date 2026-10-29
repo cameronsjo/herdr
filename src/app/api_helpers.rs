@@ -305,6 +305,8 @@ mod metadata_token_tests {
     fn token_normalization_rejects_invalid_or_unbounded_keys() {
         for key in [
             "bad.name".to_string(),
+            // Fork: a colon would let a reporter set the reserved pin token.
+            crate::fork_agent_pin::PIN_TOKEN.to_string(),
             "x".repeat(MAX_METADATA_TOKEN_KEY_LEN + 1),
         ] {
             assert!(normalize_metadata_tokens(std::collections::HashMap::from([(
