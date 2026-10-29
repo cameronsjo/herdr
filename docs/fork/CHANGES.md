@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `pane focus <pane_id>` jumps to a pane from anywhere (issue [#94](https://github.com/cameronsjo/herdr/issues/94), Linear CAM-433)
+
+### feat: jump to a pane by id with pane focus
+
+- **PR:** (pending)
+- **Files:** `src/cli/pane.rs`, `src/cli/pane/bindings.rs`, `src/cli/spec.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-focus/spec.md` (via the archived `pane-focus-jump` change)
+- **Adds:** a positional pane id on `pane focus`, which sends the existing `pane.focus` (it switches workspace and tab before focusing). `--direction` is now required unless a pane id is given, and still sends `pane.focus_direction`; a pane id cannot be combined with `--direction`, `--pane` or `--current`. CLI only, so a candidate to offer upstream.
+- **Collision:** the `focus` leaf in `bindings.rs` (now a hand-built `Leaf` with `focus_arguments`/`focus` in `pane.rs`) and the dropped `pane focus` row in `spec_marks_runtime_required_options_as_required`.
+- **Regression check:** `cargo nextest run -E 'test(/pane_focus/)'`. Live: from workspace 1, `herdr pane focus <pane in workspace 2>` lands on that pane.
+- **Render scaling:** not affected; CLI parsing only.
+
 ## `pane send-text --paste` sends a bracketed paste (issue [#121](https://github.com/cameronsjo/herdr/issues/121), Linear CAM-432)
 
 ### feat: opt-in bracketed paste for pane send-text
