@@ -190,6 +190,24 @@ impl App {
         }
     }
 
+    pub(super) fn handle_pane_peek(&mut self, id: String, target: PaneTarget) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
+            return pane_not_found(id, &target.pane_id);
+        };
+        match self.open_peek_popup(ws_idx, pane_id) {
+            Ok(()) => encode_success(id, ResponseResult::Ok {}),
+            Err(crate::app::popup::PeekOpenError::PaneNotFound) => {
+                pane_not_found(id, &target.pane_id)
+            }
+            Err(crate::app::popup::PeekOpenError::PaneVisible) => {
+                encode_error(id, "pane_visible", "pane is in the current tab")
+            }
+            Err(crate::app::popup::PeekOpenError::PopupOpen) => {
+                encode_error(id, "popup_open", "another popup is open")
+            }
+        }
+    }
+
     pub(super) fn handle_pane_scroll(&mut self, id: String, params: PaneScrollParams) -> String {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
             return pane_not_found(id, &params.pane_id);

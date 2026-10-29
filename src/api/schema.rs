@@ -158,6 +158,8 @@ operations::define_operations! {
     PluginPaneOpen(PluginPaneOpenParams) => "plugin.pane.open", true, true;
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
+    PanePeek(PaneTarget) => "pane.peek", true, false;
+    PanePeekClose(EmptyParams) => "pane.peek_close", true, false;
 }
 
 #[cfg(test)]

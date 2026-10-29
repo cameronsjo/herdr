@@ -515,12 +515,15 @@ fn render_popup_surface(
     let (buffer, cursor) =
         crate::server::render_stream::render_terminal_virtual(runtime, content_area);
     let hyperlinks = runtime.visible_hyperlinks(content_area);
-    let title = app
-        .state
-        .terminals
-        .get(&popup.terminal_id)
-        .and_then(|terminal| terminal.manual_label.clone())
-        .unwrap_or_else(|| "popup".to_owned());
+    let title = match &popup.peek {
+        Some(peek) => format!("peek: {}", peek.label),
+        None => app
+            .state
+            .terminals
+            .get(&popup.terminal_id)
+            .and_then(|terminal| terminal.manual_label.clone())
+            .unwrap_or_else(|| "popup".to_owned()),
+    };
     let (pixel_width, pixel_height) = if cell_size.is_known() {
         (
             u32::from(content_area.width) * cell_size.width_px,

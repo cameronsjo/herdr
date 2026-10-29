@@ -217,6 +217,23 @@ pub(super) fn apply_client_pane_input_events(
     Ok(keyboard_forwarded)
 }
 
+/// The first press of a prefix key in a batch of popup input. The prefix
+/// closes a peek, so it and everything after it stay out of the peeked pane.
+pub(super) fn first_prefix_press(
+    events: &[ClientPaneInputEvent],
+    keybindings: &crate::config::LiveKeybindConfig,
+) -> Option<usize> {
+    events.iter().position(|event| {
+        matches!(event, ClientPaneInputEvent::Key { .. })
+            && match event.to_raw_input_event() {
+                crate::raw_input::RawInputEvent::Key(key) => {
+                    key.kind == KeyEventKind::Press && keybindings.matches_prefix(&key)
+                }
+                _ => false,
+            }
+    })
+}
+
 pub(super) fn apply_client_popup_input_events(
     runtime: &crate::terminal::TerminalRuntime,
     events: &[ClientPaneInputEvent],

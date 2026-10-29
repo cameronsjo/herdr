@@ -370,6 +370,22 @@ impl ClientConnection {
         }
     }
 
+    /// Releases owed for presses this shell forwarded to one target.
+    pub(crate) fn drain_shell_held_inputs_for(
+        &mut self,
+        target: &ClientShellInputTarget,
+    ) -> Vec<ClientShellHeldInput> {
+        let ids = self
+            .shell_held_inputs
+            .iter()
+            .filter(|(_, held)| held.target == *target)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        ids.into_iter()
+            .filter_map(|id| self.shell_held_inputs.remove(&id))
+            .collect()
+    }
+
     pub(crate) fn drain_shell_held_inputs(&mut self) -> Vec<ClientShellHeldInput> {
         self.shell_held_inputs
             .drain()
