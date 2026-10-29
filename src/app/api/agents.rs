@@ -1206,6 +1206,90 @@ mod tests {
     }
 
     #[test]
+    fn agent_rename_announces_the_tab_label_it_carries() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("agent")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("reviewer".into());
+        name_agent(&mut app, pane_id, "reviewer");
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+
+        rename_agent(&mut app, "reviewer", "planner");
+
+        assert!(event_hub.events_after(0).iter().any(|(_, event)| matches!(
+            &event.data,
+            crate::api::schema::EventData::TabRenamed { tab_id: renamed, label, .. }
+                if renamed == &tab_id && label == "planner"
+        )));
+    }
+
+    #[test]
+    fn agent_name_clear_leaves_every_label() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state.workspaces[0].tabs[0].set_custom_name("reviewer".into());
+        name_agent(&mut app, pane_id, "reviewer");
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_manual_label("reviewer".into());
+        let target = app.public_pane_id(0, pane_id).unwrap();
+
+        let response =
+            app.handle_agent_rename("req".into(), AgentRenameParams { target, name: None });
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("reviewer")
+        );
+        assert_eq!(
+            app.state.terminals[&terminal_id].manual_label.as_deref(),
+            Some("reviewer")
+        );
+    }
+
+    #[test]
+    fn tab_rename_leaves_the_agent_name() {
+        let mut app = app_with_agent();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state.workspaces[0].tabs[0].set_custom_name("reviewer".into());
+        name_agent(&mut app, pane_id, "reviewer");
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+
+        let response = app.handle_tab_rename(
+            "req".into(),
+            crate::api::schema::TabRenameParams {
+                tab_id,
+                label: "planner".into(),
+            },
+        );
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(
+            app.state.terminals[&terminal_id].agent_name.as_deref(),
+            Some("reviewer")
+        );
+    }
+
+    #[test]
     fn agent_name_stops_routing_once_no_agent_backs_it() {
         let mut app = app_with_agent();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;

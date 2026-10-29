@@ -87,12 +87,12 @@ When `agent.rename` renames the only pane in a tab whose agent name routes to a 
 - **THEN** the pane's label is `planner`
 
 ### Requirement: A live named agent titles its pane
-While a pane's agent name routes to a live agent, its border title SHALL be its pane label when it has one, else its agent name, ahead of the title the agent reports. Once no live agent backs the name, the border MUST fall back to upstream's order: reported title, pane label, then agent kind when enabled.
+While a pane's agent name routes to a live agent, its border title SHALL be its pane label when it has one, else its agent name, ahead of any reported title. Once no live agent backs the name, the border MUST fall back to upstream's order: reported title, pane label, then agent kind when enabled.
 
 #### Scenario: Named agent with a session title
 - **WHEN** a pane hosts a live agent named `reviewer` whose hooks report the title `Brief task execution`
 - **THEN** the pane's border reads `reviewer`
 
 #### Scenario: Agent has left
-- **WHEN** the agent named `reviewer` has exited and the pane is a shell again
+- **WHEN** the agent named `reviewer`, in a pane with no label, has exited and the pane is a shell again
 - **THEN** the pane's border no longer reads `reviewer`

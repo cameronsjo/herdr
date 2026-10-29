@@ -135,7 +135,10 @@ impl App {
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
-        if let (Some(previous_name), Some(name)) = (previous_name, normalized_name) {
+        if let Some((previous_name, name)) = previous_name
+            .zip(normalized_name)
+            .filter(|(previous, name)| previous != name)
+        {
             self.sync_tab_label_to_agent_name(
                 resolved.ws_idx,
                 resolved.pane_id,
