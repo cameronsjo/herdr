@@ -11,7 +11,7 @@ pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
-const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be a path containing a /, made of ASCII letters, digits and _ . / : + -, starting with a letter, digit, _ . or /";
+const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be a path to a program: it contains a /, uses only ASCII letters, digits and _ . / : + -, starts with a letter, _, /, ./ or ../, and does not end in /, . or ..";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
 
 impl App {
@@ -572,14 +572,23 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
 }
 
 /// Fork (#110): `exec` is typed as the command word in every pane shell, so
-/// it is limited to characters no supported shell quotes or expands, starts
-/// like a program name (not `-`, `=`, `%` or `@`), and holds a `/`. Shells
-/// skip their builtins, functions and aliases for a word with a `/`, so `exit`
-/// or `eval` can never run in place of a program. A path with spaces or `~`
-/// can go through a symlink.
+/// it is limited to characters no supported shell quotes or expands, and is a
+/// path: it holds a `/` and starts with a letter, `_`, `/`, `./` or `../`. No
+/// builtin name holds a `/`, so `exit` or `eval` can never run in its place,
+/// and a leading digit would be arithmetic in PowerShell. A path that ends in
+/// `/`, `.` or `..` names a directory, which fish and auto-cd shells read as a
+/// `cd`, so it is refused. A function or alias the user names with a `/` can
+/// still shadow the path in zsh or bash. A path with spaces or `~` can go
+/// through a symlink.
 fn valid_agent_exec(exec: &str) -> bool {
+    let starts_like_a_path = exec
+        .starts_with(|ch: char| ch.is_ascii_alphabetic() || matches!(ch, '_' | '/'))
+        || exec.starts_with("./")
+        || exec.starts_with("../");
+    let last = exec.rsplit('/').next().unwrap_or_default();
     exec.contains('/')
-        && exec.starts_with(|ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/'))
+        && starts_like_a_path
+        && !matches!(last, "" | "." | "..")
         && exec
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | ':' | '+' | '-'))

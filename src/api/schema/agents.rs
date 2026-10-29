@@ -212,9 +212,9 @@ cli_params! {
             .input(bindings::agent_env()),
         /// Fork: the path of the executable to launch in place of the kind's
         /// default. It must contain a `/` and only ASCII letters, digits and
-        /// `_ . / : + -`, starting with a letter, digit, `_`, `.` or `/`, so
-        /// every shell runs it as a program, never a builtin such as `exit`;
-        /// use a symlink for other paths. Detection
+        /// `_ . / : + -`, start with a letter, `_`, `/`, `./` or `../`, and not
+        /// end in `/`, `.` or `..`, so a shell never runs a builtin such as
+        /// `exit` in its place; use a symlink for other paths. Detection
         /// still needs the process to identify as `kind`, by a built-in name or
         /// `[advanced] agent_process_names`.
         /// Servers that accept this field advertise `capabilities.agent_start_exec`.

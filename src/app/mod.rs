@@ -3150,6 +3150,12 @@ mod tests {
             "exit",
             ".",
             "my-claude",
+            "/",
+            "./",
+            "../",
+            "/opt/bin/..",
+            "1/2",
+            ".5/1",
         ] {
             let (mut app, pane_id, terminal_id, mut receiver) =
                 agent_start_env_app("agent-start-exec-invalid");
