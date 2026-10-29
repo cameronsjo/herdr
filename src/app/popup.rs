@@ -6,6 +6,18 @@ use crate::pane::PaneLaunchEnv;
 use crate::popup_size::{resolve_popup_geometry, PopupSize};
 use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 
+/// A peek is meant for answering a prompt, so it takes most of the tab.
+const PEEK_SIZE: PopupSize = PopupSize::Percent(80);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeekOpenError {
+    PaneNotFound,
+    /// The pane is already on screen in the active tab.
+    PaneVisible,
+    /// A popup that is not a peek is open.
+    PopupOpen,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct PopupGeometry {
     pub width: Option<PopupSize>,
@@ -17,11 +29,15 @@ impl App {
         let Some(popup) = self.state.popup_pane.take() else {
             return false;
         };
-        self.state
-            .direct_attach_resize_locks
-            .remove(&popup.terminal_id);
-        self.state.terminals.remove(&popup.terminal_id);
-        self.shutdown_terminal_runtime(popup.terminal_id);
+        // A peek only borrowed the view: the terminal stays with its tiled pane,
+        // and the next tab geometry pass gives it back its layout size.
+        if popup.peek.is_none() {
+            self.state
+                .direct_attach_resize_locks
+                .remove(&popup.terminal_id);
+            self.state.terminals.remove(&popup.terminal_id);
+            self.shutdown_terminal_runtime(popup.terminal_id);
+        }
         self.state.mode = if self.state.active.is_some() {
             Mode::Terminal
         } else {
@@ -30,6 +46,72 @@ impl App {
         self.render_dirty.request_generic();
         self.render_notify.notify_one();
         true
+    }
+
+    /// Show a tiled pane from another tab in the popup overlay without moving
+    /// it. The pane keeps its place in its own tab; only the view is borrowed.
+    /// A peek that is already open is replaced; any other popup blocks it.
+    pub(crate) fn open_peek_popup(
+        &mut self,
+        ws_idx: usize,
+        pane_id: PaneId,
+    ) -> Result<(), PeekOpenError> {
+        if self
+            .state
+            .popup_pane
+            .as_ref()
+            .is_some_and(|popup| popup.peek.is_none())
+        {
+            return Err(PeekOpenError::PopupOpen);
+        }
+        let workspace = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .ok_or(PeekOpenError::PaneNotFound)?;
+        let tab_idx = workspace
+            .find_tab_index_for_pane(pane_id)
+            .ok_or(PeekOpenError::PaneNotFound)?;
+        let terminal_id = workspace
+            .terminal_id(pane_id)
+            .cloned()
+            .ok_or(PeekOpenError::PaneNotFound)?;
+        if self.state.active == Some(ws_idx) && workspace.active_tab_index() == tab_idx {
+            return Err(PeekOpenError::PaneVisible);
+        }
+        if self.terminal_runtimes.get(&terminal_id).is_none() {
+            return Err(PeekOpenError::PaneNotFound);
+        }
+        let label = self
+            .pane_info(ws_idx, pane_id)
+            .and_then(|info| info.label.or(info.display_agent).or(info.agent))
+            .or_else(|| self.public_pane_id(ws_idx, pane_id))
+            .unwrap_or_else(|| "pane".to_owned());
+        self.state.popup_pane = Some(crate::app::state::PopupPaneState {
+            pane_id,
+            terminal_id,
+            width: Some(PEEK_SIZE),
+            height: Some(PEEK_SIZE),
+            peek: Some(crate::app::state::PopupPeek { label }),
+        });
+        self.state.mode = Mode::Terminal;
+        self.render_dirty.request_generic();
+        self.render_notify.notify_one();
+        Ok(())
+    }
+
+    /// Close the popup only when it is a peek, leaving other popups alone.
+    pub(crate) fn close_peek_popup(&mut self) -> bool {
+        if self
+            .state
+            .popup_pane
+            .as_ref()
+            .is_some_and(|popup| popup.peek.is_some())
+        {
+            self.close_popup_pane()
+        } else {
+            false
+        }
     }
 
     pub(crate) fn spawn_popup_shell_command(
@@ -164,6 +246,7 @@ impl App {
             terminal_id,
             width: geometry.width,
             height: geometry.height,
+            peek: None,
         });
         self.state.mode = Mode::Terminal;
         Ok(())
@@ -188,6 +271,7 @@ impl App {
             terminal_id: terminal_id.clone(),
             width: None,
             height: None,
+            peek: None,
         });
         (pane_id, terminal_id)
     }
@@ -219,6 +303,7 @@ mod tests {
             terminal_id,
             width: None,
             height: None,
+            peek: None,
         });
         app
     }
@@ -287,5 +372,146 @@ mod tests {
         let response = app.handle_api_request(close());
         let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(response.error.code, "popup_not_open");
+    }
+
+    /// One workspace with two tabs, each with a runtime-backed pane. Tab 0 is
+    /// active, so tab 1's pane is the one a peek can borrow.
+    fn app_with_peekable_pane() -> (App, String, PaneId) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("peek");
+        workspace.test_add_tab(Some("worker"));
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.ensure_test_terminals();
+        for tab in 0..2 {
+            let pane_id = app.state.workspaces[0].tabs[tab].root_pane;
+            let terminal_id = app.state.workspaces[0]
+                .terminal_id(pane_id)
+                .unwrap()
+                .clone();
+            app.terminal_runtimes
+                .insert(terminal_id, TerminalRuntime::test_with_channel(40, 10).0);
+        }
+        let worker = app.state.workspaces[0].tabs[1].root_pane;
+        let public = app.public_pane_id(0, worker).unwrap();
+        (app, public, worker)
+    }
+
+    fn request(method: crate::api::schema::Method) -> crate::api::schema::Request {
+        crate::api::schema::Request {
+            id: "peek".into(),
+            method,
+        }
+    }
+
+    fn peek(pane_id: &str) -> crate::api::schema::Request {
+        request(crate::api::schema::Method::PanePeek(
+            crate::api::schema::PaneTarget {
+                pane_id: pane_id.to_owned(),
+            },
+        ))
+    }
+
+    fn peek_close() -> crate::api::schema::Request {
+        request(crate::api::schema::Method::PanePeekClose(
+            crate::api::schema::EmptyParams::default(),
+        ))
+    }
+
+    fn error_code(response: &str) -> String {
+        serde_json::from_str::<crate::api::schema::ErrorResponse>(response)
+            .unwrap()
+            .error
+            .code
+    }
+
+    #[tokio::test]
+    async fn peek_borrows_a_pane_without_moving_it() {
+        let (mut app, public, worker) = app_with_peekable_pane();
+        let terminal_id = app.state.workspaces[0].terminal_id(worker).unwrap().clone();
+
+        let response = app.handle_api_request(peek(&public));
+        serde_json::from_str::<crate::api::schema::SuccessResponse>(&response).expect(&response);
+
+        let popup = app.state.popup_pane.as_ref().unwrap();
+        assert_eq!(popup.pane_id, worker);
+        assert_eq!(popup.terminal_id, terminal_id);
+        assert!(popup.peek.is_some());
+        assert_eq!(
+            app.state.workspaces[0].find_tab_index_for_pane(worker),
+            Some(1)
+        );
+        assert!(app.state.tab_resize_locked(&terminal_id));
+        app.state.assert_invariants_for_test();
+
+        let response = app.handle_api_request(peek_close());
+        serde_json::from_str::<crate::api::schema::SuccessResponse>(&response).unwrap();
+
+        assert!(app.state.popup_pane.is_none());
+        assert!(app.state.terminals.contains_key(&terminal_id));
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+        assert!(!app.state.tab_resize_locked(&terminal_id));
+        app.state.assert_invariants_for_test();
+        assert_eq!(
+            error_code(&app.handle_api_request(peek_close())),
+            "peek_not_open"
+        );
+    }
+
+    #[tokio::test]
+    async fn peek_refuses_a_pane_already_on_screen() {
+        let (mut app, _, _) = app_with_peekable_pane();
+        let visible = app.state.workspaces[0].tabs[0].root_pane;
+        let public = app.public_pane_id(0, visible).unwrap();
+
+        assert_eq!(
+            error_code(&app.handle_api_request(peek(&public))),
+            "pane_visible"
+        );
+        assert_eq!(
+            error_code(&app.handle_api_request(peek("w9:p9"))),
+            "pane_not_found"
+        );
+        assert!(app.state.popup_pane.is_none());
+    }
+
+    #[tokio::test]
+    async fn peek_replaces_a_peek_but_not_another_popup() {
+        let (mut app, public, worker) = app_with_peekable_pane();
+        app.handle_api_request(peek(&public));
+        app.handle_api_request(peek(&public));
+        assert_eq!(app.state.popup_pane.as_ref().unwrap().pane_id, worker);
+
+        app.close_popup_pane();
+        let (popup_pane, _) =
+            app.install_test_popup_runtime(TerminalRuntime::test_with_channel(10, 4).0);
+        assert_eq!(
+            error_code(&app.handle_api_request(peek(&public))),
+            "popup_open"
+        );
+        assert_eq!(
+            error_code(&app.handle_api_request(peek_close())),
+            "peek_not_open"
+        );
+        assert_eq!(app.state.popup_pane.as_ref().unwrap().pane_id, popup_pane);
+    }
+
+    #[tokio::test]
+    async fn peek_closes_when_its_pane_terminal_shuts_down() {
+        let (mut app, public, worker) = app_with_peekable_pane();
+        app.handle_api_request(peek(&public));
+        let terminal_id = app.state.workspaces[0].terminal_id(worker).unwrap().clone();
+
+        app.shutdown_terminal_runtime(terminal_id);
+
+        assert!(app.state.popup_pane.is_none());
     }
 }

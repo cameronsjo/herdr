@@ -314,6 +314,8 @@ impl HeadlessServer {
                     | Method::PaneEditScrollback(_)
                     | Method::PaneFocus(_)
                     | Method::PaneFocusDirection(_)
+                    | Method::PanePeek(_)
+                    | Method::PanePeekClose(_)
                     | Method::PaneResize(_)
                     | Method::PaneSplit(_)
                     | Method::PaneSwap(_)
@@ -833,6 +835,7 @@ impl HeadlessServer {
     ) -> bool {
         let target_before = self.default_shell_target();
         let popup_before = self.app.state.popup_pane.is_some();
+        let peek_before = self.peeked_terminal_id();
         let method_claims_geometry = Self::public_request_may_change_geometry(&msg.request.method);
         let explicit_public_focus_target = match &msg.request.method {
             api::schema::Method::WorkspaceFocus(params) => self
@@ -936,9 +939,21 @@ impl HeadlessServer {
         {
             self.reconcile_client_shell_locations();
         }
-        let geometry_changed =
-            method_claims_geometry && self.reapply_controlled_shell_tab_geometry(false);
+        // Opening or closing a peek (by any method) moves the pane between
+        // popup size and its tab's layout size.
+        let peek_changed = peek_before != self.peeked_terminal_id();
+        let geometry_changed = (method_claims_geometry || peek_changed)
+            && self.reapply_controlled_shell_tab_geometry(false);
         changed | geometry_changed
+    }
+
+    fn peeked_terminal_id(&self) -> Option<crate::terminal::TerminalId> {
+        self.app
+            .state
+            .popup_pane
+            .as_ref()
+            .filter(|popup| popup.peek.is_some())
+            .map(|popup| popup.terminal_id.clone())
     }
 
     pub(super) fn handle_client_shell_api_request(

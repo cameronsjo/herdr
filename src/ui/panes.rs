@@ -328,7 +328,7 @@ pub(super) fn resize_tab_panes(
         {
             let pane_inner = pane_inner_rect(area, zoomed_pane_borders(app, multi_pane));
             let inner_rect = terminal_inner_rect(rt, pane_inner, app.pane_scrollbars);
-            if !app.direct_attach_resize_locks.contains(terminal_id) {
+            if !app.tab_resize_locked(terminal_id) {
                 rt.resize(
                     inner_rect.height,
                     inner_rect.width,
@@ -352,7 +352,7 @@ pub(super) fn resize_tab_panes(
             runtime_for_tab_pane(app, terminal_runtimes, workspace_index, tab, info.id)
         {
             let inner_rect = terminal_inner_rect(rt, pane_inner, app.pane_scrollbars);
-            if !app.direct_attach_resize_locks.contains(terminal_id) {
+            if !app.tab_resize_locked(terminal_id) {
                 rt.resize(
                     inner_rect.height,
                     inner_rect.width,
@@ -394,9 +394,9 @@ pub(super) fn compute_pane_infos_for_tab(
             (inner_rect, scrollbar_rect) =
                 stable_scrollbar_gutter(rt, pane_inner, app.pane_scrollbars);
             if resize_panes
-                && tab.terminal_id(focused_id).is_some_and(|terminal_id| {
-                    !app.direct_attach_resize_locks.contains(terminal_id)
-                })
+                && tab
+                    .terminal_id(focused_id)
+                    .is_some_and(|terminal_id| !app.tab_resize_locked(terminal_id))
             {
                 rt.resize(
                     inner_rect.height,
@@ -432,9 +432,9 @@ pub(super) fn compute_pane_infos_for_tab(
             (inner_rect, scrollbar_rect) =
                 stable_scrollbar_gutter(rt, pane_inner, app.pane_scrollbars);
             if resize_panes
-                && tab.terminal_id(info.id).is_some_and(|terminal_id| {
-                    !app.direct_attach_resize_locks.contains(terminal_id)
-                })
+                && tab
+                    .terminal_id(info.id)
+                    .is_some_and(|terminal_id| !app.tab_resize_locked(terminal_id))
             {
                 rt.resize(
                     inner_rect.height,

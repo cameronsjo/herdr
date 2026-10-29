@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Peek a pane from another tab as a temporary overlay (issue [#95](https://github.com/cameronsjo/herdr/issues/95), Linear CAM-438)
+
+### feat(pane): show a pane from another tab as a temporary overlay
+
+- **PR:** (pending)
+- **Files:** `src/app/{popup,state,runtime,api}.rs`, `src/app/api/panes.rs`, `src/api/schema{,/operations}.rs`, `src/cli/pane{,/bindings}.rs`, `src/server/{client_shell,headless/client_views,headless/render}.rs`, `src/ui/panes.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `pane-peek` change)
+- **Adds:** `pane.peek` / `herdr pane peek <pane_id>` shows a pane from another tab or space in the popup overlay over the current tab, with input and mouse routed to it; `pane.peek_close` / `herdr pane peek --close` closes it. `PopupPaneState.peek` marks a popup that borrows a tiled pane's terminal instead of owning one, so closing it shuts nothing down. `AppState::tab_resize_locked` keeps tab layout from resizing a peeked terminal, and a public request that opens or closes a peek reapplies tab geometry so the pane gets its layout size back. A peek closes when its terminal shuts down, and the popup branch of `PaneDied` no longer skips the pane's own exit handling for a peek. Server only: the client already renders and routes popups, so no wire codec changes.
+- **Collision:** `PopupPaneState` and `close_popup_pane` in `src/app/{state,popup}.rs`, the popup branch of `PaneDied` in `src/app/api.rs`, `shutdown_terminal_runtime` in `src/app/runtime.rs`, `any_shell_surface_contains_pane` in `render.rs`, `public_request_may_change_geometry` and the end of `handle_api_request_with_shutdown_check` in `client_views.rs`, the popup title in `render_popup_surface`, and the four `tab_resize_locked` checks in `src/ui/panes.rs`. The popup invariant in `assert_invariants_for_test` now allows an attached terminal only for a peek.
+- **Regression check:** `cargo nextest run -E 'test(/peek/)'`. Live: with an agent in tab 2, run `herdr pane peek <its pane id>` from tab 1; the agent shows in an overlay titled `peek: …`, keys reach it, and `herdr pane peek --close` returns it to tab 2 at its layout size.
+- **Render scaling:** none added to pane loops; the lock check is one hash lookup and one comparison per pane resize.
+
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
 
 ### feat: drag a pane by its frame to swap it with another pane
