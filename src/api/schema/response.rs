@@ -113,6 +113,10 @@ pub enum ResponseResult {
     },
     AgentPrompted {
         agent: AgentInfo,
+        /// Fork (cameronsjo/herdr#102): whether the prompt reached the
+        /// agent's input. Absent from servers that do not check.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivered: Option<super::PromptDelivery>,
     },
     AgentList {
         agents: Vec<AgentInfo>,

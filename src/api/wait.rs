@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use regex::Regex;
 
+use crate::api::fork_prompt_delivery::{with_delivery, DeliveryBaseline, PROMPT_DELIVERY_WINDOW};
 use crate::api::schema::{
     ErrorBody, ErrorResponse, EventData, EventEnvelope, EventKind, EventMatch, EventsWaitParams,
     Method, Request, ResponseResult, Subscription, SubscriptionEventData,
@@ -18,6 +19,7 @@ use crate::api::{ApiRequestSender, EventHub};
 use crate::ipc::LocalStream;
 
 const AGENT_PROMPT_EFFECT_TIMEOUT_MS: u64 = 5_000;
+const PROMPT_EFFECT_FLOOR_MS: u64 = 100;
 
 pub(super) fn wait_for_output(
     request_id: String,
@@ -183,14 +185,42 @@ pub(super) fn prompt_agent(
     running: &Arc<AtomicBool>,
 ) -> std::io::Result<Option<String>> {
     let Some(wait) = params.wait.clone() else {
-        return Ok(Some(dispatch_to_app_with_timeout(
+        // Fork (cameronsjo/herdr#102): a target that cannot be read here gets
+        // the prompt's own error from the app, so it is dispatched unchanged.
+        let baseline = agent_get(&request_id, &params.target, api_tx)
+            .ok()
+            .map(|before| {
+                DeliveryBaseline::capture(
+                    &request_id,
+                    &before,
+                    &params.text,
+                    api_tx,
+                    event_hub,
+                    None,
+                )
+            });
+        let response = dispatch_to_app_with_timeout(
             Request {
-                id: request_id,
+                id: request_id.clone(),
                 method: Method::AgentPrompt(params),
             },
             api_tx,
             None,
-        )));
+        );
+        if agent_from_response(&request_id, &response).is_err() {
+            return Ok(Some(response));
+        }
+        let delivery = baseline.map_or(crate::api::schema::PromptDelivery::Unknown, |baseline| {
+            baseline.observe(
+                &request_id,
+                api_tx,
+                event_hub,
+                stream,
+                running,
+                std::time::Instant::now() + PROMPT_DELIVERY_WINDOW,
+            )
+        });
+        return Ok(Some(with_delivery(response, delivery)));
     };
 
     let wait_started = std::time::Instant::now();
@@ -210,6 +240,17 @@ pub(super) fn prompt_agent(
     };
     let prompt_started_working =
         before_prompt.agent_status == crate::api::schema::AgentStatus::Working;
+    let wait_deadline = wait
+        .timeout_ms
+        .map(|timeout_ms| wait_started + std::time::Duration::from_millis(timeout_ms));
+    let delivery_baseline = DeliveryBaseline::capture(
+        &request_id,
+        &before_prompt,
+        &params.text,
+        api_tx,
+        event_hub,
+        wait_deadline,
+    );
     let target = params.target.clone();
     if let Some(prompt_wait) = params.wait.as_mut() {
         prompt_wait.submission_deadline = wait
@@ -240,6 +281,23 @@ pub(super) fn prompt_agent(
     ) {
         return agent_wait_not_running(request_id).map(Some);
     }
+    let submitted_at = std::time::Instant::now();
+    let delivery_deadline = submitted_at + PROMPT_DELIVERY_WINDOW;
+    let delivery_deadline =
+        wait_deadline.map_or(delivery_deadline, |timeout| timeout.min(delivery_deadline));
+    let delivery = delivery_baseline.observe(
+        &request_id,
+        api_tx,
+        event_hub,
+        stream,
+        running,
+        delivery_deadline,
+    );
+    // The delivery window counts toward the five seconds a prompt has to
+    // show activity; the floor leaves the gate one look at replayed events.
+    let effect_budget_ms = AGENT_PROMPT_EFFECT_TIMEOUT_MS
+        .saturating_sub(submitted_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+        .max(PROMPT_EFFECT_FLOOR_MS);
 
     let prompt_activity_observed = prompt_started_working
         || matches!(
@@ -253,11 +311,11 @@ pub(super) fn prompt_agent(
     if !prompt_activity_observed {
         let remaining_timeout_ms = remaining_timeout_ms(wait.timeout_ms, wait_started);
         let (effect_timeout_ms, timeout_kind) = match remaining_timeout_ms {
-            Some(timeout_ms) if timeout_ms <= AGENT_PROMPT_EFFECT_TIMEOUT_MS => {
+            Some(timeout_ms) if timeout_ms <= effect_budget_ms => {
                 (timeout_ms, AgentWaitTimeoutKind::Status)
             }
             _ => (
-                AGENT_PROMPT_EFFECT_TIMEOUT_MS,
+                effect_budget_ms,
                 AgentWaitTimeoutKind::PromptStalled {
                     timeout_ms: AGENT_PROMPT_EFFECT_TIMEOUT_MS,
                 },
@@ -289,7 +347,7 @@ pub(super) fn prompt_agent(
         };
     }
     if agent_wait_matches(&initial, &until, None) {
-        return agent_prompt_success(request_id, initial).map(Some);
+        return agent_prompt_success(request_id, initial, delivery).map(Some);
     }
 
     let Some(outcome) = wait_for_resolved_agent(
@@ -318,7 +376,7 @@ pub(super) fn prompt_agent(
         AgentWaitOutcome::Matched(agent) => *agent,
         AgentWaitOutcome::Response(response) => return Ok(Some(response)),
     };
-    agent_prompt_success(request_id, agent).map(Some)
+    agent_prompt_success(request_id, agent, delivery).map(Some)
 }
 
 fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> Option<u64> {
@@ -331,10 +389,14 @@ fn remaining_timeout_ms(total_ms: Option<u64>, started: std::time::Instant) -> O
 fn agent_prompt_success(
     request_id: String,
     agent: crate::api::schema::AgentInfo,
+    delivery: crate::api::schema::PromptDelivery,
 ) -> std::io::Result<String> {
     serde_json::to_string(&SuccessResponse {
         id: request_id,
-        result: ResponseResult::AgentPrompted { agent },
+        result: ResponseResult::AgentPrompted {
+            agent,
+            delivered: Some(delivery),
+        },
     })
     .map_err(std::io::Error::other)
 }
