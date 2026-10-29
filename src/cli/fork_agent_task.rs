@@ -10,12 +10,12 @@ use std::collections::HashMap;
 use clap::{Arg, ArgAction, Command};
 
 use crate::api::schema::{AgentTarget, Method, PaneReportMetadataParams, Request};
+use crate::config::AGENT_TASK_TOKEN as TASK_TOKEN;
 
 pub(super) const TASK_USAGE: &str =
-    "herdr agent task <TEXT> [--target TARGET]\n       herdr agent task --clear [--target TARGET]";
-use crate::config::AGENT_TASK_TOKEN as TASK_TOKEN;
-/// Metadata source for every task report, so one source owns the token's
-/// report sequence no matter which process sets it.
+    "herdr agent task [--target TARGET] [--] <TEXT>\n       herdr agent task --clear [--target TARGET]";
+/// Metadata source for every task report, so reports read the same in logs
+/// whichever process sends them.
 const TASK_SOURCE: &str = "herdr:task";
 
 /// The clap shape of this command, for `herdr agent --help` and completions.
@@ -53,8 +53,14 @@ fn parse_task_args(args: &[String], own_pane: Option<String>) -> Result<TaskArgs
     let mut target = None;
     let mut clear = false;
     let mut index = 0;
+    let mut options_done = false;
     while index < args.len() {
         match args[index].as_str() {
+            value if options_done && text.is_none() => text = Some(value.to_owned()),
+            _ if options_done => {
+                return Err("expected one TEXT argument; quote a task with spaces".into())
+            }
+            "--" => options_done = true,
             "--clear" => clear = true,
             "--target" => {
                 let Some(value) = args.get(index + 1) else {
@@ -103,7 +109,22 @@ fn task_params(pane_id: String, text: Option<String>) -> PaneReportMetadataParam
     }
 }
 
+/// `help`, `-h` or `--help` before any `--` asks for help, not a task named
+/// "help": the fork's own parser runs before clap would offer it.
+fn wants_help(args: &[String]) -> bool {
+    matches!(args, [only] if only == "help")
+        || args
+            .iter()
+            .take_while(|arg| *arg != "--")
+            .any(|arg| arg == "-h" || arg == "--help")
+}
+
 pub(super) fn agent_task(args: &[String]) -> std::io::Result<i32> {
+    if wants_help(args) {
+        crate::platform::begin_cli_output();
+        command().bin_name("herdr agent task").print_help()?;
+        return Ok(0);
+    }
     let own_pane = std::env::var(crate::integration::HERDR_PANE_ID_ENV_VAR).ok();
     let parsed = match parse_task_args(args, own_pane) {
         Ok(parsed) => parsed,
@@ -179,6 +200,32 @@ mod tests {
     }
 
     #[test]
+    fn task_text_may_follow_a_separator() {
+        assert_eq!(
+            parse_task_args(&args(&["--", "--flaky test"]), Some("p_1_2".into())),
+            Ok(TaskArgs {
+                target: TaskTarget::OwnPane("p_1_2".into()),
+                text: Some("--flaky test".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn task_help_is_help_not_a_task() {
+        for values in [
+            vec!["help"],
+            vec!["--help"],
+            vec!["-h"],
+            vec!["--target", "w", "--help"],
+        ] {
+            assert!(wants_help(&args(&values)), "{values:?}");
+        }
+        for values in [vec!["help me"], vec!["--", "--help"], vec!["fix", "help"]] {
+            assert!(!wants_help(&args(&values)), "{values:?}");
+        }
+    }
+
+    #[test]
     fn task_rejects_bad_shapes() {
         let pane = || Some("p_1_2".to_owned());
         for (values, own_pane) in [
@@ -188,6 +235,7 @@ mod tests {
             (vec!["one", "two"], pane()),
             (vec!["--target"], pane()),
             (vec!["--bogus", "text"], pane()),
+            (vec!["--", "one", "two"], pane()),
             (vec!["text"], None),
             (vec!["text"], Some(String::new())),
         ] {

@@ -250,9 +250,9 @@ next sync is likely to conflict again:
 
 ### feat(agent): set an agent's sidebar task line with agent task
 
-- **PR:** _pending_
+- **PR:** [cameronsjo/herdr#144](https://github.com/cameronsjo/herdr/pull/144)
 - **Files:** `src/cli/fork_agent_task.rs` (new), `src/cli.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/config/sidebar.rs`, `src/config.rs`, `src/ui/sidebar/tokens.rs` (test), `docs/next/website/src/content/docs/{cli-reference,configuration}.mdx` plus the ja and zh-cn default-row blocks, `docs/next/website/src/data/config-reference.json`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-task-line` change)
-- **Adds:** `herdr agent task <TEXT>|--clear [--target TARGET]`, which patches the pane metadata token `task` (source `herdr:task`) on the calling pane (`HERDR_PANE_ID`) or on the `--target` agent, resolved with `agent.get`. It keeps its own parser, like `agent register`. The default agent `rows` and `grouped_rows` end with a `["$task"]` row; an unset token drops the row, so layouts look the same until a task is set. No API, protocol or server change.
+- **Adds:** `herdr agent task [--target TARGET] [--] <TEXT>|--clear`, which patches the pane metadata token `task` (source `herdr:task`) on the calling pane (`HERDR_PANE_ID`) or on the `--target` agent, resolved with `agent.get`. It keeps its own parser, like `agent register`. The default agent `rows` and `grouped_rows` end with a `["$task"]` row; an unset token drops the row, so layouts look the same until a task is set. No API, protocol or server change.
 - **Replaces:** upstream's default `rows` (`[["state_icon","machine","workspace","tab"],["agent"]]`) gains the third row.
 - **Collision:** `AgentsSidebarConfig::default()` in `src/config/sidebar.rs`, the default-rows blocks in the three `configuration.mdx` files and `config-reference.json`, and the fork dispatch at the top of `run_agent_command` in `src/cli/agent.rs`.
 - **Regression check:** `cargo nextest run -E 'test(/task_/) | test(/default_rows_draw_the_task_line/)'`. Dropping the `$task` default row reddens `default_rows_draw_the_task_line_only_once_a_task_is_set`. Live: in an agent pane run `herdr agent task "probe"`; the sidebar entry gains a `probe` line, and `herdr agent task --clear` removes it.
