@@ -246,6 +246,17 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## `pane send-text --paste` sends a bracketed paste (issue [#121](https://github.com/cameronsjo/herdr/issues/121), Linear CAM-432)
+
+### feat: opt-in bracketed paste for pane send-text
+
+- **PR:** (pending)
+- **Files:** `src/api/schema/panes.rs`, `src/app/api/panes.rs`, `src/cli/pane.rs`, `src/platform/macos/input_tests.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-input/spec.md` (via the archived `send-text-paste` change)
+- **Adds:** an optional `paste` field on `pane.send_text` (CLI `--paste`, before the pane id). Set, the text is wrapped with `encode_api_text`, the same live bracketed-paste check `pane run` uses, before the canonical-mode admission check; unset, the bytes are unchanged and the field is not serialized. A paste refuses text containing ESC (`invalid_paste_text`) so it cannot end the paste early. Whether it fixes the cut-off text in a Claude Code pane still needs the live repro on #121.
+- **Collision:** `PaneSendTextParams` and `handle_pane_send_text`. If upstream adds its own paste option, drop this one and the `pane-input` requirement in the same sync.
+- **Regression check:** `cargo nextest run -E 'test(/send_text/)'`. Live: `herdr pane send-text --paste <claude-pane> "$(cat long.md)"` lands as one `[Pasted text]` block.
+- **Render scaling:** not affected; one request-time branch.
+
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
 
 ### feat: drag a pane by its frame to swap it with another pane

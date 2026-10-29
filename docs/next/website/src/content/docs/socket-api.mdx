@@ -140,6 +140,8 @@ like `ctrl+h`, `control+j`, `alt+x`, and `shift+tab`, function keys like
 `f1`, and named punctuation like `minus` and `plus`. They do not accept
 `prefix+` binding strings.
 
+`pane.send_text` accepts an optional `paste` boolean. When `true` and the pane has enabled bracketed-paste mode, the text is wrapped in bracketed paste; otherwise it is sent as raw bytes, as without the field. With `paste`, text containing ESC is refused with `invalid_paste_text`.
+
 On macOS, `pane.send_input` (used by `pane run`), `pane.send_text` (used by `pane send-text`) and `agent.start` check the terminal's current canonical input limit before accepting a command into the input queue. An oversized encoded line, including Enter, is rejected in full; wait for the shell prompt and retry, or split the text into lines under the limit. Multiple short lines and raw-mode input remain supported. Successful responses still acknowledge queue admission, not command execution. This check covers the current submission only: it cannot inspect an earlier incomplete line or guarantee the terminal mode will remain unchanged while input is queued.
 
 ```json

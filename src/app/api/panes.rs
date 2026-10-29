@@ -1930,12 +1930,26 @@ impl App {
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
+        // An ESC inside a paste could carry the end marker and turn the rest
+        // of the text back into typed keys, so a paste refuses it outright.
+        if params.paste && params.text.contains('\x1b') {
+            return encode_error(
+                id,
+                "invalid_paste_text",
+                "pane send-text --paste text must not contain ESC",
+            );
+        }
+        let bytes = if params.paste {
+            super::super::api_helpers::encode_api_text(runtime, &params.text)
+        } else {
+            params.text.into_bytes()
+        };
         // Same admission check as send_input: Darwin drops a canonical-mode
         // line past MAX_CANON without an error, so refuse it up front.
-        if let Err(err) = runtime.validate_input_submission(params.text.as_bytes()) {
+        if let Err(err) = runtime.validate_input_submission(&bytes) {
             return encode_error(id, "pane_send_failed", err.to_string());
         }
-        if let Err(err) = runtime.try_send_bytes(Bytes::from(params.text)) {
+        if let Err(err) = runtime.try_send_bytes(Bytes::from(bytes)) {
             return encode_error(id, "pane_send_failed", err.to_string());
         }
 
@@ -2461,6 +2475,91 @@ mod tests {
     fn metadata_error_code(response: &str) -> String {
         let response: ErrorResponse = serde_json::from_str(response).unwrap();
         response.error.code
+    }
+
+    #[tokio::test]
+    async fn api_pane_send_text_paste_wraps_only_when_the_pane_accepts_paste() {
+        let (mut app, pane_id, mut rx) = app_with_send_key_runtime(4);
+        let send = |app: &mut App, paste: bool| {
+            let response = app.handle_api_request(crate::api::schema::Request {
+                id: "req".into(),
+                method: crate::api::schema::Method::PaneSendText(PaneSendTextParams {
+                    pane_id: pane_id.clone(),
+                    text: "one\n\ntwo".into(),
+                    paste,
+                }),
+            });
+            let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+            assert_eq!(success.result, ResponseResult::Ok {});
+        };
+
+        // Bracketed paste is off: --paste has nothing to wrap with.
+        send(&mut app, true);
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            bytes::Bytes::from_static(b"one\n\ntwo")
+        );
+
+        let root = app.state.workspaces[0].tabs[0].root_pane;
+        app.lookup_runtime_sender(0, root)
+            .unwrap()
+            .test_process_pty_bytes(b"\x1b[?2004h");
+        send(&mut app, true);
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            bytes::Bytes::from_static(b"\x1b[200~one\n\ntwo\x1b[201~")
+        );
+        // Without --paste the text stays raw, as before.
+        send(&mut app, false);
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            bytes::Bytes::from_static(b"one\n\ntwo")
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn api_pane_send_text_paste_refuses_escape() {
+        let (mut app, pane_id, mut rx) = app_with_send_key_runtime(4);
+        let send = |app: &mut App, paste: bool| {
+            app.handle_api_request(crate::api::schema::Request {
+                id: "req".into(),
+                method: crate::api::schema::Method::PaneSendText(PaneSendTextParams {
+                    pane_id: pane_id.clone(),
+                    text: "a\x1b[201~b".into(),
+                    paste,
+                }),
+            })
+        };
+
+        assert_eq!(
+            metadata_error_code(&send(&mut app, true)),
+            "invalid_paste_text"
+        );
+        assert!(rx.try_recv().is_err(), "nothing is written");
+        // Raw send-text keeps passing escapes through, as before.
+        let success: SuccessResponse = serde_json::from_str(&send(&mut app, false)).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            bytes::Bytes::from_static(b"a\x1b[201~b")
+        );
+    }
+
+    #[test]
+    fn pane_send_text_omits_paste_when_unset() {
+        let params = PaneSendTextParams {
+            pane_id: "p".into(),
+            text: "x".into(),
+            paste: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&params).unwrap(),
+            serde_json::json!({"pane_id": "p", "text": "x"})
+        );
+        let parsed: PaneSendTextParams =
+            serde_json::from_value(serde_json::json!({"pane_id": "p", "text": "x"})).unwrap();
+        assert!(!parsed.paste);
     }
 
     #[tokio::test]
