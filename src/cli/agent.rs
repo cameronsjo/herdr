@@ -21,12 +21,13 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
     use super::projection::ParseError;
     use bindings::Operation;
 
-    // The fork's registered-agent commands keep their own parser; the clap tree
+    // The fork's registered-agent and task commands keep their own parser; the clap tree
     // carries them only for help and completion.
     match args.first().map(String::as_str) {
         Some("register") => return super::fork_registered_agents::agent_register(&args[1..]),
         Some("unregister") => return super::fork_registered_agents::agent_unregister(&args[1..]),
         Some("registered") => return super::fork_registered_agents::agent_registered(&args[1..]),
+        Some("task") => return super::fork_agent_task::agent_task(&args[1..]),
         _ => {}
     }
 
