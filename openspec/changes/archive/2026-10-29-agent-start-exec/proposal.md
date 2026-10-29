@@ -5,7 +5,7 @@ A Claude Code wrapper installed under another name can't be launched with `agent
 ## What Changes
 
 - `agent.start` takes an optional `exec`. It is typed in place of the kind's default executable. It is limited to characters no shell quotes or expands, because the shared quoters are not safe for it in every pane shell. The kind still selects detection and the managed launch.
-- An `exec` outside ASCII letters, digits and `_ . / : @ % + = , -`, or starting with `-`, fails with `invalid_agent_exec` before anything is typed.
+- An `exec` outside ASCII letters, digits and `_ . / : + -`, not starting like a program name, or naming a shell builtin, fails with `invalid_agent_exec` before anything is typed.
 - Servers advertise `capabilities.agent_start_exec`. The CLI's `--exec PATH` refuses an older server with `agent_start_exec_unsupported`, because that server would launch the default executable and report success.
 
 ## Capabilities

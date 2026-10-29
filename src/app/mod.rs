@@ -3143,6 +3143,11 @@ mod tests {
             "x\u{2019};y",
             "C:\\bin\\my-claude",
             "$(id)",
+            "/opt/a@b/claude",
+            "LD_PRELOAD=/tmp/x.so",
+            "%1",
+            "eval",
+            ".",
         ] {
             let (mut app, pane_id, terminal_id, mut receiver) =
                 agent_start_env_app("agent-start-exec-invalid");
