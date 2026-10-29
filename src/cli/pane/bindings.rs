@@ -382,6 +382,24 @@ cli_projection! { pub(crate) PaneTargetProjection for PaneTarget {
     pane_id => Field::new(String::new()).input(pane_id()),
 } }
 
+fn peek_arguments() -> Vec<clap::Arg> {
+    let mut arguments = PaneTargetProjection::arguments();
+    for argument in &mut arguments {
+        *argument = argument
+            .clone()
+            .required(false)
+            .required_unless_present("close")
+            .conflicts_with("close");
+    }
+    arguments.push(
+        clap::Arg::new("close")
+            .long("close")
+            .action(clap::ArgAction::SetTrue)
+            .help("Close the open peek instead"),
+    );
+    arguments
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Output {
     Json,
@@ -572,6 +590,19 @@ pub(super) const LEAVES: &[Leaf] = &[
         PaneZoomProjection,
         PaneZoom
     ),
+    Leaf {
+        name: "peek",
+        about: "Show a pane from another tab as a temporary overlay",
+        id: "cli:pane:peek",
+        output: Output::Json,
+        arguments: peek_arguments,
+        method: |matches| {
+            if matches.get_flag("close") {
+                return Ok(Method::PanePeekClose(Default::default()));
+            }
+            PaneTargetProjection::from_matches(matches).map(Method::PanePeek)
+        },
+    },
     Leaf {
         name: "read",
         about: "Read pane terminal output",

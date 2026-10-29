@@ -2,6 +2,7 @@ use super::*;
 
 mod event_fairness;
 mod fork_moves;
+mod fork_peek;
 mod fork_workspace_ids;
 mod native_graphics;
 #[path = "pane_move.rs"]
