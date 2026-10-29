@@ -11,7 +11,7 @@ pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
-const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be an executable name or path of ASCII letters, digits and _ . / : + -, starting with a letter, digit, _ . or /, and not a shell builtin";
+const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be a path containing a /, made of ASCII letters, digits and _ . / : + -, starting with a letter, digit, _ . or /";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
 
 impl App {
@@ -573,19 +573,16 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
 
 /// Fork (#110): `exec` is typed as the command word in every pane shell, so
 /// it is limited to characters no supported shell quotes or expands, starts
-/// like a program name (not `-`, `=`, `%` or `@`), and is not a shell builtin
-/// that would run inside the pane's shell. A path with spaces or `~` can go
-/// through a symlink.
+/// like a program name (not `-`, `=`, `%` or `@`), and holds a `/`. Shells
+/// skip their builtins, functions and aliases for a word with a `/`, so `exit`
+/// or `eval` can never run in place of a program. A path with spaces or `~`
+/// can go through a symlink.
 fn valid_agent_exec(exec: &str) -> bool {
-    const SHELL_BUILTINS: &[&str] = &[
-        ".", "..", "alias", "builtin", "cd", "command", "eval", "exec", "export", "set", "source",
-        "trap", "unset",
-    ];
-    exec.starts_with(|ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/'))
+    exec.contains('/')
+        && exec.starts_with(|ch: char| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/'))
         && exec
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | ':' | '+' | '-'))
-        && !SHELL_BUILTINS.contains(&exec)
 }
 
 pub(super) enum AgentStartError {
@@ -596,7 +593,7 @@ pub(super) enum AgentStartError {
     /// Fork (#103): the pane's shell has no verified env quoting. Carries the
     /// shell's process name only.
     EnvUnsupportedShell(String),
-    /// Fork (#110): `exec` is empty or holds control characters.
+    /// Fork (#110): `exec` is not a plain path; see `valid_agent_exec`.
     InvalidExec,
     InvalidArgument,
     InvalidTimeout,

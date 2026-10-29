@@ -1466,7 +1466,7 @@
               "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control, line-separator\nor format characters. Refused with `agent_env_unsupported_shell` in panes\nwhose shell has no verified quoting (nu, xonsh, elvish, csh, tcsh).\nServers that accept this field advertise `capabilities.agent_start_env`."
             },
             "exec": {
-              "description": "Fork: the executable to launch in place of the kind's default, as a\nname on the pane's PATH or a path. Only ASCII letters, digits and\n`_ . / : + -` are allowed, starting with a letter, digit, `_`, `.` or\n`/`, and shell builtins such as `eval` are refused, so every shell runs\nit as a program; use a symlink for other paths. Detection\nstill needs the process to identify as `kind`, by a built-in name or\n`[advanced] agent_process_names`.\nServers that accept this field advertise `capabilities.agent_start_exec`.",
+              "description": "Fork: the path of the executable to launch in place of the kind's\ndefault. It must contain a `/` and only ASCII letters, digits and\n`_ . / : + -`, starting with a letter, digit, `_`, `.` or `/`, so\nevery shell runs it as a program, never a builtin such as `exit`;\nuse a symlink for other paths. Detection\nstill needs the process to identify as `kind`, by a built-in name or\n`[advanced] agent_process_names`.\nServers that accept this field advertise `capabilities.agent_start_exec`.",
               "type": [
                 "string",
                 "null"

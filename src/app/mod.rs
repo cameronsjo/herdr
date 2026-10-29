@@ -3147,7 +3147,9 @@ mod tests {
             "LD_PRELOAD=/tmp/x.so",
             "%1",
             "eval",
+            "exit",
             ".",
+            "my-claude",
         ] {
             let (mut app, pane_id, terminal_id, mut receiver) =
                 agent_start_env_app("agent-start-exec-invalid");

@@ -67,7 +67,7 @@ A server that honors `agent.start`'s `env` SHALL report `capabilities.agent_star
 - **THEN** the command fails with `agent_start_env_unsupported` and no agent is started
 
 ### Requirement: agent start can launch another executable
-`agent.start` SHALL accept an optional `exec`, and `herdr agent start` SHALL accept `--exec PATH`. It MUST replace the default executable in the typed command and start the reported `argv`; a session started this way MUST NOT be recorded for resume. An `exec` that holds anything but ASCII letters, digits and `_ . / : + -`, starts with anything but a letter, digit, `_`, `.` or `/`, or is a shell builtin such as `eval` MUST fail with `invalid_agent_exec` before anything is typed.
+`agent.start` SHALL accept an optional `exec`, and `herdr agent start` SHALL accept `--exec PATH`. It MUST replace the default executable in the typed command and start the reported `argv`; a session started this way MUST NOT be recorded for resume. An `exec` that holds no `/`, holds anything but ASCII letters, digits and `_ . / : + -`, or starts with anything but a letter, digit, `_`, `.` or `/` MUST fail with `invalid_agent_exec` before anything is typed.
 
 #### Scenario: Wrapper launch
 - **WHEN** `herdr agent start w1 --kind claude --exec /opt/bin/my-claude --pane 1 -- --resume` runs in an available sh pane
@@ -81,5 +81,5 @@ A server that honors `agent.start`'s `env` SHALL report `capabilities.agent_star
 A server that honors `agent.start`'s `exec` SHALL report `capabilities.agent_start_exec: true` in its ping response and in `herdr status --json`. The CLI MUST NOT send `--exec` to a server that does not report it, and MUST instead fail with `agent_start_exec_unsupported` without starting anything.
 
 #### Scenario: Older server
-- **WHEN** `herdr agent start w1 --kind claude --pane 1 --exec my-claude` runs against a server whose capabilities lack `agent_start_exec`
+- **WHEN** `herdr agent start w1 --kind claude --pane 1 --exec /opt/bin/my-claude` runs against a server whose capabilities lack `agent_start_exec`
 - **THEN** the command fails with `agent_start_exec_unsupported` and no agent is started
