@@ -122,6 +122,8 @@ pub enum AgentSidebarToken {
     Tab,
     Pane,
     Agent,
+    /// Fork: the herdr agent name alone, never the display or kind fallback.
+    Name,
     TerminalTitle,
     TerminalTitleStripped,
     Custom(String),
@@ -292,6 +294,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Tab => "tab".into(),
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
+        AgentSidebarToken::Name => "name".into(),
         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
         AgentSidebarToken::Custom(name) => format!("${name}"),
@@ -351,6 +354,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("tab", Self::Tab),
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
+                ("name", Self::Name),
                 ("terminal_title", Self::TerminalTitle),
                 ("terminal_title_stripped", Self::TerminalTitleStripped),
             ],
@@ -640,7 +644,7 @@ mod tests {
         let config: crate::config::Config = toml::from_str(
             r#"
 [ui.sidebar.agents]
-rows = [["state_icon", "workspace"], ["state_text", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"]]
+rows = [["state_icon", "workspace"], ["state_text", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"], ["name", "$name"]]
 row_gap = 1
 
 [ui.sidebar.agents.rows_by_agent]
@@ -677,6 +681,13 @@ row_gap = 3
                     AgentSidebarToken::Agent,
                     AgentSidebarToken::Custom("model".into()),
                 ],
+            ]
+        );
+        assert_eq!(
+            config.ui.sidebar.agents.rows[3],
+            vec![
+                AgentSidebarToken::Name,
+                AgentSidebarToken::Custom("name".into()),
             ]
         );
         assert_eq!(config.ui.sidebar.agents.row_gap, 1);

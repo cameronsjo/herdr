@@ -361,6 +361,10 @@ crate::cli::projection::cli_params! {
     pub struct PaneSendTextParams => PaneSendTextProjection {
         pub pane_id: String => Field::new(String::new()).input(binding::pane_id()),
         pub text: String => Field::new(String::new()).input(binding::joined("text", "TEXT")),
+        /// Fork: wrap the text in bracketed paste when the pane has enabled
+        /// it, so an agent's input reads it as one paste, not typing.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pub paste: bool => Field::new(false).input(binding::boolean("paste", true).help("Send as a bracketed paste when the pane accepts one")),
     }
 }
 
