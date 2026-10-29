@@ -65,10 +65,14 @@ The agent-name grammar is upstream's `valid_agent_name`, which upstream applies 
 - **THEN** the first pane restored keeps `reviewer` and the second restores with no agent name
 
 ### Requirement: Tab label that spells the agent name follows a rename
-When `agent.rename` renames the only pane in a tab whose agent name routes to a live agent, and the tab's label equals that agent's previous name, the tab's label SHALL become the new name and `tab_renamed` SHALL be emitted. An auto-named tab, a tab whose label differs from the previous name, and a tab holding two or more named live agents MUST keep their labels. `tab.rename` MUST NOT change any agent name, and clearing an agent name MUST NOT change any label.
+When `agent.rename` renames the tab's only live named agent, and the tab's label equals that agent's previous name, the tab's label SHALL become the new name and `tab_renamed` SHALL be emitted. An auto-named tab, a tab whose label differs from the previous name, and a tab holding two or more named live agents MUST keep their labels. `tab.rename` MUST NOT change any agent name, and clearing an agent name MUST NOT change any label.
 
 #### Scenario: Agent renamed under a tab labeled with its name
 - **WHEN** a tab labeled `cos-cadence` holds one pane, named `cos-cadence`, and `agent.rename` renames it to `cos-forge`
+- **THEN** the tab's label is `cos-forge`
+
+#### Scenario: Named agent beside an unnamed pane
+- **WHEN** a tab labeled `cos-cadence` holds the live agent named `cos-cadence` and a shell pane with no agent name, and the agent is renamed to `cos-forge`
 - **THEN** the tab's label is `cos-forge`
 
 #### Scenario: Label of the user's own

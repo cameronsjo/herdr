@@ -154,7 +154,9 @@ impl App {
             return tab_not_found(id, &params.tab_id);
         };
         self.set_tab_label(ws_idx, tab_idx, params.label);
-        let tab = self.tab_info(ws_idx, tab_idx).unwrap();
+        let Some(tab) = self.tab_info(ws_idx, tab_idx) else {
+            return tab_not_found(id, &params.tab_id);
+        };
 
         encode_success(id, ResponseResult::TabInfo { tab })
     }

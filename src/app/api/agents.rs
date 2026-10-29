@@ -1234,6 +1234,49 @@ mod tests {
     }
 
     #[test]
+    fn agent_rename_to_its_own_name_announces_nothing() {
+        let event_hub = crate::api::EventHub::default();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        app.state.workspaces = vec![Workspace::test_new("agent")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].tabs[0].set_custom_name("reviewer".into());
+        name_agent(&mut app, pane_id, "reviewer");
+
+        rename_agent(&mut app, "reviewer", "reviewer");
+
+        assert!(!event_hub.events_after(0).iter().any(|(_, event)| matches!(
+            &event.data,
+            crate::api::schema::EventData::TabRenamed { .. }
+        )));
+    }
+
+    #[test]
+    fn agent_rename_carries_the_tab_beside_an_unnamed_pane() {
+        let mut app = app_with_agent();
+        let first = app.state.workspaces[0].tabs[0].root_pane;
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.workspaces[0].tabs[0].set_custom_name("cos-cadence".into());
+        name_agent(&mut app, first, "cos-cadence");
+
+        rename_agent(&mut app, "cos-cadence", "cos-forge");
+
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("cos-forge")
+        );
+    }
+
+    #[test]
     fn agent_name_clear_leaves_every_label() {
         let mut app = app_with_agent();
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
