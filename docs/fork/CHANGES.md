@@ -253,7 +253,7 @@ next sync is likely to conflict again:
 - **PR:** [cameronsjo/herdr#142](https://github.com/cameronsjo/herdr/pull/142)
 - **Files:** `src/cli/pane.rs`, `src/cli/pane/bindings.rs`, `src/cli/spec.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-focus/spec.md` (via the archived `pane-focus-jump` change)
 - **Adds:** a positional pane id on `pane focus`, which sends the existing `pane.focus` (it switches workspace and tab before focusing). `--direction` is now required unless a pane id is given, and still sends `pane.focus_direction`; a pane id cannot be combined with `--direction`, `--pane` or `--current`. CLI only, so a candidate to offer upstream.
-- **Collision:** the `focus` leaf in `bindings.rs` (now a hand-built `Leaf` with `focus_arguments`/`focus` in `pane.rs`) and the dropped `pane focus` row in `spec_marks_runtime_required_options_as_required`.
+- **Collision:** the `focus` leaf in `bindings.rs` (now a hand-built `Leaf` with `focus_arguments`/`focus` in `pane.rs`, plus a required `focus_target` group in `Leaf::command`) and the dropped `pane focus` row in `spec_marks_runtime_required_options_as_required`.
 - **Regression check:** `cargo nextest run -E 'test(/pane_focus/)'`. Live: from workspace 1, `herdr pane focus <pane in workspace 2>` lands on that pane.
 - **Render scaling:** not affected; CLI parsing only.
 

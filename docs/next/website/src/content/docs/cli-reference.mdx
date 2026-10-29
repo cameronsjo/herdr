@@ -221,8 +221,7 @@ herdr pane layout [--pane ID|--current]
 herdr pane process-info [--pane ID|--current]
 herdr pane neighbor --direction left|right|up|down [--pane ID|--current]
 herdr pane edges [--pane ID|--current]
-herdr pane focus --direction left|right|up|down [--pane ID|--current]
-herdr pane focus <pane_id>
+herdr pane focus <pane_id>|--direction left|right|up|down [--pane ID|--current]
 herdr pane resize --direction left|right|up|down [--amount FLOAT] [--pane ID|--current]
 herdr pane zoom [<pane_id>|--pane ID|--current] [--toggle|--on|--off]
 herdr pane rename <pane_id> <label>|--clear
@@ -236,7 +235,7 @@ herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--f
 herdr pane close <pane_id>
 ```
 
-`pane focus <pane_id>` jumps to that pane from anywhere: it switches to the pane's workspace and tab, then focuses it, in one call. With `--direction`, `pane focus` moves to a neighboring pane as before.
+`pane focus <pane_id>` jumps to that pane from anywhere: it switches to the pane's workspace and tab, then focuses it, in one call. With `--direction`, `pane focus` moves to a neighboring pane as before. The jump prints the focused pane's info, the same shape as `pane get`; the directional move prints its own result.
 
 For pane commands that accept `--current`, Herdr uses the calling pane's
 `HERDR_PANE_ID` when the command runs inside a Herdr pane. For `pane split`,

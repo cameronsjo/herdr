@@ -145,8 +145,10 @@ fn focus_arguments() -> Vec<clap::Arg> {
     let mut arguments = PaneFocusProjection::arguments()
         .into_iter()
         .map(|argument| {
+            // The `focus_target` group in `Leaf::command` requires exactly one
+            // of `--direction` or a pane id.
             if argument.get_id() == "direction" {
-                argument.required(false).required_unless_present("pane_id")
+                argument.required(false)
             } else {
                 argument
             }
@@ -156,24 +158,24 @@ fn focus_arguments() -> Vec<clap::Arg> {
         clap::Arg::new("pane_id")
             .value_name("PANE_ID")
             .index(1)
-            .conflicts_with_all(["direction", "pane", "current"])
+            .allow_hyphen_values(true)
+            .conflicts_with_all(["pane", "current"])
             .help("Jump to this pane, switching workspace and tab"),
     );
     arguments
 }
 
 fn focus(matches: &ArgMatches) -> Result<Method, ParseError> {
-    if let Some(pane_id) = matches.get_one::<String>("pane_id") {
-        return Ok(Method::PaneFocus(crate::api::schema::PaneTarget {
-            pane_id: super::normalize_pane_id(pane_id),
-        }));
+    let Some(pane_id) = matches.get_one::<String>("pane_id") else {
+        return PaneFocusProjection::from_matches(matches).map(Method::PaneFocusDirection);
+    };
+    // Single-dash ids are accepted; `--` words are mistyped options.
+    if pane_id.starts_with("--") {
+        return Err(ParseError::Usage(format!("unknown option: {pane_id}")));
     }
-    if matches.value_source("direction").is_none() {
-        return Err(ParseError::Usage(
-            "provide --direction, or a pane id to jump to".into(),
-        ));
-    }
-    PaneFocusProjection::from_matches(matches).map(Method::PaneFocusDirection)
+    Ok(Method::PaneFocus(crate::api::schema::PaneTarget {
+        pane_id: super::normalize_pane_id(pane_id),
+    }))
 }
 
 fn move_pane(matches: &ArgMatches) -> Result<Method, ParseError> {
@@ -659,6 +661,9 @@ mod tests {
         assert!(request("focus", &["--pane", "w1:p2"]).is_err());
         assert!(request("focus", &["w1:p2", "--direction", "up"]).is_err());
         assert!(request("focus", &["w1:p2", "--current"]).is_err());
+        assert!(request("focus", &["--direcion", "up"]).is_err());
+        let json = serde_json::to_value(request("focus", &["-p"]).unwrap()).unwrap();
+        assert_eq!(json["params"]["pane_id"], "-p");
     }
 
     #[test]
