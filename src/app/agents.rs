@@ -121,12 +121,31 @@ impl App {
         if terminal.effective_agent_label().is_none() {
             return Err(AgentRenameError::NotAgent);
         }
-        match normalized_name {
-            Some(name) => terminal.set_agent_name(name),
+        let previous_name = terminal.agent_name.clone();
+        match normalized_name.clone() {
+            Some(name) => {
+                // A pane label that spells the old name is the name, often one
+                // a cold restore kept; one that differs is the user's own.
+                if previous_name.is_some() && terminal.manual_label == previous_name {
+                    terminal.set_manual_label(name.clone());
+                }
+                terminal.set_agent_name(name)
+            }
             None => terminal.clear_agent_name(),
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
+        if let Some((previous_name, name)) = previous_name
+            .zip(normalized_name)
+            .filter(|(previous, name)| previous != name)
+        {
+            self.sync_tab_label_to_agent_name(
+                resolved.ws_idx,
+                resolved.pane_id,
+                &previous_name,
+                &name,
+            );
+        }
         self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
         self.agent_info(resolved.ws_idx, resolved.pane_id)
             .ok_or_else(|| {
@@ -437,6 +456,55 @@ impl App {
             foreground_cwd: pane.foreground_cwd,
             revision: pane.revision,
         })
+    }
+
+    /// The one pane in the tab whose agent name routes to a live agent, when
+    /// exactly one does. A name an agent has left behind does not count.
+    fn sole_named_agent_in_tab(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+    ) -> Option<crate::layout::PaneId> {
+        let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+        let mut named = tab.panes.iter().filter_map(|(pane_id, pane)| {
+            self.state
+                .terminals
+                .get(&pane.attached_terminal_id)
+                .is_some_and(|terminal| terminal.agent_name_routes())
+                .then_some(*pane_id)
+        });
+        let sole = named.next()?;
+        named.next().is_none().then_some(sole)
+    }
+
+    /// Lets a tab label that spells the agent's previous name follow a
+    /// rename, when the agent is the tab's only named one. Any other label is
+    /// the user's own and stays.
+    fn sync_tab_label_to_agent_name(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        previous_name: &str,
+        name: &str,
+    ) {
+        let Some(tab_idx) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.find_tab_index_for_pane(pane_id))
+        else {
+            return;
+        };
+        if self.sole_named_agent_in_tab(ws_idx, tab_idx) != Some(pane_id) {
+            return;
+        }
+        if self.state.workspaces[ws_idx].tabs[tab_idx]
+            .custom_name
+            .as_deref()
+            == Some(previous_name)
+        {
+            self.set_tab_label(ws_idx, tab_idx, name.to_string());
+        }
     }
 
     fn agent_name_conflicts(

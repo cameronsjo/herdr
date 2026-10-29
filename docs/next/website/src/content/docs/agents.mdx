@@ -135,6 +135,8 @@ herdr agent rename reviewer --clear
 
 Targets accept a unique live agent name or the pane ID that currently hosts the agent. Terminal IDs and bare agent-kind labels are not accepted.
 
+While a named agent runs, its pane's border shows the pane label if you set one, otherwise the agent name, in place of the agent's own session title. A pane label that spells the agent's old name follows `agent rename`. So does a tab label that spells it, as long as the tab holds no other named agent. A label that differs from the name is yours, and a rename leaves it alone. Renaming a tab never renames its agent.
+
 ## Custom status labels
 
 Integrations report lifecycle state as semantic state only. Add display customization separately with pane metadata tokens.
