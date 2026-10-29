@@ -894,7 +894,9 @@ fn resolved_agent_name_from_path_token(token: &str) -> Option<String> {
 }
 
 fn agent_name_from_basename(basename: &str) -> Option<String> {
-    let agent = parse_agent_label(basename)?;
+    // Fork: `identify_agent`, so wrapper scripts run through an interpreter
+    // also match `[advanced] agent_process_names`.
+    let agent = identify_agent(basename)?;
     Some(agent_label(agent).to_string())
 }
 

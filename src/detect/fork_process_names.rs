@@ -15,6 +15,9 @@ use std::sync::{
 use super::Agent;
 
 static EXTRA_NAMES: OnceLock<RwLock<HashMap<String, Agent>>> = OnceLock::new();
+// The kernel's TASK_COMM_LEN less its terminating NUL.
+const LINUX_COMM_MAX_BYTES: usize = 15;
+
 // Lets the common case (nothing configured) skip the lock on every lookup.
 static HAS_EXTRA_NAMES: AtomicBool = AtomicBool::new(false);
 
@@ -34,7 +37,7 @@ pub(crate) fn extra_process_names(
     let mut names = HashMap::new();
     let mut diagnostics = Vec::new();
     for (kind, entries) in config {
-        let Some(agent) = super::parse_canonical_agent_label(kind) else {
+        let Some(agent) = super::parse_canonical_agent_label(&kind.to_lowercase()) else {
             diagnostics.push(format!(
                 "unknown agent kind `{kind}` in [advanced] agent_process_names; ignoring its names"
             ));
@@ -45,6 +48,12 @@ pub(crate) fn extra_process_names(
             if name.is_empty() || name.contains(['/', '\\']) {
                 diagnostics.push(format!(
                     "invalid process name `{entry}` for `{kind}` in [advanced] agent_process_names; use a bare executable name"
+                ));
+                continue;
+            }
+            if is_shell_or_launcher(&name) {
+                diagnostics.push(format!(
+                    "process name `{entry}` in [advanced] agent_process_names is a shell, runtime or launcher; ignoring it for `{kind}`"
                 ));
                 continue;
             }
@@ -67,12 +76,47 @@ pub(crate) fn extra_process_names(
                 )),
                 Some(_) => {}
                 None => {
+                    // Linux reports a process name cut to 15 bytes, so a longer
+                    // configured name also matches its cut form.
+                    if let Some(cut) = name.get(..LINUX_COMM_MAX_BYTES) {
+                        if name.len() > LINUX_COMM_MAX_BYTES && super::parse_agent_label(cut).is_none() {
+                            names.entry(cut.to_string()).or_insert(agent);
+                        }
+                    }
                     names.insert(name, agent);
                 }
             }
         }
     }
     (names, diagnostics)
+}
+
+/// Names that also run things other than an agent. Claiming one would make a
+/// pane's shell, or a dev server, count as the agent, so name-routed input
+/// such as `agent prompt` would be typed into it.
+fn is_shell_or_launcher(name: &str) -> bool {
+    super::is_generic_runtime_or_shell(name)
+        || matches!(
+            name,
+            "dash"
+                | "ksh"
+                | "mksh"
+                | "csh"
+                | "tcsh"
+                | "nu"
+                | "xonsh"
+                | "elvish"
+                | "screen"
+                | "deno"
+                | "npx"
+                | "bunx"
+                | "env"
+                | "sudo"
+                | "doas"
+                | "ssh"
+                | "login"
+                | "su"
+        )
 }
 
 /// Replaces the extra names used by process identification. Invalid entries
@@ -91,15 +135,18 @@ pub(crate) fn set_extra_process_names(config: &BTreeMap<String, Vec<String>>) {
 /// The kind a configured extra name belongs to, matched on the executable's
 /// basename the same way as the built-in names.
 pub(crate) fn lookup_extra_process_name(process_name: &str) -> Option<Agent> {
-    let name = super::normalized_agent_lookup_name(process_name);
-    let name = super::path_basename(&name);
     #[cfg(test)]
-    if let Some(agent) = TEST_NAMES.with(|names| names.borrow().get(name).copied()) {
+    if let Some(agent) = TEST_NAMES.with(|names| {
+        let name = super::normalized_agent_lookup_name(process_name);
+        names.borrow().get(super::path_basename(&name)).copied()
+    }) {
         return Some(agent);
     }
     if !HAS_EXTRA_NAMES.load(Ordering::Acquire) {
         return None;
     }
+    let name = super::normalized_agent_lookup_name(process_name);
+    let name = super::path_basename(&name);
     let lock = EXTRA_NAMES.get()?;
     let names = match lock.read() {
         Ok(names) => names,
@@ -153,6 +200,57 @@ mod tests {
             "a built-in alias of the same kind is accepted silently"
         );
         assert_eq!(diagnostics.len(), 5, "{diagnostics:?}");
+    }
+
+    #[test]
+    fn extra_process_names_match_the_linux_cut_name_and_any_kind_case() {
+        let (names, diagnostics) =
+            extra_process_names(&config(&[("Claude", &["claude-wrapper-v2"])]));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(names.get("claude-wrapper-v2"), Some(&Agent::Claude));
+        assert_eq!(names.get("claude-wrapper-"), Some(&Agent::Claude));
+    }
+
+    #[test]
+    fn extra_process_names_match_a_wrapper_run_by_an_interpreter() {
+        let name = "herdr-test-wrapper";
+        let (names, _) = extra_process_names(&config(&[("claude", &[name])]));
+        TEST_NAMES.with(|current| *current.borrow_mut() = names);
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 41,
+            processes: vec![crate::platform::ForegroundProcess {
+                pid: 41,
+                name: "bash".into(),
+                argv0: Some("bash".into()),
+                argv: Some(vec!["bash".into(), format!("/opt/bin/{name}")]),
+                cmdline: Some(format!("bash /opt/bin/{name}")),
+            }],
+        };
+        let identified = crate::detect::identify_agent_in_job(&job).map(|(agent, _)| agent);
+        TEST_NAMES.with(|current| current.borrow_mut().clear());
+        assert_eq!(identified, Some(Agent::Claude));
+    }
+
+    #[test]
+    fn extra_process_names_refuses_shells_runtimes_and_launchers() {
+        let (names, diagnostics) = extra_process_names(&config(&[(
+            "claude",
+            &[
+                "zsh",
+                "node",
+                "python3",
+                "pwsh.exe",
+                "sudo",
+                "nu",
+                "my-claude",
+            ],
+        )]));
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert_eq!(names.get("my-claude"), Some(&Agent::Claude));
+        assert_eq!(diagnostics.len(), 6, "{diagnostics:?}");
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.contains("is a shell, runtime or launcher")));
     }
 
     #[test]
