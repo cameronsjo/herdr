@@ -19,6 +19,7 @@ use crate::api::{ApiRequestSender, EventHub};
 use crate::ipc::LocalStream;
 
 const AGENT_PROMPT_EFFECT_TIMEOUT_MS: u64 = 5_000;
+const PROMPT_EFFECT_FLOOR_MS: u64 = 100;
 
 pub(super) fn wait_for_output(
     request_id: String,
@@ -188,8 +189,16 @@ pub(super) fn prompt_agent(
         // the prompt's own error from the app, so it is dispatched unchanged.
         let baseline = agent_get(&request_id, &params.target, api_tx)
             .ok()
-            .map(|before| DeliveryBaseline::capture(&request_id, &before, &params.text, api_tx));
-        let target = params.target.clone();
+            .map(|before| {
+                DeliveryBaseline::capture(
+                    &request_id,
+                    &before,
+                    &params.text,
+                    api_tx,
+                    event_hub,
+                    None,
+                )
+            });
         let response = dispatch_to_app_with_timeout(
             Request {
                 id: request_id.clone(),
@@ -198,19 +207,19 @@ pub(super) fn prompt_agent(
             api_tx,
             None,
         );
-        let Some(baseline) = baseline else {
-            return Ok(Some(response));
-        };
         if agent_from_response(&request_id, &response).is_err() {
             return Ok(Some(response));
         }
-        let delivery = baseline.observe(
-            &request_id,
-            &target,
-            api_tx,
-            running,
-            std::time::Instant::now() + PROMPT_DELIVERY_WINDOW,
-        );
+        let delivery = baseline.map_or(crate::api::schema::PromptDelivery::Unknown, |baseline| {
+            baseline.observe(
+                &request_id,
+                api_tx,
+                event_hub,
+                stream,
+                running,
+                std::time::Instant::now() + PROMPT_DELIVERY_WINDOW,
+            )
+        });
         return Ok(Some(with_delivery(response, delivery)));
     };
 
@@ -231,8 +240,17 @@ pub(super) fn prompt_agent(
     };
     let prompt_started_working =
         before_prompt.agent_status == crate::api::schema::AgentStatus::Working;
-    let delivery_baseline =
-        DeliveryBaseline::capture(&request_id, &before_prompt, &params.text, api_tx);
+    let wait_deadline = wait
+        .timeout_ms
+        .map(|timeout_ms| wait_started + std::time::Duration::from_millis(timeout_ms));
+    let delivery_baseline = DeliveryBaseline::capture(
+        &request_id,
+        &before_prompt,
+        &params.text,
+        api_tx,
+        event_hub,
+        wait_deadline,
+    );
     let target = params.target.clone();
     if let Some(prompt_wait) = params.wait.as_mut() {
         prompt_wait.submission_deadline = wait
@@ -263,13 +281,23 @@ pub(super) fn prompt_agent(
     ) {
         return agent_wait_not_running(request_id).map(Some);
     }
-    let delivery_deadline = std::time::Instant::now() + PROMPT_DELIVERY_WINDOW;
-    let delivery_deadline = wait
-        .timeout_ms
-        .map(|timeout_ms| wait_started + std::time::Duration::from_millis(timeout_ms))
-        .map_or(delivery_deadline, |timeout| timeout.min(delivery_deadline));
-    let delivery =
-        delivery_baseline.observe(&request_id, &target, api_tx, running, delivery_deadline);
+    let submitted_at = std::time::Instant::now();
+    let delivery_deadline = submitted_at + PROMPT_DELIVERY_WINDOW;
+    let delivery_deadline =
+        wait_deadline.map_or(delivery_deadline, |timeout| timeout.min(delivery_deadline));
+    let delivery = delivery_baseline.observe(
+        &request_id,
+        api_tx,
+        event_hub,
+        stream,
+        running,
+        delivery_deadline,
+    );
+    // The delivery window counts toward the five seconds a prompt has to
+    // show activity; the floor leaves the gate one look at replayed events.
+    let effect_budget_ms = AGENT_PROMPT_EFFECT_TIMEOUT_MS
+        .saturating_sub(submitted_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+        .max(PROMPT_EFFECT_FLOOR_MS);
 
     let prompt_activity_observed = prompt_started_working
         || matches!(
@@ -283,11 +311,11 @@ pub(super) fn prompt_agent(
     if !prompt_activity_observed {
         let remaining_timeout_ms = remaining_timeout_ms(wait.timeout_ms, wait_started);
         let (effect_timeout_ms, timeout_kind) = match remaining_timeout_ms {
-            Some(timeout_ms) if timeout_ms <= AGENT_PROMPT_EFFECT_TIMEOUT_MS => {
+            Some(timeout_ms) if timeout_ms <= effect_budget_ms => {
                 (timeout_ms, AgentWaitTimeoutKind::Status)
             }
             _ => (
-                AGENT_PROMPT_EFFECT_TIMEOUT_MS,
+                effect_budget_ms,
                 AgentWaitTimeoutKind::PromptStalled {
                     timeout_ms: AGENT_PROMPT_EFFECT_TIMEOUT_MS,
                 },

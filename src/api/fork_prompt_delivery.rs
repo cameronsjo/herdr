@@ -7,22 +7,26 @@
 //! copies. After the write, this watches the agent's status and the bottom of
 //! its screen for a short window and reports what it saw.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{
-    AgentInfo, AgentStatus, Method, PaneReadParams, PaneReadResult, PromptDelivery, ReadFormat,
-    ReadIntent, ReadSource, Request,
+    AgentInfo, AgentStatus, EventData, Method, PaneReadParams, PaneReadResult, PromptDelivery,
+    ReadFormat, ReadIntent, ReadSource, Request,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
-use crate::api::ApiRequestSender;
+use crate::api::server::{
+    dispatch_to_app_with_caller_timeout, should_stop_connection, APP_RESPONSE_TIMEOUT,
+};
+use crate::api::{ApiRequestSender, EventHub};
+use crate::ipc::LocalStream;
 
 /// How long to look for evidence after the write completes.
 pub(super) const PROMPT_DELIVERY_WINDOW: Duration = Duration::from_millis(1_500);
 const PROMPT_DELIVERY_POLL: Duration = Duration::from_millis(100);
 /// Characters of the prompt's first line to look for on screen. Short enough
-/// to fit an input box row, long enough not to match unrelated text.
+/// to fit most input box rows, long enough not to match unrelated text; a
+/// pane too narrow for it wraps the text and reads `unknown`.
 const ECHO_NEEDLE_CHARS: usize = 32;
 /// A shorter first line ("y", "ok") matches too much incidental text to count.
 const ECHO_NEEDLE_MIN_CHARS: usize = 4;
@@ -31,21 +35,25 @@ const ECHO_NEEDLE_MIN_CHARS: usize = 4;
 pub(super) struct DeliveryBaseline {
     pane_id: String,
     busy: bool,
-    state_change_seq: u64,
     needle: Option<String>,
     echoes: usize,
+    event_sequence: u64,
 }
 
 impl DeliveryBaseline {
+    /// Call immediately before dispatching the prompt: status changes after
+    /// the event sequence read here count as evidence.
     pub(super) fn capture(
         request_id: &str,
         before: &AgentInfo,
         text: &str,
         api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        deadline: Option<Instant>,
     ) -> Self {
         let needle = echo_needle(text);
         let echoes = match &needle {
-            Some(needle) => read_detection_text(request_id, &before.pane_id, api_tx)
+            Some(needle) => read_detection_text(request_id, &before.pane_id, api_tx, deadline)
                 .map(|screen| count_echoes(&screen, needle))
                 .unwrap_or(0),
             None => 0,
@@ -53,40 +61,52 @@ impl DeliveryBaseline {
         Self {
             pane_id: before.pane_id.clone(),
             busy: before.agent_status == AgentStatus::Working,
-            state_change_seq: before.state_change_seq,
             needle,
             echoes,
+            event_sequence: event_hub.current_sequence(),
         }
     }
 
-    /// Polls until there is evidence or `deadline` passes.
+    /// Polls until there is evidence, `deadline` passes, or the caller goes
+    /// away.
     pub(super) fn observe(
         &self,
         request_id: &str,
-        target: &str,
         api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        stream: &mut LocalStream,
         running: &Arc<AtomicBool>,
         deadline: Instant,
     ) -> PromptDelivery {
+        let mut statuses = StatusEvidence::default();
+        let mut last_sequence = self.event_sequence;
         loop {
-            let went_working = !self.busy
-                && agent_get(request_id, target, api_tx).is_some_and(|agent| {
-                    agent.state_change_seq != self.state_change_seq
-                        && matches!(
-                            agent.agent_status,
-                            AgentStatus::Working | AgentStatus::Blocked
-                        )
-                });
-            let echoed = !went_working
+            // Replaying events, not polling status, catches a turn that starts
+            // and ends between two polls.
+            for (sequence, event) in event_hub.events_after(last_sequence) {
+                last_sequence = sequence;
+                if let EventData::PaneAgentStatusChanged {
+                    pane_id,
+                    agent_status,
+                    ..
+                } = event.data
+                {
+                    if pane_id == self.pane_id {
+                        statuses.record(agent_status);
+                    }
+                }
+            }
+            let started_turn = statuses.started_turn(self.busy);
+            let echoed = !started_turn
                 && self.needle.as_deref().is_some_and(|needle| {
-                    read_detection_text(request_id, &self.pane_id, api_tx)
+                    read_detection_text(request_id, &self.pane_id, api_tx, Some(deadline))
                         .is_some_and(|screen| count_echoes(&screen, needle) > self.echoes)
                 });
-            if let Some(delivery) = classify(self.busy, went_working, echoed) {
+            if let Some(delivery) = classify(self.busy, started_turn, echoed) {
                 return delivery;
             }
             let now = Instant::now();
-            if now >= deadline || !running.load(Ordering::Relaxed) {
+            if now >= deadline || should_stop_connection(stream, running).unwrap_or(true) {
                 return PromptDelivery::Unknown;
             }
             std::thread::sleep(PROMPT_DELIVERY_POLL.min(deadline - now));
@@ -94,9 +114,40 @@ impl DeliveryBaseline {
     }
 }
 
+/// Status changes seen on the agent's pane since the write.
+#[derive(Default)]
+struct StatusEvidence {
+    settled: bool,
+    active_after_settled: bool,
+    active: bool,
+}
+
+impl StatusEvidence {
+    fn record(&mut self, status: AgentStatus) {
+        match status {
+            AgentStatus::Working | AgentStatus::Blocked => {
+                self.active = true;
+                self.active_after_settled |= self.settled;
+            }
+            AgentStatus::Idle | AgentStatus::Done => self.settled = true,
+            AgentStatus::Unknown => {}
+        }
+    }
+
+    /// A non-working agent started a turn, or a working one finished its turn
+    /// and started another.
+    fn started_turn(&self, busy: bool) -> bool {
+        if busy {
+            self.active_after_settled
+        } else {
+            self.active
+        }
+    }
+}
+
 /// `None` means no evidence yet.
-fn classify(busy: bool, went_working: bool, echoed: bool) -> Option<PromptDelivery> {
-    match (busy, went_working || echoed) {
+fn classify(busy: bool, started_turn: bool, echoed: bool) -> Option<PromptDelivery> {
+    match (busy, started_turn || echoed) {
         (_, false) => None,
         (false, true) => Some(PromptDelivery::Typed),
         (true, true) => Some(PromptDelivery::Queued),
@@ -118,35 +169,45 @@ fn echo_needle(text: &str) -> Option<String> {
 fn count_echoes(screen: &str, needle: &str) -> usize {
     screen
         .lines()
-        .map(|line| collapse_whitespace(line).matches(needle).count())
-        .sum()
+        .filter(|line| collapse_whitespace(line).contains(needle))
+        .count()
 }
 
 fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn agent_get(request_id: &str, target: &str, api_tx: &ApiRequestSender) -> Option<AgentInfo> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:delivery-agent"),
-            method: Method::AgentGet(crate::api::schema::AgentTarget {
-                target: target.to_string(),
-            }),
-        },
+/// Sends one app request, bounded by `deadline` as well as the usual app
+/// timeout so a stalled app loop cannot hold the caller past its own timeout.
+fn dispatch(
+    request: Request,
+    api_tx: &ApiRequestSender,
+    deadline: Option<Instant>,
+) -> Option<String> {
+    let timeout = match deadline {
+        Some(deadline) => {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
+            remaining.min(APP_RESPONSE_TIMEOUT)
+        }
+        None => APP_RESPONSE_TIMEOUT,
+    };
+    Some(dispatch_to_app_with_caller_timeout(
+        request,
         api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).ok()?;
-    serde_json::from_value(value.get("result")?.get("agent")?.clone()).ok()
+        Some(timeout),
+    ))
 }
 
 fn read_detection_text(
     request_id: &str,
     pane_id: &str,
     api_tx: &ApiRequestSender,
+    deadline: Option<Instant>,
 ) -> Option<String> {
-    let response = dispatch_to_app_with_timeout(
+    let response = dispatch(
         Request {
             id: format!("{request_id}:delivery-read"),
             method: Method::PaneRead(PaneReadParams {
@@ -159,8 +220,8 @@ fn read_detection_text(
             }),
         },
         api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
+        deadline,
+    )?;
     let value: serde_json::Value = serde_json::from_str(&response).ok()?;
     let read: PaneReadResult =
         serde_json::from_value(value.get("result")?.get("read")?.clone()).ok()?;
@@ -220,6 +281,10 @@ mod tests {
     fn echoes_count_rows_with_collapsed_whitespace() {
         let screen = "│ > Review  this diff │\nold: Review this diff\nunrelated";
         assert_eq!(count_echoes(screen, "Review this diff"), 2);
+        assert_eq!(
+            count_echoes("Review this diff Review this diff", "Review this diff"),
+            1
+        );
         assert_eq!(count_echoes(screen, "Fix the build"), 0);
     }
 
@@ -230,6 +295,27 @@ mod tests {
         assert_eq!(classify(false, true, false), Some(PromptDelivery::Typed));
         assert_eq!(classify(false, false, true), Some(PromptDelivery::Typed));
         assert_eq!(classify(true, false, true), Some(PromptDelivery::Queued));
+    }
+
+    #[test]
+    fn a_settled_turn_is_not_evidence_for_an_idle_agent() {
+        let mut idle = StatusEvidence::default();
+        idle.record(AgentStatus::Done);
+        idle.record(AgentStatus::Idle);
+        assert!(!idle.started_turn(false));
+        idle.record(AgentStatus::Working);
+        assert!(idle.started_turn(false));
+    }
+
+    #[test]
+    fn a_busy_agent_needs_a_new_turn_after_settling() {
+        let mut busy = StatusEvidence::default();
+        busy.record(AgentStatus::Working);
+        assert!(!busy.started_turn(true));
+        busy.record(AgentStatus::Idle);
+        assert!(!busy.started_turn(true));
+        busy.record(AgentStatus::Working);
+        assert!(busy.started_turn(true));
     }
 
     #[test]

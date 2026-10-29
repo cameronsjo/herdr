@@ -135,11 +135,15 @@ When a pane moves and its public id changes, the previous public id SHALL keep r
 - **THEN** none of that pane's previous public ids resolve
 
 ### Requirement: Prompt results report delivery
-A successful `agent.prompt` result SHALL carry `delivered`, set from what herdr observes for up to 1.5 seconds after the prompt is written, capped by any `--wait` timeout. It MUST be `typed` when the agent was not working before the write and then starts working, blocks, or shows the prompt; `queued` when it was working before the write and shows the prompt; and `unknown` otherwise. A client MUST read an unrecognized value as `unknown`.
+A successful `agent.prompt` result SHALL carry `delivered`, set from what herdr observes for up to 1.5 seconds after the prompt is written, capped by any `--wait` timeout. It MUST be `typed` when the agent was not working before the write and then reports working or blocked, or shows the prompt; `queued` when it was working before the write and then shows the prompt, or settles and reports working or blocked again; and `unknown` otherwise. A client MUST read an unrecognized value as `unknown`.
 
 #### Scenario: Prompt to an idle agent
 - **WHEN** `herdr agent prompt main "Review this diff"` targets an idle agent that starts working
 - **THEN** the result's `delivered` is `typed`
+
+#### Scenario: A turn shorter than one poll
+- **WHEN** an idle agent reports working and then idle again within 100 ms of the write
+- **THEN** the result's `delivered` is `typed`, because status changes are replayed from the agent's event stream
 
 #### Scenario: Prompt to a working agent
 - **WHEN** a prompt is sent to an agent that is already working and its text appears in the agent's input area

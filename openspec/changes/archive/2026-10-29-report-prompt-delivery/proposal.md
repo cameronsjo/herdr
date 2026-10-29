@@ -5,7 +5,7 @@
 ## What Changes
 
 - A successful `agent.prompt` result gains `delivered`: `typed`, `queued` or `unknown`.
-- After the write, the API server watches the agent for up to 1.5 seconds and stops at the first evidence: a non-working agent that starts working (or blocks) or shows the prompt is `typed`; an agent that was already working and shows the prompt is `queued`; no evidence is `unknown`.
+- After the write, the API server watches the agent for up to 1.5 seconds and stops at the first evidence: a non-working agent that reports working or blocked (replayed from the event stream) or shows the prompt is `typed`; an agent that was already working and shows the prompt, or settles and starts another turn, is `queued`; no evidence is `unknown`. Each app call in the window is capped by the caller's `--wait` timeout, and the window counts toward the five-second activity gate.
 - "Shows the prompt" means the first 32 characters of the prompt's first non-blank line, whitespace collapsed, appear on more rows of the detection region than before the write. First lines under 4 characters are never matched.
 - With `--wait`, the window is capped by the caller's timeout and the result carries the same field.
 
