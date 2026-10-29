@@ -30,6 +30,21 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         _ => {}
     }
 
+    // Fork: `agent start --parent NAME` is taken out before clap parses the
+    // start options, so the API's start params stay unchanged.
+    let (start_args, parent) = if args.first().map(String::as_str) == Some("start") {
+        match super::fork_agent_parent::take_parent(args) {
+            Ok((rest, parent)) => (Some(rest), parent),
+            Err(message) => {
+                eprintln!("{message}");
+                return Ok(2);
+            }
+        }
+    } else {
+        (None, None)
+    };
+    let args = start_args.as_deref().unwrap_or(args);
+
     // `explain` and `wait` historically treat a bare `help` operand after the target as help.
     let help_args;
     let args = match args.first().map(String::as_str) {
@@ -68,7 +83,7 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         Operation::Rename(params) => agent_rename(params),
         Operation::Wait(params) => agent_wait(params),
         Operation::Prompt(params) => agent_prompt(params),
-        Operation::Start(params) => agent_start(params),
+        Operation::Start(params) => agent_start(params, parent.as_deref()),
         Operation::Attach(params) => agent_attach(params),
         Operation::Explain(params) => agent_explain(params),
     }
@@ -260,7 +275,7 @@ fn matched_rule_region_preview<'a>(
         .filter(|preview| !preview.is_empty())
 }
 
-fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
+fn agent_start(params: AgentStartParams, parent: Option<&str>) -> std::io::Result<i32> {
     let AgentStartParams {
         name,
         kind,
@@ -282,6 +297,15 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
             return super::print_response(&error);
         }
     }
+    // Fork: resolve `--parent` before anything is typed, so a typo fails
+    // without starting an agent.
+    let parent = match parent {
+        Some(parent) => match super::fork_agent_parent::resolve_parent(parent)? {
+            Ok(link) => Some(link),
+            Err(response) => return super::print_response(&response),
+        },
+        None => None,
+    };
     let pinned_terminal_id = pane_terminal_id(&pane_id)?;
     let mut retry_deadline = None;
     let mut previous_busy_response = None;
@@ -354,6 +378,16 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
     match waited {
         Ok(Ok(agent)) => {
             response["result"]["agent"] = agent;
+            if let Some(link) = parent.as_ref() {
+                let child_pane_id = response["result"]["agent"]["pane_id"]
+                    .as_str()
+                    .unwrap_or(&pane_id)
+                    .to_owned();
+                if let Some(error) = super::fork_agent_parent::record_parent(link, &child_pane_id)?
+                {
+                    return super::print_response(&error);
+                }
+            }
             super::print_response(&response)
         }
         Ok(Err(error)) => super::print_response(&error),

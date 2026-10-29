@@ -256,6 +256,13 @@ pub(super) fn blocked_first_order<T, K: PartialEq>(
     }
 }
 
+/// Whether `agent` is the one its token group is named after: an
+/// orchestrator under `group_by = { token = "parent" }`, whose workers carry
+/// `parent = <its name>`. Such an agent leads its group.
+pub(super) fn leads_its_token_group(agent: &ClientShellAgent, key: AgentGroupKey<&str>) -> bool {
+    matches!(key, AgentGroupKey::Token(value) if agent.name.as_deref() == Some(value))
+}
+
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
@@ -300,6 +307,20 @@ pub(super) fn ordered_agent_pane_ids(
             |agent| Some(agent_group_key(agent, &snapshot.workspaces, group_by)),
             |_| None,
             |agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked,
+        );
+    }
+    // Fork: the agent a token group is named after leads it, ahead of
+    // blocked members; runs are contiguous here, so this never splits one.
+    if gathers_group_runs(group_by, sort) {
+        agents = blocked_first_within_runs(
+            agents,
+            |agent| agent_group_key(agent, &snapshot.workspaces, group_by),
+            |agent| {
+                leads_its_token_group(
+                    agent,
+                    agent_group_key(agent, &snapshot.workspaces, group_by),
+                )
+            },
         );
     }
     agents

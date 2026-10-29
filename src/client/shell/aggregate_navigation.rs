@@ -95,6 +95,25 @@ pub(super) fn aggregate_agent_rows<'a>(
             |row| row.agent.agent_status == crate::api::schema::AgentStatus::Blocked,
         );
     }
+    if super::agent_sidebar::gathers_group_runs(group_by, sort) {
+        fn key<'r>(
+            row: &AggregateAgentRow<'r>,
+            group_by: &crate::config::AgentGroupBy,
+        ) -> (usize, super::agent_sidebar::AgentGroupKey<&'r str>) {
+            (
+                row.endpoint.endpoint_index,
+                super::agent_sidebar::agent_group_key(
+                    row.agent,
+                    &row.endpoint.snapshot.workspaces,
+                    group_by,
+                ),
+            )
+        }
+        let key = |row: &AggregateAgentRow<'a>| key(row, group_by);
+        rows = super::agent_sidebar::blocked_first_within_runs(rows, key, |row| {
+            super::agent_sidebar::leads_its_token_group(row.agent, key(row).1)
+        });
+    }
     rows
 }
 

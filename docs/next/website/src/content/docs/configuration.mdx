@@ -503,6 +503,13 @@ group in the view's order. Token grouping still turns off under **priority**
 order. Pane tokens can expire (`--ttl-ms`); an agent whose token expired
 uses its workspace's token, or returns to its workspace group.
 
+An agent whose name equals its group's value leads that group, ahead of blocked
+members. That is how orchestrators nest their workers: `herdr agent start
+worker-1 --parent orch ...` tags the worker, and `orch` itself, with
+`parent = orch`, so with `group_by = { token = "parent" }` the `orch` header
+lists `orch` first and its workers under it, wherever they run. Add `location`
+to `grouped_rows` to see where each worker lives.
+
 Set `blocked_first = true` to move blocked agents to the top of their group, or
 of the whole list when the panel is not grouped. Every other agent keeps its
 place, so groups stay whole. It applies in **grouped** (space) order, including
