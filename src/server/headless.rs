@@ -2513,6 +2513,22 @@ impl HeadlessServer {
                     }
                     return runtime.scroll_metrics() != scroll_before;
                 }
+                let peek_dismiss = self
+                    .app
+                    .state
+                    .popup_pane
+                    .as_ref()
+                    .is_some_and(|popup| popup.peek.is_some())
+                    .then(|| {
+                        super::pane_input::first_prefix_press(
+                            &events,
+                            &super::keybindings::app_keybindings(&self.app),
+                        )
+                    })
+                    .flatten();
+                if let Some(index) = peek_dismiss {
+                    events.truncate(index);
+                }
                 let interaction = client_pane_input_has_interaction(&events);
                 if let Some(client) = self.clients.get_mut(&client_id) {
                     client.track_shell_input(
@@ -2541,6 +2557,12 @@ impl HeadlessServer {
                 }
                 if let Err(err) = input_result {
                     warn!(client_id, terminal_id, err = %err, "targeted client popup input failed");
+                }
+                if peek_dismiss.is_some() {
+                    self.app.close_popup_pane();
+                    self.reconcile_client_shell_locations();
+                    self.reapply_controlled_shell_tab_geometry(false);
+                    return true;
                 }
                 foreground_changed | geometry_changed || scroll_changed
             }

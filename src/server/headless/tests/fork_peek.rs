@@ -1,4 +1,5 @@
 use super::*;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 fn send_public(server: &mut HeadlessServer, method: api::schema::Method) -> String {
     let (respond_to, response) = std::sync::mpsc::channel();
@@ -107,6 +108,72 @@ async fn peek_shows_another_tab_pane_at_popup_size_then_gives_it_back() {
     serde_json::from_str::<api::schema::SuccessResponse>(&response).expect(&response);
     assert!(server.app.state.popup_pane.is_none());
     assert_eq!(worker_size(&server), layout_size);
+    assert!(server.app.terminal_runtimes.get(&worker_terminal).is_some());
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
+async fn prefix_key_closes_a_peek_and_never_reaches_the_pane() {
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("peek");
+    let worker_tab = workspace.test_add_tab(Some("worker"));
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    let worker = server.app.state.workspaces[0].tabs[worker_tab].root_pane;
+    let worker_terminal = server.app.state.workspaces[0]
+        .terminal_id(worker)
+        .unwrap()
+        .clone();
+    let (runtime, mut worker_input) = crate::terminal::TerminalRuntime::test_with_channel(80, 23);
+    server
+        .app
+        .terminal_runtimes
+        .insert(worker_terminal.clone(), runtime);
+    let worker_id = server.app.public_pane_id(0, worker).unwrap();
+    let (control, _render) = connect_test_shell(&mut server, 42, 100, 30);
+    control.recv().unwrap();
+    server.claim_shell_tab_geometry(42, false);
+    let response = send_public(
+        &mut server,
+        api::schema::Method::PanePeek(api::schema::PaneTarget { pane_id: worker_id }),
+    );
+    serde_json::from_str::<api::schema::SuccessResponse>(&response).expect(&response);
+    let key = |code, modifiers| {
+        crate::protocol::ClientPaneInputEvent::from_terminal_key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))
+        .unwrap()
+    };
+
+    assert!(
+        !server.handle_server_event(ServerEvent::ClientShellPopupInput {
+            client_id: 42,
+            terminal_id: worker_terminal.to_string(),
+            events: vec![crate::protocol::ClientPaneInputEvent::TextCommit(
+                "y".into()
+            )],
+        })
+    );
+    assert_eq!(worker_input.try_recv().unwrap(), Bytes::from_static(b"y"));
+
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellPopupInput {
+            client_id: 42,
+            terminal_id: worker_terminal.to_string(),
+            events: vec![
+                key(KeyCode::Char('b'), KeyModifiers::CONTROL),
+                crate::protocol::ClientPaneInputEvent::TextCommit("after".into()),
+            ],
+        })
+    );
+    assert!(server.app.state.popup_pane.is_none());
+    assert!(
+        worker_input.try_recv().is_err(),
+        "the prefix and what follows stay out of the pane"
+    );
     assert!(server.app.terminal_runtimes.get(&worker_terminal).is_some());
     shutdown_test_runtimes(&mut server);
 }
