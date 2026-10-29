@@ -99,6 +99,17 @@ When `[ui.sidebar.agents] group_by` is anything but `none` and `rows_by_agent` h
 - **WHEN** `group_by = "workspace"` and `rows_by_agent` is empty
 - **THEN** no diagnostic about `rows_by_agent` is reported
 
+### Requirement: Location names where an agent lives
+The agent row token `location` SHALL draw `<workspace label> · <tab label>` for an agent whose workspace is not the snapshot's focused workspace, or only the workspace label when the tab label is hidden (one tab without a custom label). For an agent in the focused workspace it MUST draw nothing. In the multi-machine endpoint list each machine's own focused workspace decides.
+
+#### Scenario: Agent in another workspace
+- **WHEN** rows are `[["agent", "location"]]`, the focused workspace is `client-shell`, and agent `there` runs in workspace `homelab` on the custom-labelled tab `review`
+- **THEN** its row reads `there · homelab · review`
+
+#### Scenario: Agent in the focused workspace
+- **WHEN** the same rows are used for agent `here` in the focused workspace
+- **THEN** its row reads `here`
+
 ### Requirement: Agents show a one-line task
 `herdr agent task <TEXT>` SHALL set the pane metadata token `task` to TEXT with source `herdr:task`, and `herdr agent task --clear` SHALL clear it. Without `--target` it MUST act on the calling pane named by `HERDR_PANE_ID`, and fail with usage when that is unset; `--target` takes an agent name or pane id, resolved through `agent.get`. The default `rows` and `grouped_rows` SHALL end with a `["$task"]` row, which, like any row whose tokens are all unset, is not drawn until a task is set.
 

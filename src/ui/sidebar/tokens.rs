@@ -56,6 +56,9 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    /// Whether the agent lives outside the focused workspace; the `location`
+    /// token draws only then.
+    pub(crate) outside_focused_workspace: bool,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
     pub(crate) agent_name: Option<&'a str>,
@@ -93,6 +96,14 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Tab => context
                             .tab
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                        AgentSidebarToken::Location => {
+                            context.outside_focused_workspace.then(|| {
+                                ResolvedTokenKind::Workspace(match context.tab {
+                                    Some(tab) => format!("{} · {tab}", context.workspace),
+                                    None => context.workspace.to_string(),
+                                })
+                            })
+                        }
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
@@ -228,6 +239,7 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            outside_focused_workspace: false,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             agent_name: entry.agent_name.as_deref(),
@@ -235,6 +247,24 @@ mod tests {
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             canonical_agent: entry.canonical_agent,
             tokens: &entry.tokens,
+        }
+    }
+
+    #[test]
+    fn location_token_resolves_only_outside_the_focused_workspace() {
+        let config: AgentsSidebarConfig = toml::from_str(r#"rows = [["location"]]"#).unwrap();
+        let mut entry = entry();
+        assert!(agent_rows(&config, context(&entry), "idle", false).is_empty());
+        for (tab, expected) in [(None, "repo"), (Some("review"), "repo · review")] {
+            entry.tab = tab.map(str::to_owned);
+            let mut context = context(&entry);
+            context.outside_focused_workspace = true;
+            assert_eq!(
+                agent_rows(&config, context, "idle", false),
+                vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                    expected.into()
+                ))]]
+            );
         }
     }
 

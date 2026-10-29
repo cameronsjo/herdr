@@ -120,6 +120,9 @@ pub enum AgentSidebarToken {
     Machine,
     Workspace,
     Tab,
+    /// Fork: `workspace · tab` for an agent outside the focused workspace,
+    /// and nothing for one inside it.
+    Location,
     Pane,
     Agent,
     /// Fork: the herdr agent name alone, never the display or kind fallback.
@@ -292,6 +295,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Machine => "machine".into(),
         AgentSidebarToken::Workspace => "workspace".into(),
         AgentSidebarToken::Tab => "tab".into(),
+        AgentSidebarToken::Location => "location".into(),
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
         AgentSidebarToken::Name => "name".into(),
@@ -352,6 +356,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("machine", Self::Machine),
                 ("workspace", Self::Workspace),
                 ("tab", Self::Tab),
+                ("location", Self::Location),
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
                 ("name", Self::Name),
