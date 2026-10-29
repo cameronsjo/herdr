@@ -265,6 +265,49 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run -E 'test(/peek/)'`. Live: with an agent in tab 2, run `herdr pane peek <its pane id>` from tab 1; the agent shows in an overlay titled `peek: …`, keys reach it, and `herdr pane peek --close` returns it to tab 2 at its layout size.
 - **Render scaling:** none added to pane loops; the lock check is one hash lookup and one comparison per pane resize.
 
+## A `name` token shows the herdr agent name in sidebar rows (issue [#97](https://github.com/cameronsjo/herdr/issues/97), Linear CAM-434)
+
+### feat: add a name token to agent sidebar rows
+
+- **PR:** [cameronsjo/herdr#146](https://github.com/cameronsjo/herdr/pull/146)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `sidebar-name-token` change)
+- **Adds:** `AgentSidebarToken::Name` (`"name"`), resolved from the agent's herdr name only through a new `agent_name` field on `AgentTokenContext`, and drawn as `ResolvedTokenKind::Agent` so it styles like `agent`. Omitted for an unnamed agent. `agent` (display name, then name, kind, title) and the default rows are unchanged, so herdr-bridge's `claude · <session>` display still shows; `["name", "agent"]` puts the herdr name beside it.
+- **Collision:** the `AgentSidebarToken` enum and its name/parse tables in `config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `ui/sidebar/tokens.rs`, and the `AgentTokenContext` construction in `agent_row`.
+- **Regression check:** `cargo nextest run -E 'test(/name_token/) | test(parses_builtin_and_arbitrary_custom_tokens)'`. Live: with `rows = [["state_icon", "name", "agent"]]`, an agent started as `cos-cadence` shows `cos-cadence · claude · <branch>`.
+- **Render scaling:** not affected; one more `Option<&str>` per row build.
+
+## `pane focus <pane_id>` jumps to a pane from anywhere (issue [#94](https://github.com/cameronsjo/herdr/issues/94), Linear CAM-433)
+
+### feat: jump to a pane by id with pane focus
+
+- **PR:** [cameronsjo/herdr#142](https://github.com/cameronsjo/herdr/pull/142)
+- **Files:** `src/cli/pane.rs`, `src/cli/pane/bindings.rs`, `src/cli/spec.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-focus/spec.md` (via the archived `pane-focus-jump` change)
+- **Adds:** a positional pane id on `pane focus`, which sends the existing `pane.focus` (it switches workspace and tab before focusing). `--direction` is now required unless a pane id is given, and still sends `pane.focus_direction`; a pane id cannot be combined with `--direction`, `--pane` or `--current`. CLI only, so a candidate to offer upstream.
+- **Collision:** the `focus` leaf in `bindings.rs` (now a hand-built `Leaf` with `focus_arguments`/`focus` in `pane.rs`, plus a required `focus_target` group in `Leaf::command`) and the dropped `pane focus` row in `spec_marks_runtime_required_options_as_required`.
+- **Regression check:** `cargo nextest run -E 'test(/pane_focus/)'`. Live: from workspace 1, `herdr pane focus <pane in workspace 2>` lands on that pane.
+- **Render scaling:** not affected; CLI parsing only.
+
+## `agent prompt` reports whether the text reached the agent (issue [#102](https://github.com/cameronsjo/herdr/issues/102), Linear CAM-436)
+
+### feat(agent): report prompt delivery as typed, queued or unknown
+
+- **PR:** [cameronsjo/herdr#141](https://github.com/cameronsjo/herdr/pull/141)
+- **Files:** new fork files `src/api/fork_prompt_delivery.rs` (baseline capture, the post-write poll, the echo needle and `with_delivery`) and `src/api/schema/fork_prompt_delivery.rs` (`PromptDelivery`); `src/api/mod.rs` and `src/api/schema.rs` (module lines); `src/api/schema/response.rs` (`AgentPrompted.delivered`); `src/api/wait.rs` (`prompt_agent` captures a baseline on both paths and observes after the write; `agent_prompt_success` takes the delivery); `src/app/api/agents.rs` (`delivered: None` from the app; the server fills it); `tests/cli/agents.rs`; `docs/next/api/herdr-api.schema.json`; `cli-reference.mdx` and `agent-automation.mdx` (English only); `openspec/specs/agent-registry/`.
+- **Replaces:** nothing upstream. Upstream's success means the bytes were written. The fork then watches for up to 1.5 seconds (capped by a `--wait` timeout, which also bounds each app call in the window): a non-working agent whose pane reports working or blocked (replayed from the event hub, so a sub-poll turn counts) or shows the prompt's opening text is `typed`; an already working agent that shows it, or settles and starts another turn, is `queued`; otherwise `unknown`. With `--wait`, the window counts toward the five-second `agent_prompt_stalled` gate. **Compatibility:** `delivered` is optional and an unknown value reads as `unknown`; no parameter, method or capability changes. **Worth knowing:** a prompt with no evidence returns up to 1.5 seconds later than upstream's; collapsed pastes never echo, so a long prompt to a working agent reads `unknown`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_prompt_delivery/) + test(agent_start_command_works)'`. On a sync, any upstream change to `prompt_agent` or the `AgentPrompted` variant must keep `delivered` on both prompt paths. **Collision:** `prompt_agent` and `agent_prompt_success` in `src/api/wait.rs`, the `AgentPrompted` variant, and the `agent prompt` paragraphs of the two docs pages.
+- **Render scaling:** not affected; the check runs once per `agent.prompt` call, off the render path.
+
+## `pane send-text --paste` sends a bracketed paste (issue [#121](https://github.com/cameronsjo/herdr/issues/121), Linear CAM-432)
+
+### feat: opt-in bracketed paste for pane send-text
+
+- **PR:** [cameronsjo/herdr#140](https://github.com/cameronsjo/herdr/pull/140)
+- **Files:** `src/api/schema/panes.rs`, `src/app/api/panes.rs`, `src/cli/pane.rs`, `src/platform/macos/input_tests.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-input/spec.md` (via the archived `send-text-paste` change)
+- **Adds:** an optional `paste` field on `pane.send_text` (CLI `--paste`, before the pane id). Set, the text is wrapped with `encode_api_text`, the same live bracketed-paste check `pane run` uses, before the canonical-mode admission check; unset, the bytes are unchanged and the field is not serialized. A paste refuses text containing ESC or U+009B (`invalid_paste_text`) so it cannot end the paste early. Like `pane run`, it skips the Windows CRLF conversion the TUI paste path applies; untested on Windows. Whether it fixes the cut-off text in a Claude Code pane still needs the live repro on #121.
+- **Collision:** `PaneSendTextParams` and `handle_pane_send_text`. If upstream adds its own paste option, drop this one and the `pane-input` requirement in the same sync.
+- **Regression check:** `cargo nextest run -E 'test(/send_text/)'`. Live: `herdr pane send-text --paste <claude-pane> "$(cat long.md)"` lands as one `[Pasted text]` block.
+- **Render scaling:** not affected; one request-time branch.
+
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
 
 ### feat: drag a pane by its frame to swap it with another pane

@@ -421,6 +421,7 @@ impl Leaf {
         let command = projection::command(self.name, (self.arguments)()).about(self.about);
         match self.name {
             "input" => command.group(clap::ArgGroup::new("selector").args(["pane_id", "pane", "current"]).required(true)),
+            "focus" => command.group(clap::ArgGroup::new("focus_target").args(["pane_id", "direction"]).required(true)),
             "move" => command.group(clap::ArgGroup::new("destination").args(["tab", "new-tab", "new-workspace"]).required(true)),
             "send-text" => command.after_help("next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"),
             "send-keys" => command.after_help("Use esc as the canonical Escape key name; escape is also accepted."),
@@ -565,14 +566,14 @@ pub(super) const LEAVES: &[Leaf] = &[
             Ok(Method::PaneEdges(params))
         },
     },
-    leaf!(
-        "focus",
-        "Focus a neighboring pane",
-        "cli:pane:focus",
-        Json,
-        PaneFocusProjection,
-        PaneFocusDirection
-    ),
+    Leaf {
+        name: "focus",
+        about: "Focus a neighboring pane, or jump to a pane by id",
+        id: "cli:pane:focus",
+        output: Output::Json,
+        arguments: super::focus_arguments,
+        method: super::focus,
+    },
     leaf!(
         "resize",
         "Resize a pane split",
