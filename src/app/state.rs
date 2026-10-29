@@ -20,6 +20,14 @@ pub(crate) struct PopupPaneState {
     pub terminal_id: crate::terminal::TerminalId,
     pub width: Option<crate::popup_size::PopupSize>,
     pub height: Option<crate::popup_size::PopupSize>,
+    /// Set when the popup borrows a tiled pane's terminal (`pane.peek`)
+    /// instead of owning one. `pane_id` is then the tiled pane's id.
+    pub peek: Option<PopupPeek>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PopupPeek {
+    pub label: String,
 }
 
 use crate::terminal_theme::{HostAppearance, TerminalTheme};
@@ -893,6 +901,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Whether tab layout must leave this terminal's size alone: a direct
+    /// attach client owns it, or a peek popup is showing it at popup size.
+    pub(crate) fn tab_resize_locked(&self, terminal_id: &crate::terminal::TerminalId) -> bool {
+        self.direct_attach_resize_locks.contains(terminal_id)
+            || self
+                .popup_pane
+                .as_ref()
+                .is_some_and(|popup| popup.peek.is_some() && popup.terminal_id == *terminal_id)
+    }
+
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
     }
@@ -1329,11 +1347,19 @@ impl AppState {
                 popup.pane_id,
                 popup.terminal_id
             );
-            assert!(
-                !attached_terminal_ids.contains(&popup.terminal_id),
-                "popup terminal {} must not be attached to a tiled pane",
-                popup.terminal_id
-            );
+            if popup.peek.is_some() {
+                assert!(
+                    attached_terminal_ids.contains(&popup.terminal_id),
+                    "peek popup terminal {} must stay attached to its tiled pane",
+                    popup.terminal_id
+                );
+            } else {
+                assert!(
+                    !attached_terminal_ids.contains(&popup.terminal_id),
+                    "popup terminal {} must not be attached to a tiled pane",
+                    popup.terminal_id
+                );
+            }
         }
         for &pane_id in self.plugin_panes.keys() {
             assert_live_pane(pane_id, "plugin pane record");

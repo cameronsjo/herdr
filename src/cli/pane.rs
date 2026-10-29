@@ -347,6 +347,13 @@ mod tests {
                 json!({"mode": "toggle"}),
             ),
             (
+                "peek",
+                vec!["pane"],
+                "cli:pane:peek",
+                "pane.peek",
+                json!({"pane_id": "pane"}),
+            ),
+            (
                 "read",
                 vec!["pane"],
                 "cli:pane:read",
@@ -462,6 +469,16 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn pane_peek_needs_a_pane_or_close_but_not_both() {
+        assert_eq!(
+            serde_json::to_value(request("peek", &["--close"]).unwrap()).unwrap(),
+            serde_json::json!({"id": "cli:pane:peek", "method": "pane.peek_close", "params": {}})
+        );
+        assert!(request("peek", &[]).is_err());
+        assert!(request("peek", &["pane", "--close"]).is_err());
     }
 
     #[test]
