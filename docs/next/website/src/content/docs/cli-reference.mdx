@@ -222,6 +222,7 @@ herdr pane process-info [--pane ID|--current]
 herdr pane neighbor --direction left|right|up|down [--pane ID|--current]
 herdr pane edges [--pane ID|--current]
 herdr pane focus --direction left|right|up|down [--pane ID|--current]
+herdr pane focus <pane_id>
 herdr pane resize --direction left|right|up|down [--amount FLOAT] [--pane ID|--current]
 herdr pane zoom [<pane_id>|--pane ID|--current] [--toggle|--on|--off]
 herdr pane rename <pane_id> <label>|--clear
@@ -234,6 +235,8 @@ herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--n
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
 herdr pane close <pane_id>
 ```
+
+`pane focus <pane_id>` jumps to that pane from anywhere: it switches to the pane's workspace and tab, then focuses it, in one call. With `--direction`, `pane focus` moves to a neighboring pane as before. The jump prints the focused pane's info, the same shape as `pane get`; the directional move prints its own result.
 
 For pane commands that accept `--current`, Herdr uses the calling pane's
 `HERDR_PANE_ID` when the command runs inside a Herdr pane. For `pane split`,
@@ -262,7 +265,7 @@ herdr pane read <pane_id> --source recent-unwrapped --lines 120
 Send input:
 
 ```bash
-herdr pane send-text <pane_id> <text>
+herdr pane send-text [--paste] <pane_id> <text>
 herdr pane send-keys <pane_id> <key> [key ...]
 herdr pane run <pane_id> <command>
 ```
@@ -276,6 +279,8 @@ aliases for `ctrl+c`.
 `esc` is the canonical spelling; `escape` is also accepted.
 
 On macOS, `send-text` is refused with `pane_send_failed` when the pane's terminal is in canonical mode and a line of the text exceeds the 1024-byte limit; the tty would otherwise drop it silently. Split the text into shorter lines or wait for a raw-mode prompt.
+
+`send-text --paste` sends the text as a bracketed paste when the pane has enabled bracketed-paste mode, and as raw bytes when it has not. Use it for long or multi-line text sent to an agent's prompt, which can read an unbracketed burst as typing. `--paste` goes before the pane id; after the text starts, it is part of the text. Text containing ESC or the C1 CSI character (U+009B) is refused with `invalid_paste_text`, since it could end the paste early.
 
 `pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
@@ -370,7 +375,7 @@ Agent targets are either a unique live agent name or the pane ID that currently 
 
 A successful start returns only after the expected agent owns the same terminal and is ready for interactive input. If detection reports `blocked` during startup, the command returns `agent_not_ready` immediately. The name remains available for `agent read`, `agent send-keys`, and `agent type-submit`, and becomes ready for prompts after detection reports `idle`. The default startup timeout is 30000 milliseconds; explicit values must be greater than 3000 and no more than 300000.
 
-`agent prompt` honors live bracketed-paste mode and writes text followed by delayed Enter as one ordered submission, including while the agent is working. Success without `--wait` acknowledges the writes, not the start of a turn. On Windows, Codex receives a paste boundary before Enter so submission does not depend on prompt size; the caller timeout includes submission time. If the agent is already `blocked`, it returns `agent_blocked` without sending input. With `--wait`, a prompt sent from another non-working state has up to five seconds after submission to produce an observed `working` or `blocked` state or Herdr returns `agent_prompt_stalled`; if the caller timeout expires first, Herdr returns the normal `timeout` error. This prevents unrelated `idle`, `done`, or session changes from completing the wait. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
+`agent prompt` honors live bracketed-paste mode and writes text followed by delayed Enter as one ordered submission, including while the agent is working. Success without `--wait` acknowledges the writes, not the start of a turn. The result's `.result.delivered` says whether the text reached the agent's input: `typed` when an agent that was not working starts a turn or shows the prompt's opening text; `queued` when an agent that was already working shows it, or finishes its turn and starts another; `unknown` when neither appears within 1.5 seconds. A turn start is evidence that the agent took input after the write, not proof that it was this prompt, so two callers prompting one idle agent at once can both read `typed`. Agents that collapse long or multi-line pastes never show the text, and a pane too narrow for the first 32 characters wraps them, so such a prompt to a working agent reads `unknown`. On Windows, Codex receives a paste boundary before Enter so submission does not depend on prompt size; the caller timeout includes submission time. If the agent is already `blocked`, it returns `agent_blocked` without sending input. With `--wait`, a prompt sent from another non-working state has up to five seconds after submission to produce an observed `working` or `blocked` state or Herdr returns `agent_prompt_stalled`; if the caller timeout expires first, Herdr returns the normal `timeout` error. This prevents unrelated `idle`, `done`, or session changes from completing the wait. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
 
 `idle` and `done` both mean ready for input. The CLI/API uses the server's seen state: `done` is idle but not yet marked seen, explicit `pane focus` / `agent focus` commands mark the target seen, and reads do not. Each TUI client tracks viewed completions independently, so its Done badge can differ from the CLI or another client. `blocked` means Herdr recognized an approval or question UI. `unknown` means an agent is present but Herdr cannot classify it confidently, not that its work succeeded.
 

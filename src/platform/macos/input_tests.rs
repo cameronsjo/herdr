@@ -212,6 +212,7 @@ async fn send_text_rejects_oversized_canonical_input_instead_of_dropping_it() {
             method: Method::PaneSendText(PaneSendTextParams {
                 pane_id: pane_id.clone(),
                 text: text.into(),
+                paste: false,
             }),
         };
         serde_json::from_str(&app.handle_api_request(request)).unwrap()

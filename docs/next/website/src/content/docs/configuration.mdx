@@ -393,6 +393,7 @@ Agent rows accept these built-in tokens:
 - `location` — `workspace · tab` (or just the workspace when its tab name is hidden) for an agent outside the focused workspace; omitted for agents in it. Useful in `grouped_rows` with `group_by = { token = "..." }`, whose groups span workspaces, for example `["state_icon", "agent", "location"]`. Style rules on it match the combined `workspace · tab` text.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
+- `name` — the herdr agent name given with `herdr agent start <name>` or `agent rename`; omitted for an unnamed agent. Unlike `agent`, a reported display name never replaces it, so `["name", "agent"]` shows `cos-cadence · claude · feat/x` for a named Claude worker.
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
 - `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
 - `$name` — custom pane metadata named `name`.
