@@ -113,6 +113,62 @@ async fn peek_shows_another_tab_pane_at_popup_size_then_gives_it_back() {
 }
 
 #[tokio::test]
+async fn moving_the_peeked_pane_under_its_overlay_closes_the_peek() {
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("peek");
+    let worker_tab = workspace.test_add_tab(Some("worker"));
+    workspace.test_add_tab(Some("third"));
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.ensure_test_terminals();
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    for tab in 0..3 {
+        let pane = server.app.state.workspaces[0].tabs[tab].root_pane;
+        let terminal_id = server.app.state.workspaces[0]
+            .terminal_id(pane)
+            .unwrap()
+            .clone();
+        server.app.terminal_runtimes.insert(
+            terminal_id,
+            crate::terminal::TerminalRuntime::test_with_channel(80, 23).0,
+        );
+    }
+    let worker = server.app.state.workspaces[0].tabs[worker_tab].root_pane;
+    let worker_id = server.app.public_pane_id(0, worker).unwrap();
+    let owner_tab = server.app.public_tab_id(0, 0).unwrap();
+    let (control, _render) = connect_test_shell(&mut server, 43, 100, 30);
+    control.recv().unwrap();
+    server.claim_shell_tab_geometry(43, false);
+    send_public(
+        &mut server,
+        api::schema::Method::PanePeek(api::schema::PaneTarget {
+            pane_id: worker_id.clone(),
+        }),
+    );
+    assert!(server.app.state.popup_pane.is_some());
+
+    let response = send_public(
+        &mut server,
+        api::schema::Method::PaneMove(api::schema::PaneMoveParams {
+            pane_id: worker_id,
+            destination: api::schema::PaneMoveDestination::Tab {
+                tab_id: owner_tab,
+                target_pane_id: None,
+                split: api::schema::SplitDirection::Right,
+                ratio: None,
+            },
+            focus: false,
+        }),
+    );
+    serde_json::from_str::<api::schema::SuccessResponse>(&response).expect(&response);
+
+    assert!(server.app.state.popup_pane.is_none());
+    server.app.state.assert_invariants_for_test();
+    shutdown_test_runtimes(&mut server);
+}
+
+#[tokio::test]
 async fn prefix_key_closes_a_peek_and_never_reaches_the_pane() {
     let mut server = test_headless_server();
     let mut workspace = crate::workspace::Workspace::test_new("peek");

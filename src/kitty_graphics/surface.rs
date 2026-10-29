@@ -598,14 +598,21 @@ pub(crate) fn collect_scene(
             }
         }
     }
-    let popup_target = app.state.popup_pane.as_ref().map(|popup| {
-        (
-            popup.pane_id,
-            SurfaceGraphicsTarget::Popup {
-                terminal_id: popup.terminal_id.to_string(),
-            },
-        )
-    });
+    // Only a client that shows the popup gets a popup target: a peeked pane is
+    // also tiled in its own tab, and a client viewing that tab keeps its pane target.
+    let popup_target = app
+        .state
+        .popup_pane
+        .as_ref()
+        .filter(|_| popup_content_size.is_some())
+        .map(|popup| {
+            (
+                popup.pane_id,
+                SurfaceGraphicsTarget::Popup {
+                    terminal_id: popup.terminal_id.to_string(),
+                },
+            )
+        });
     if let Some((pane_id, target)) = popup_target.as_ref() {
         targets.insert(*pane_id, target.clone());
     }

@@ -82,11 +82,18 @@ impl App {
         if self.terminal_runtimes.get(&terminal_id).is_none() {
             return Err(PeekOpenError::PaneNotFound);
         }
-        let label = self
+        // The public id is always shown: a caller can set any label, so the
+        // label alone cannot tell the operator which pane gets their keys.
+        let public_id = self
+            .public_pane_id(ws_idx, pane_id)
+            .unwrap_or_else(|| "pane".to_owned());
+        let label = match self
             .pane_info(ws_idx, pane_id)
             .and_then(|info| info.label.or(info.display_agent).or(info.agent))
-            .or_else(|| self.public_pane_id(ws_idx, pane_id))
-            .unwrap_or_else(|| "pane".to_owned());
+        {
+            Some(name) => format!("{name} ({public_id})"),
+            None => public_id,
+        };
         self.state.popup_pane = Some(crate::app::state::PopupPaneState {
             pane_id,
             terminal_id,
@@ -513,5 +520,39 @@ mod tests {
         app.shutdown_terminal_runtime(terminal_id);
 
         assert!(app.state.popup_pane.is_none());
+    }
+
+    #[tokio::test]
+    async fn peeked_pane_exit_closes_the_peek_and_still_removes_the_pane() {
+        let (mut app, public, worker) = app_with_peekable_pane();
+        app.handle_api_request(peek(&public));
+
+        app.handle_internal_event(crate::events::AppEvent::PaneDied {
+            pane_id: worker,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+
+        assert!(app.state.popup_pane.is_none());
+        assert!(
+            app.find_pane(worker).is_none(),
+            "the pane's own exit handling ran"
+        );
+    }
+
+    #[tokio::test]
+    async fn peek_title_always_names_the_pane_id() {
+        let (mut app, public, _) = app_with_peekable_pane();
+        app.handle_api_request(peek(&public));
+
+        let label = &app
+            .state
+            .popup_pane
+            .as_ref()
+            .unwrap()
+            .peek
+            .as_ref()
+            .unwrap()
+            .label;
+        assert!(label.contains(&public), "{label}");
     }
 }
