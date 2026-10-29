@@ -11,6 +11,7 @@ pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
+const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be an executable name or path of ASCII letters, digits and _ . / : @ % + = , - that does not start with '-'";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
 
 impl App {
@@ -177,12 +178,17 @@ impl App {
         if params
             .exec
             .as_deref()
-            .is_some_and(|exec| exec.trim().is_empty() || exec.chars().any(char::is_control))
+            .is_some_and(|exec| !valid_agent_exec(exec))
         {
             return Err(AgentStartError::InvalidExec);
         }
-        let persisted_agent_session =
-            crate::agent_resume::persisted_session_from_launch_args(kind, &params.args);
+        // Fork (#110): a restore resumes with the kind's default executable, so
+        // a session started through a wrapper is not recorded for resume.
+        let persisted_agent_session = params
+            .exec
+            .is_none()
+            .then(|| crate::agent_resume::persisted_session_from_launch_args(kind, &params.args))
+            .flatten();
         let conflicts = self.agent_name_conflicts(&name, "");
         if !conflicts.is_empty() {
             return Err(AgentStartError::DuplicateName {
@@ -281,7 +287,7 @@ impl App {
             },
             AgentStartError::InvalidExec => crate::api::schema::ErrorBody {
                 code: "invalid_agent_exec".into(),
-                message: "agent exec must be a non-empty executable name or path without control characters".into(),
+                message: INVALID_AGENT_EXEC_MESSAGE.into(),
             },
             AgentStartError::InvalidArgument => crate::api::schema::ErrorBody {
                 code: "invalid_agent_argument".into(),
@@ -562,6 +568,21 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
             job.processes
                 .iter()
                 .find_map(|process| crate::platform::process_agent_hint(process.pid))
+        })
+}
+
+/// Fork (#110): `exec` is typed as the command word in every pane shell, so
+/// it is limited to characters no supported shell quotes or expands. A path
+/// with spaces or `~` can go through a symlink.
+fn valid_agent_exec(exec: &str) -> bool {
+    !exec.is_empty()
+        && !exec.starts_with('-')
+        && exec.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '_' | '.' | '/' | ':' | '@' | '%' | '+' | '=' | ',' | '-'
+                )
         })
 }
 

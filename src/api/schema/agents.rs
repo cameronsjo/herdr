@@ -211,9 +211,11 @@ cli_params! {
         pub env: super::fork_agent_env::AgentEnv => Field::new(super::fork_agent_env::AgentEnv::default())
             .input(bindings::agent_env()),
         /// Fork: the executable to launch in place of the kind's default, as a
-        /// name on the pane's PATH or a path. It is quoted, not expanded, so `~`
-        /// and variables are not resolved. Detection still needs the process to
-        /// identify as `kind`, by a built-in name or `[advanced] agent_process_names`.
+        /// name on the pane's PATH or a path. Only ASCII letters, digits and
+        /// `_ . / : @ % + = , -` are allowed, not as the first character `-`, so
+        /// no shell quotes or expands it; use a symlink for other paths. Detection
+        /// still needs the process to identify as `kind`, by a built-in name or
+        /// `[advanced] agent_process_names`.
         /// Servers that accept this field advertise `capabilities.agent_start_exec`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub exec: Option<String> => Field::new(None).input(bindings::agent_exec()),

@@ -3108,7 +3108,7 @@ mod tests {
         let (mut app, pane_id, terminal_id, mut receiver) = agent_start_env_app("agent-start-exec");
         let mut request = agent_start_env_request(&pane_id, Default::default());
         if let crate::api::schema::Method::AgentStart(params) = &mut request.method {
-            params.exec = Some("/opt/my claude/bin/my-claude".into());
+            params.exec = Some("/opt/my-claude/bin/my-claude".into());
         }
 
         let response = app.handle_api_request(request);
@@ -3117,12 +3117,12 @@ mod tests {
         assert_eq!(response["result"]["type"], "agent_started");
         assert_eq!(
             response["result"]["argv"],
-            serde_json::json!(["/opt/my claude/bin/my-claude", "--resume"])
+            serde_json::json!(["/opt/my-claude/bin/my-claude", "--resume"])
         );
         let typed = receiver.try_recv().unwrap();
         let typed = String::from_utf8_lossy(&typed);
         assert!(
-            typed.starts_with("'/opt/my claude/bin/my-claude' --resume"),
+            typed.starts_with("/opt/my-claude/bin/my-claude --resume"),
             "typed command: {typed:?}"
         );
         assert_eq!(
@@ -3133,7 +3133,17 @@ mod tests {
 
     #[tokio::test]
     async fn agent_start_invalid_exec_is_rejected_without_input() {
-        for exec in ["", "  ", "my-claude\n"] {
+        for exec in [
+            "",
+            "  ",
+            "my-claude\n",
+            "/opt/my claude/my-claude",
+            "~/bin/my-claude",
+            "-x",
+            "x\u{2019};y",
+            "C:\\bin\\my-claude",
+            "$(id)",
+        ] {
             let (mut app, pane_id, terminal_id, mut receiver) =
                 agent_start_env_app("agent-start-exec-invalid");
             let mut request = agent_start_env_request(&pane_id, Default::default());
