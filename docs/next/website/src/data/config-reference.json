@@ -614,6 +614,12 @@
           "description": "Clear the active agent view, such as a plugin's focus filter. Also in the global menu and the command palette while a view is active. Unset by default."
         },
         {
+          "key": "keys.toggle_needs_me",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Show only blocked agents in the Agent panel (\"needs me\"), or every agent again. Also in the command palette and as the third state of the panel header's order toggle. Unset by default."
+        },
+        {
           "key": "keys.previous_workspace",
           "type": "keybinding",
           "default": "unset",

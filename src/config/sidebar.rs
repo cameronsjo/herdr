@@ -503,6 +503,12 @@ pub struct AgentsSidebarConfig {
     /// when not grouping), keeping every other order. Applies in grouped
     /// (space) panel order; priority order already leads with them.
     pub blocked_first: bool,
+    /// Fork: show only blocked agents ("needs me"). Runtime-only TUI state,
+    /// toggled from the panel or the palette and never read from or written
+    /// to a config file; it lives here so every agent-order consumer (panel,
+    /// collapsed list, agent navigation) filters through one function.
+    #[serde(skip)]
+    pub(crate) needs_me_only: bool,
 }
 
 impl AgentsSidebarConfig {
@@ -564,6 +570,7 @@ impl Default for AgentsSidebarConfig {
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             group_by: AgentGroupBy::None,
             blocked_first: false,
+            needs_me_only: false,
         }
     }
 }

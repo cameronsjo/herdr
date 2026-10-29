@@ -287,6 +287,9 @@ pub(super) fn ordered_agent_pane_ids(
         }
         agents
     };
+    if agents_config.needs_me_only {
+        agents.retain(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked);
+    }
     if gathers_group_runs(group_by, sort) {
         agents = gather_runs(agents, |agent| {
             agent_group_key(agent, &snapshot.workspaces, group_by)
@@ -335,10 +338,7 @@ pub(super) fn render_agent_panel(
         buffer,
         area,
         &rows,
-        snapshot
-            .agent_view_label
-            .as_ref()
-            .map(|_| " no matching agents"),
+        empty_agent_list_message(snapshot.agent_view_label.is_some(), config),
         config,
         agent_scroll,
         hits,
@@ -351,6 +351,21 @@ pub(super) fn render_agent_panel(
             render_agent_row(buffer, rect, row, config);
         },
     );
+}
+
+/// What an empty agent list says: a view or the "needs me" filter can hide
+/// every agent, and an unexplained blank panel reads as broken.
+pub(super) fn empty_agent_list_message(
+    view_active: bool,
+    config: &ClientShellConfig,
+) -> Option<&'static str> {
+    if view_active {
+        Some(" no matching agents")
+    } else if config.agents.needs_me_only {
+        Some(" no agents need you")
+    } else {
+        None
+    }
 }
 
 pub(super) fn render_agent_panel_header(
@@ -392,6 +407,7 @@ pub(super) fn render_agent_panel_header(
             let room = (area.width as usize).saturating_sub(display_width(" agents ✕ ") + 1);
             format!("{} ✕", crate::ui::truncate_end(label, room)).into()
         }
+        None if config.agents.needs_me_only => "needs me".into(),
         None => match config.agent_panel_sort {
             crate::config::AgentPanelSortConfig::Spaces => "grouped",
             crate::config::AgentPanelSortConfig::Priority => "priority",
@@ -419,11 +435,13 @@ pub(super) fn render_agent_panel_header(
         sort_rect.width,
         &sort_label,
         Style::default()
-            .fg(if agent_view_label.is_some() {
-                config.palette.accent
-            } else {
-                config.palette.overlay0
-            })
+            .fg(
+                if agent_view_label.is_some() || config.agents.needs_me_only {
+                    config.palette.accent
+                } else {
+                    config.palette.overlay0
+                },
+            )
             .add_modifier(Modifier::BOLD),
     );
     true

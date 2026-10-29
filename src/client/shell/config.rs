@@ -350,7 +350,10 @@ impl ClientShellConfig {
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.spaces = ui.sidebar.spaces.clone();
+                // The "needs me" filter is session state, not config.
+                let needs_me_only = self.agents.needs_me_only;
                 self.agents = ui.sidebar.agents.clone();
+                self.agents.needs_me_only = needs_me_only;
                 self.agent_panel_sort = ui.agent_panel_sort;
                 self.status_indicators = ui.status_indicators;
                 self.sound_enabled = ui.sound.enabled;

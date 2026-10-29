@@ -125,6 +125,10 @@ impl ClientShellState {
                     self.clear_agent_view(outcome);
                     return;
                 }
+                if action == crate::input::KeybindAction::ToggleNeedsMe {
+                    self.toggle_needs_me(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::ReloadConfig {
                     self.push_endpoint_method_with_kind(
                         crate::api::schema::Method::ServerReloadConfig(
@@ -401,6 +405,14 @@ impl ClientShellState {
         ) {
             self.agent_scroll = 0;
         }
+        outcome.repaint = true;
+    }
+
+    /// Shows only blocked agents, or every agent again. Client-side and
+    /// session-only: nothing is sent, and a config reload keeps it.
+    pub(super) fn toggle_needs_me(&mut self, outcome: &mut ClientShellInput) {
+        self.config.agents.needs_me_only = !self.config.agents.needs_me_only;
+        self.agent_scroll = 0;
         outcome.repaint = true;
     }
 

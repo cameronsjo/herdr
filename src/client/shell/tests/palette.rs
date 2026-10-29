@@ -140,6 +140,32 @@ fn the_palette_clears_an_agent_view() {
 }
 
 #[test]
+fn the_palette_toggles_the_needs_me_filter() {
+    let mut state = shell();
+    for expected in [true, false] {
+        enter_prefix(&mut state);
+        open_palette(&mut state);
+        for character in "needs me".chars() {
+            press(&mut state, KeyCode::Char(character));
+        }
+        assert_eq!(
+            state
+                .filtered_palette_commands()
+                .first()
+                .map(|row| row.command.id.clone())
+                .as_deref(),
+            Some("core:toggle-needs-me")
+        );
+        let ran = press(&mut state, KeyCode::Enter);
+        assert!(
+            endpoint_methods(&ran).is_empty(),
+            "the filter is client-side and sends nothing"
+        );
+        assert_eq!(state.config.agents.needs_me_only, expected);
+    }
+}
+
+#[test]
 fn a_remembered_command_leads_the_next_empty_palette() {
     let mut state = shell();
     enter_prefix(&mut state);
