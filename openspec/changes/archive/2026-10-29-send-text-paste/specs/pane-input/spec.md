@@ -15,8 +15,8 @@
 - **WHEN** `herdr pane send-text <pane> hello --paste` is run
 - **THEN** the text sent is `hello --paste` and `paste` is not set
 
-### Requirement: A paste refuses ESC
-A `pane.send_text` request with `paste: true` whose text contains ESC MUST be refused with `invalid_paste_text` and nothing written, so the text cannot end the paste early. Without `paste`, escapes MUST still pass through raw.
+### Requirement: A paste refuses ESC and CSI
+A `pane.send_text` request with `paste: true` whose text contains ESC or the C1 CSI character U+009B MUST be refused with `invalid_paste_text` and nothing written, whether or not the pane has enabled bracketed paste, so the text cannot end the paste early. Without `paste`, escapes MUST still pass through raw.
 
 #### Scenario: Paste text carries the end marker
 - **WHEN** `pane.send_text` is called with `paste: true` and text `a ESC [201~ b`

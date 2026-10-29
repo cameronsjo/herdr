@@ -1930,13 +1930,14 @@ impl App {
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
             return pane_not_found(id, &params.pane_id);
         };
-        // An ESC inside a paste could carry the end marker and turn the rest
-        // of the text back into typed keys, so a paste refuses it outright.
-        if params.paste && params.text.contains('\x1b') {
+        // An ESC (or the one-character C1 CSI) inside a paste could carry the
+        // end marker and turn the rest of the text back into typed keys, so a
+        // paste refuses both outright.
+        if params.paste && params.text.contains(['\x1b', '\u{9b}']) {
             return encode_error(
                 id,
                 "invalid_paste_text",
-                "pane send-text --paste text must not contain ESC",
+                "pane send-text --paste text must not contain ESC or CSI",
             );
         }
         let bytes = if params.paste {
@@ -2509,6 +2510,16 @@ mod tests {
             rx.try_recv().unwrap(),
             bytes::Bytes::from_static(b"\x1b[200~one\n\ntwo\x1b[201~")
         );
+        let refused = app.handle_api_request(crate::api::schema::Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::PaneSendText(PaneSendTextParams {
+                pane_id: pane_id.clone(),
+                text: "x\x1b[201~y".into(),
+                paste: true,
+            }),
+        });
+        assert_eq!(metadata_error_code(&refused), "invalid_paste_text");
+        assert!(rx.try_recv().is_err(), "nothing is written");
         // Without --paste the text stays raw, as before.
         send(&mut app, false);
         assert_eq!(
@@ -2536,6 +2547,16 @@ mod tests {
             metadata_error_code(&send(&mut app, true)),
             "invalid_paste_text"
         );
+        assert!(rx.try_recv().is_err(), "nothing is written");
+        let csi = app.handle_api_request(crate::api::schema::Request {
+            id: "req".into(),
+            method: crate::api::schema::Method::PaneSendText(PaneSendTextParams {
+                pane_id: pane_id.clone(),
+                text: "a\u{9b}201~b".into(),
+                paste: true,
+            }),
+        });
+        assert_eq!(metadata_error_code(&csi), "invalid_paste_text");
         assert!(rx.try_recv().is_err(), "nothing is written");
         // Raw send-text keeps passing escapes through, as before.
         let success: SuccessResponse = serde_json::from_str(&send(&mut app, false)).unwrap();

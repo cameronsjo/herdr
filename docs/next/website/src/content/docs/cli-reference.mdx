@@ -277,7 +277,7 @@ aliases for `ctrl+c`.
 
 On macOS, `send-text` is refused with `pane_send_failed` when the pane's terminal is in canonical mode and a line of the text exceeds the 1024-byte limit; the tty would otherwise drop it silently. Split the text into shorter lines or wait for a raw-mode prompt.
 
-`send-text --paste` sends the text as a bracketed paste when the pane has enabled bracketed-paste mode, and as raw bytes when it has not. Use it for long or multi-line text sent to an agent's prompt, which can read an unbracketed burst as typing. `--paste` goes before the pane id; after the text starts, it is part of the text. Text containing ESC is refused with `invalid_paste_text`, since it could end the paste early.
+`send-text --paste` sends the text as a bracketed paste when the pane has enabled bracketed-paste mode, and as raw bytes when it has not. Use it for long or multi-line text sent to an agent's prompt, which can read an unbracketed burst as typing. `--paste` goes before the pane id; after the text starts, it is part of the text. Text containing ESC or the C1 CSI character (U+009B) is refused with `invalid_paste_text`, since it could end the paste early.
 
 `pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
