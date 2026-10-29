@@ -547,14 +547,14 @@ pub(super) const LEAVES: &[Leaf] = &[
             Ok(Method::PaneEdges(params))
         },
     },
-    leaf!(
-        "focus",
-        "Focus a neighboring pane",
-        "cli:pane:focus",
-        Json,
-        PaneFocusProjection,
-        PaneFocusDirection
-    ),
+    Leaf {
+        name: "focus",
+        about: "Focus a neighboring pane, or jump to a pane by id",
+        id: "cli:pane:focus",
+        output: Output::Json,
+        arguments: super::focus_arguments,
+        method: super::focus,
+    },
     leaf!(
         "resize",
         "Resize a pane split",

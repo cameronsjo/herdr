@@ -3,7 +3,9 @@ pub(crate) mod bindings;
 use clap::ArgMatches;
 
 use super::projection::ParseError;
-use crate::api::schema::panes::{PaneMetadataProjection, PaneMoveProjection, PaneSwapProjection};
+use crate::api::schema::panes::{
+    PaneFocusProjection, PaneMetadataProjection, PaneMoveProjection, PaneSwapProjection,
+};
 use crate::api::schema::{Method, PaneDirection, PaneMoveDestination};
 
 pub(crate) fn command() -> clap::Command {
@@ -135,6 +137,43 @@ fn swap(matches: &ArgMatches) -> Result<Method, ParseError> {
         .target_pane_id
         .map(|value| super::normalize_pane_id(&value));
     Ok(Method::PaneSwap(params))
+}
+
+/// `--direction` keeps `pane focus` a neighbor move; a bare pane id makes it
+/// a jump through `pane.focus`, which switches workspace and tab first.
+fn focus_arguments() -> Vec<clap::Arg> {
+    let mut arguments = PaneFocusProjection::arguments()
+        .into_iter()
+        .map(|argument| {
+            if argument.get_id() == "direction" {
+                argument.required(false).required_unless_present("pane_id")
+            } else {
+                argument
+            }
+        })
+        .collect::<Vec<_>>();
+    arguments.push(
+        clap::Arg::new("pane_id")
+            .value_name("PANE_ID")
+            .index(1)
+            .conflicts_with_all(["direction", "pane", "current"])
+            .help("Jump to this pane, switching workspace and tab"),
+    );
+    arguments
+}
+
+fn focus(matches: &ArgMatches) -> Result<Method, ParseError> {
+    if let Some(pane_id) = matches.get_one::<String>("pane_id") {
+        return Ok(Method::PaneFocus(crate::api::schema::PaneTarget {
+            pane_id: super::normalize_pane_id(pane_id),
+        }));
+    }
+    if matches.value_source("direction").is_none() {
+        return Err(ParseError::Usage(
+            "provide --direction, or a pane id to jump to".into(),
+        ));
+    }
+    PaneFocusProjection::from_matches(matches).map(Method::PaneFocusDirection)
 }
 
 fn move_pane(matches: &ArgMatches) -> Result<Method, ParseError> {
@@ -607,6 +646,19 @@ mod tests {
                 .get("pane_id")
                 .is_none());
         }
+    }
+
+    #[test]
+    fn pane_focus_jumps_by_id_or_moves_by_direction() {
+        let json = serde_json::to_value(request("focus", &["w1:p2"]).unwrap()).unwrap();
+        assert_eq!(json["method"], "pane.focus");
+        assert_eq!(json["params"], serde_json::json!({"pane_id": "w1:p2"}));
+        let json = serde_json::to_value(request("focus", &["--direction", "up"]).unwrap()).unwrap();
+        assert_eq!(json["method"], "pane.focus_direction");
+        assert!(request("focus", &[]).is_err());
+        assert!(request("focus", &["--pane", "w1:p2"]).is_err());
+        assert!(request("focus", &["w1:p2", "--direction", "up"]).is_err());
+        assert!(request("focus", &["w1:p2", "--current"]).is_err());
     }
 
     #[test]
