@@ -133,6 +133,7 @@ impl Config {
             .chain(self.invalid_sidebar_bounds_diagnostic())
             .chain(self.ui.sidebar.agents.grouped_rows_by_agent_diagnostic())
             .chain(self.invalid_headless_size_diagnostic())
+            .chain(crate::detect::extra_process_names(&self.advanced.agent_process_names).1)
             .collect()
     }
 

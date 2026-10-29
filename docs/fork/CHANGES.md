@@ -258,6 +258,17 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run -E 'test(/task_/) | test(/default_rows_draw_the_task_line/)'`. Dropping the `$task` default row reddens `default_rows_draw_the_task_line_only_once_a_task_is_set`. Live: in an agent pane run `herdr agent task "probe"`; the sidebar entry gains a `probe` line, and `herdr agent task --clear` removes it.
 - **Render scaling:** one more row per entry to resolve, a `HashMap` lookup that is skipped when the token is unset; no new per-pane work.
 
+## A wrapper under its own executable name is identified as its agent (issue [#110](https://github.com/cameronsjo/herdr/issues/110), Linear CAM-447)
+
+### feat(detect): identify extra process names as a built-in agent kind
+
+- **PR:** [cameronsjo/herdr#152](https://github.com/cameronsjo/herdr/pull/152)
+- **Files:** new fork file `src/detect/fork_process_names.rs` (validation into a name-to-kind map with diagnostics, the process-wide map behind an `AtomicBool` fast path, the lookup); `src/detect/mod.rs` (module line, re-export, an `or_else` in `identify_agent`, and `agent_name_from_basename` calling `identify_agent` so interpreter-run wrapper scripts match too); `src/config/model.rs` (`AdvancedConfig.agent_process_names` and its default); `src/config.rs` (diagnostics in `collect_diagnostics`); `src/app/mod.rs` (set at the top of `App::try_new`, and in the `advanced` branch of `apply_live_config` with its diagnostics); `docs/next/website/src/data/config-reference.json`; `docs/next/website/src/content/docs/agents.mdx` (English only); `openspec/specs/agent-detection/` (via the archived `agent-process-names` change).
+- **Adds:** `[advanced] agent_process_names = { claude = ["my-claude"] }` makes a process whose basename is `my-claude` (case-insensitive, same suffix stripping as built-in names) identified as `claude`. The name is also recovered from a wrapper script run by an interpreter (`bash /opt/bin/my-claude`), a name over 15 bytes also matches its 15-byte cut (Linux's process name), and kind keys ignore case. Built-in names win; label parsing, so `agent start --kind`, does not accept the extra names. Unknown kinds, empty, path-like or dash-led names (a login shell's argv0 is `-zsh`), shell, runtime and launcher names (`is_generic_runtime_or_shell` plus `dash`, `ksh`, `nu`, `npm`, `uvx`, `sudo`, `env`, `ssh` and similar, since claiming one would make a pane's shell count as the agent and let `agent prompt` type into it), names that already identify another kind, and names under two kinds are dropped with a config warning. Applied at startup and on config reload. With nothing configured, identification only reads one atomic flag more than upstream. **Worth knowing:** a session restore resumes the agent with the built-in executable (`claude --resume`), not the wrapper.
+- **Collision:** `identify_agent` in `src/detect/mod.rs`, `AdvancedConfig` and its `Default`, `Config::collect_diagnostics`, the start of `App::try_new`, and the `advanced` branch of `apply_live_config`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_process_names/)'`, and `python3 scripts/config_reference_check.py`. Live: with `agent_process_names = { claude = ["my-claude"] }`, run `ln -s $(command -v claude) /tmp/my-claude && /tmp/my-claude` in a pane; the sidebar shows it as Claude with working, blocked and idle states.
+- **Render scaling:** not affected. Identification runs on the process poll, not in render, and adds one atomic load when nothing is configured.
+
 ## Peek a pane from another tab as a temporary overlay (issue [#95](https://github.com/cameronsjo/herdr/issues/95), Linear CAM-438)
 
 ### feat(pane): close a peek with the prefix key
@@ -330,6 +341,17 @@ next sync is likely to conflict again:
 - **Collision:** `pane_drop_target_at` (now takes the source pane id) and the left-press pane branch in `mouse.rs`, `ClientPaneDropTarget` in `state.rs`, the drop-target overlay pass before `render_link_hover` in `composition.rs`, and the agent-row sentence in `concepts.mdx`.
 - **Regression check:** `cargo nextest run -E 'test(/pane_frame/) | test(/agent_row_click/) | test(/pane_dragged_onto/)'`. Live: in a two-pane tab, drag one pane's top border onto the other; the target is outlined, and on release the panes trade places.
 - **Render scaling:** the overlay pass runs only while a pane drag has a pane target, once per frame, over one pane's outline.
+
+## One name follows one agent (issue [#97](https://github.com/cameronsjo/herdr/issues/97))
+
+### feat: keep tab and pane labels in sync with the agent name
+
+- **PR:** [cameronsjo/herdr#149](https://github.com/cameronsjo/herdr/pull/149)
+- **Files:** `src/app/agents.rs`, `src/app/api/tabs.rs`, `src/terminal/state.rs`, tests in `src/app/api/agents.rs`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/labels/spec.md` (via the archived `sync-agent-name-labels` change)
+- **Replaces:** upstream's pane border, which puts the agent's reported title over everything. While a named agent is live, its border shows the pane label, else the name; once the agent leaves, upstream's order is back. `agent rename` now also carries a tab label or a pane label that equals the old name (the tab only when it holds no other named live agent). A label that differs is left alone, so upstream's `agent_rename_does_not_replace_the_pane_label` still passes. `tab rename` and `agent start` are unchanged. The sidebar half of #97 is the `name` token (cameronsjo/herdr#146).
+- **Collision:** `rename_agent_target` in `agents.rs`, `handle_tab_rename` (now split into `set_tab_label`) in `tabs.rs`, and `TerminalState::border_label`.
+- **Regression check:** `cargo nextest run -E 'test(/agent_rename|agent_name_clear|tab_rename|border_label/)'`. Live: `herdr tab create --label w1`, `herdr agent start w1 --kind claude --pane <its pane>`, `herdr agent rename w1 w2`; the tab and the pane border both read `w2`, and the border drops `w2` once Claude exits.
+- **Render scaling:** not affected; `border_label` checks one more field per drawn border.
 
 ## Codex state comes from screen detection only, as upstream (issue [#114](https://github.com/cameronsjo/herdr/issues/114))
 
