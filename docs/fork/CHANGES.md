@@ -250,7 +250,7 @@ next sync is likely to conflict again:
 
 ### feat(detect): identify extra process names as a built-in agent kind
 
-- **PR:** (pending)
+- **PR:** [cameronsjo/herdr#152](https://github.com/cameronsjo/herdr/pull/152)
 - **Files:** new fork file `src/detect/fork_process_names.rs` (validation into a name-to-kind map with diagnostics, the process-wide map behind an `AtomicBool` fast path, the lookup); `src/detect/mod.rs` (module line, re-export, and an `or_else` in `identify_agent`); `src/config/model.rs` (`AdvancedConfig.agent_process_names` and its default); `src/config.rs` (diagnostics in `collect_diagnostics`); `src/app/mod.rs` (set at the top of `App::try_new`, and in the `advanced` branch of `apply_live_config` with its diagnostics); `docs/next/website/src/data/config-reference.json`; `docs/next/website/src/content/docs/agents.mdx` (English only); `openspec/specs/agent-detection/` (via the archived `agent-process-names` change).
 - **Adds:** `[advanced] agent_process_names = { claude = ["my-claude"] }` makes a process whose basename is `my-claude` (case-insensitive, same suffix stripping as built-in names) identified as `claude`. Built-in names win; label parsing, so `agent start --kind`, does not accept the extra names. Unknown kinds, empty or path-like names, names that already identify another kind, and names under two kinds are dropped with a config warning. Applied at startup and on config reload. With nothing configured, identification only reads one atomic flag more than upstream.
 - **Collision:** `identify_agent` in `src/detect/mod.rs`, `AdvancedConfig` and its `Default`, `Config::collect_diagnostics`, the start of `App::try_new`, and the `advanced` branch of `apply_live_config`.
