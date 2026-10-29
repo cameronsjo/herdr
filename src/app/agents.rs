@@ -174,6 +174,13 @@ impl App {
             return Err(AgentStartError::InvalidArgument);
         }
         params.env.validate().map_err(AgentStartError::InvalidEnv)?;
+        if params
+            .exec
+            .as_deref()
+            .is_some_and(|exec| exec.trim().is_empty() || exec.chars().any(char::is_control))
+        {
+            return Err(AgentStartError::InvalidExec);
+        }
         let persisted_agent_session =
             crate::agent_resume::persisted_session_from_launch_args(kind, &params.args);
         let conflicts = self.agent_name_conflicts(&name, "");
@@ -214,7 +221,10 @@ impl App {
             ));
         }
 
-        let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
+        let executable = params
+            .exec
+            .unwrap_or_else(|| crate::detect::interactive_agent_executable(kind).to_string());
+        let mut argv = vec![executable];
         argv.extend(params.args);
         let env = params.env.iter().collect::<Vec<_>>();
         let command = crate::platform::interactive_agent_shell_command(&argv, &env, &shell_name)
@@ -268,6 +278,10 @@ impl App {
             AgentStartError::UnsupportedKind(kind) => crate::api::schema::ErrorBody {
                 code: "unsupported_agent_kind".into(),
                 message: format!("unsupported interactive agent kind {kind}"),
+            },
+            AgentStartError::InvalidExec => crate::api::schema::ErrorBody {
+                code: "invalid_agent_exec".into(),
+                message: "agent exec must be a non-empty executable name or path without control characters".into(),
             },
             AgentStartError::InvalidArgument => crate::api::schema::ErrorBody {
                 code: "invalid_agent_argument".into(),
@@ -559,6 +573,8 @@ pub(super) enum AgentStartError {
     /// Fork (#103): the pane's shell has no verified env quoting. Carries the
     /// shell's process name only.
     EnvUnsupportedShell(String),
+    /// Fork (#110): `exec` is empty or holds control characters.
+    InvalidExec,
     InvalidArgument,
     InvalidTimeout,
     TargetNotFound(String),

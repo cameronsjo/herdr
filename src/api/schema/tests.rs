@@ -101,6 +101,7 @@ fn agent_start_and_prompt_requests_round_trip() {
             args: vec!["--no-session".into()],
             timeout_ms: Some(30_000),
             env: Default::default(),
+            exec: None,
         }),
     };
     let start_json = serde_json::to_value(&start).unwrap();
@@ -743,6 +744,7 @@ fn success_response_round_trips() {
                 health_check: true,
                 ssh_agent_registration: false,
                 agent_start_env: false,
+                agent_start_exec: false,
             }),
         },
     };

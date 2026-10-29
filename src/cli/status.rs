@@ -313,6 +313,7 @@ struct ServerCapabilitiesJson {
     health_check: bool,
     ssh_agent_registration: bool,
     agent_start_env: bool,
+    agent_start_exec: bool,
 }
 
 #[derive(Serialize)]
@@ -360,6 +361,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
                     health_check: capabilities.health_check,
                     ssh_agent_registration: capabilities.ssh_agent_registration,
                     agent_start_env: capabilities.agent_start_env,
+                    agent_start_exec: capabilities.agent_start_exec,
                 }),
             compatible: protocol.map(|value| value == crate::protocol::PROTOCOL_VERSION),
             endpoint_compatible: capabilities.as_ref().and_then(|capabilities| {
@@ -472,6 +474,7 @@ mod tests {
                 health_check: true,
                 ssh_agent_registration: false,
                 agent_start_env: false,
+                agent_start_exec: false,
             }),
         }
     }

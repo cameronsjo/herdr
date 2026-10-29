@@ -3014,6 +3014,7 @@ mod tests {
                 args: Vec::new(),
                 timeout_ms: Some(1_000),
                 env: Default::default(),
+                exec: None,
             }),
         });
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -3062,6 +3063,7 @@ mod tests {
                 args: vec!["--resume".into()],
                 timeout_ms: Some(4_000),
                 env,
+                exec: None,
             }),
         }
     }
@@ -3096,6 +3098,55 @@ mod tests {
             app.state.terminals[&terminal_id].agent_name.as_deref(),
             Some("worker")
         );
+    }
+
+    /// Fork (#110): `exec` replaces only the executable; args and the managed
+    /// launch are unchanged.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_start_exec_types_the_given_executable() {
+        let (mut app, pane_id, terminal_id, mut receiver) = agent_start_env_app("agent-start-exec");
+        let mut request = agent_start_env_request(&pane_id, Default::default());
+        if let crate::api::schema::Method::AgentStart(params) = &mut request.method {
+            params.exec = Some("/opt/my claude/bin/my-claude".into());
+        }
+
+        let response = app.handle_api_request(request);
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(response["result"]["type"], "agent_started");
+        assert_eq!(
+            response["result"]["argv"],
+            serde_json::json!(["/opt/my claude/bin/my-claude", "--resume"])
+        );
+        let typed = receiver.try_recv().unwrap();
+        let typed = String::from_utf8_lossy(&typed);
+        assert!(
+            typed.starts_with("'/opt/my claude/bin/my-claude' --resume"),
+            "typed command: {typed:?}"
+        );
+        assert_eq!(
+            app.state.terminals[&terminal_id].agent_name.as_deref(),
+            Some("worker")
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_start_invalid_exec_is_rejected_without_input() {
+        for exec in ["", "  ", "my-claude\n"] {
+            let (mut app, pane_id, terminal_id, mut receiver) =
+                agent_start_env_app("agent-start-exec-invalid");
+            let mut request = agent_start_env_request(&pane_id, Default::default());
+            if let crate::api::schema::Method::AgentStart(params) = &mut request.method {
+                params.exec = Some(exec.into());
+            }
+
+            let response = app.handle_api_request(request);
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            assert_eq!(response["error"]["code"], "invalid_agent_exec", "{exec:?}");
+            assert!(receiver.try_recv().is_err(), "nothing may be typed");
+            assert_eq!(app.state.terminals[&terminal_id].agent_name, None);
+        }
     }
 
     #[test]
@@ -3162,6 +3213,7 @@ mod tests {
                 args: vec!["resume".into(), "codex-session".into()],
                 timeout_ms: Some(4_000),
                 env: Default::default(),
+                exec: None,
             }),
         };
         let response = app.handle_api_request(request());
