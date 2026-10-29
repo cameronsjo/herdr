@@ -344,6 +344,7 @@ fn agent_start_command_works() {
     let literal_flag_prompt: serde_json::Value =
         serde_json::from_slice(&literal_flag_prompt.stdout).unwrap();
     assert_eq!(literal_flag_prompt["result"]["type"], "agent_prompted");
+    assert_eq!(literal_flag_prompt["result"]["delivered"], "typed");
     assert!(wait_until(
         Duration::from_secs(2),
         Duration::from_millis(25),
@@ -458,6 +459,9 @@ fn agent_start_command_works() {
     assert!(report_agent("working"));
     let already_working = prompt_wait("finish active", "2000");
     assert!(already_working.status.success());
+    let already_working: serde_json::Value =
+        serde_json::from_slice(&already_working.stdout).unwrap();
+    assert_eq!(already_working["result"]["delivered"], "queued");
 
     let prompted = prompt_wait("Review this diff", "2000");
     assert!(
@@ -467,6 +471,7 @@ fn agent_start_command_works() {
     );
     let prompted: serde_json::Value = serde_json::from_slice(&prompted.stdout).unwrap();
     assert_eq!(prompted["result"]["type"], "agent_prompted");
+    assert_eq!(prompted["result"]["delivered"], "typed");
 
     let duplicate = run_cli(
         &socket_path,
