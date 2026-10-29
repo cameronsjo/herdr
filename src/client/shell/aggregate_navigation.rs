@@ -61,6 +61,11 @@ pub(super) fn aggregate_agent_rows<'a>(
 ) -> Vec<AggregateAgentRow<'a>> {
     let group_by = &agents_config.group_by;
     let mut rows = ungathered_agent_rows(endpoints, active_endpoint_id, sort, agents_config);
+    // Paths with an active view or a cross-machine sort skip
+    // `ordered_agent_pane_ids`, so "needs me" filters here as well.
+    if agents_config.needs_me_only {
+        rows.retain(|row| row.agent.agent_status == crate::api::schema::AgentStatus::Blocked);
+    }
     // Each endpoint's own order is already gathered and blocked-first, but an
     // active view re-sorts rows across endpoints, so both run once more on the
     // full key.

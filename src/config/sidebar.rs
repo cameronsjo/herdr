@@ -120,6 +120,9 @@ pub enum AgentSidebarToken {
     Machine,
     Workspace,
     Tab,
+    /// Fork: `workspace · tab` for an agent outside the focused workspace,
+    /// and nothing for one inside it.
+    Location,
     Pane,
     Agent,
     /// Fork: the herdr agent name alone, never the display or kind fallback.
@@ -292,6 +295,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
         AgentSidebarToken::Machine => "machine".into(),
         AgentSidebarToken::Workspace => "workspace".into(),
         AgentSidebarToken::Tab => "tab".into(),
+        AgentSidebarToken::Location => "location".into(),
         AgentSidebarToken::Pane => "pane".into(),
         AgentSidebarToken::Agent => "agent".into(),
         AgentSidebarToken::Name => "name".into(),
@@ -352,6 +356,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
                 ("machine", Self::Machine),
                 ("workspace", Self::Workspace),
                 ("tab", Self::Tab),
+                ("location", Self::Location),
                 ("pane", Self::Pane),
                 ("agent", Self::Agent),
                 ("name", Self::Name),
@@ -438,6 +443,10 @@ where
     Ok(rows_by_agent)
 }
 
+/// Pane metadata token holding an agent's one-line task, set by the fork's
+/// `herdr agent task` and drawn by the default agent rows as `$task`.
+pub const AGENT_TASK_TOKEN: &str = "task";
+
 /// How the expanded Agent sidebar panel groups its entries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -507,6 +516,12 @@ pub struct AgentsSidebarConfig {
     /// when not grouping), keeping every other order. Applies in grouped
     /// (space) panel order; priority order already leads with them.
     pub blocked_first: bool,
+    /// Fork: show only blocked agents ("needs me"). Runtime-only TUI state,
+    /// toggled from the panel or the palette and never read from or written
+    /// to a config file; it lives here so every agent-order consumer (panel,
+    /// collapsed list, agent navigation) filters through one function.
+    #[serde(skip)]
+    pub(crate) needs_me_only: bool,
 }
 
 impl AgentsSidebarConfig {
@@ -558,16 +573,24 @@ impl Default for AgentsSidebarConfig {
                     AgentSidebarToken::Tab,
                 ],
                 vec![AgentSidebarToken::Agent],
+                // Fork: the task an agent set with `herdr agent task`. A row
+                // whose tokens are all unset is dropped, so it costs no line
+                // until a task is set.
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
             ],
-            grouped_rows: vec![vec![
-                AgentSidebarToken::StateIcon,
-                AgentSidebarToken::Tab,
-                AgentSidebarToken::Agent,
-            ]],
+            grouped_rows: vec![
+                vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Tab,
+                    AgentSidebarToken::Agent,
+                ],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
+            ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
             group_by: AgentGroupBy::None,
             blocked_first: false,
+            needs_me_only: false,
         }
     }
 }
@@ -616,15 +639,19 @@ mod tests {
                     AgentSidebarToken::Tab,
                 ],
                 vec![AgentSidebarToken::Agent],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
             ]
         );
         assert_eq!(
             config.agents.grouped_rows,
-            vec![vec![
-                AgentSidebarToken::StateIcon,
-                AgentSidebarToken::Tab,
-                AgentSidebarToken::Agent,
-            ]]
+            vec![
+                vec![
+                    AgentSidebarToken::StateIcon,
+                    AgentSidebarToken::Tab,
+                    AgentSidebarToken::Agent,
+                ],
+                vec![AgentSidebarToken::Custom(AGENT_TASK_TOKEN.into())],
+            ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
         assert_eq!(config.agents.row_gap, 0);

@@ -705,6 +705,8 @@ mod tests {
         assert!(has_option(agent_start, "pane"));
         // Fork (cameronsjo/herdr#103): `--env` returns, scoped to the agent process.
         assert!(has_option(agent_start, "env"));
+        // Fork (cameronsjo/herdr#110): `--exec` launches a wrapper in place of the default.
+        assert!(has_option(agent_start, "exec"));
         for legacy in ["cwd", "workspace", "tab", "split", "focus", "argv"] {
             assert!(!has_option(agent_start, legacy), "legacy option --{legacy}");
         }

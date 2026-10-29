@@ -119,6 +119,15 @@ pub(crate) fn agent_env() -> Input<crate::api::schema::AgentEnv> {
     .help("Set an environment variable for the agent process only (repeatable)")
 }
 
+/// Fork (#110): `--exec PATH` launches this executable instead of the kind's default.
+pub(crate) fn agent_exec() -> Input<Option<String>> {
+    Input::value("exec", "PATH", |slot, value| {
+        *slot = Some(value.to_owned());
+        Ok(())
+    })
+    .help("Launch this executable instead of the kind's default, e.g. a wrapper")
+}
+
 pub(crate) fn kind() -> Input<String> {
     Input::value("kind", "KIND", |slot, value| {
         *slot = value.to_owned();
@@ -259,6 +268,7 @@ pub(crate) fn command() -> Command {
         .subcommand_required(true)
         .subcommand(leaf("list", Vec::new(), "List agents"))
         .subcommands(crate::cli::fork_registered_agents::commands())
+        .subcommand(crate::cli::fork_agent_task::command())
         .subcommand(leaf("get", TargetProjection::arguments(), "Show an agent"))
         .subcommand(leaf("focus", TargetProjection::arguments(), "Focus an agent"))
         .subcommand(leaf("read", AgentReadProjection::arguments(), "Read agent terminal output")

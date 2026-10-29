@@ -153,6 +153,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # reload_config = "prefix+shift+r"
 # open_notification_target = "prefix+o"
 # clear_agent_view = "" # optional, unset by default
+# toggle_needs_me = "" # optional, unset by default
 # workspace_picker = "prefix+w"
 # command_palette = "prefix+/"
 # goto = "prefix+g"
@@ -362,7 +363,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # accent = "cyan"
 
 # Expanded agent rows. Built-ins are state_icon, state_text, machine, workspace, tab,
-# pane, agent, terminal_title, and terminal_title_stripped.
+# location, pane, agent, terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.

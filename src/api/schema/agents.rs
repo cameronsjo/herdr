@@ -210,6 +210,16 @@ cli_params! {
         #[serde(default, skip_serializing_if = "super::fork_agent_env::AgentEnv::is_empty")]
         pub env: super::fork_agent_env::AgentEnv => Field::new(super::fork_agent_env::AgentEnv::default())
             .input(bindings::agent_env()),
+        /// Fork: the path of the executable to launch in place of the kind's
+        /// default. It must contain a `/` and only ASCII letters, digits and
+        /// `_ . / : + -`, start with a letter, `_`, `/`, `./` or `../`, and not
+        /// end in `/`, `.` or `..`, so a shell never runs a builtin such as
+        /// `exit` in its place; use a symlink for other paths. Detection
+        /// still needs the process to identify as `kind`, by a built-in name or
+        /// `[advanced] agent_process_names`.
+        /// Servers that accept this field advertise `capabilities.agent_start_exec`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub exec: Option<String> => Field::new(None).input(bindings::agent_exec()),
     }
 }
 

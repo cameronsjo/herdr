@@ -370,9 +370,11 @@ group_by = "none"
 rows = [
   ["state_icon", "machine", "workspace", "tab"],
   ["agent"],
+  ["$task"],
 ]
 grouped_rows = [
   ["state_icon", "tab", "agent"],
+  ["$task"],
 ]
 
 [ui.sidebar.spaces]
@@ -390,6 +392,7 @@ Agent rows accept these built-in tokens:
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.
+- `location` — `workspace · tab` (or just the workspace when its tab name is hidden) for an agent outside the focused workspace; omitted for agents in it. Useful in `grouped_rows` with `group_by = { token = "..." }`, whose groups span workspaces, for example `["state_icon", "agent", "location"]`. Style rules on it match the combined `workspace · tab` text.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `name` — the herdr agent name given with `herdr agent start <name>` or `agent rename`; omitted for an unnamed agent. Unlike `agent`, a reported display name never replaces it, so `["name", "agent"]` shows `cos-cadence · claude · feat/x` for a named Claude worker.
@@ -477,6 +480,13 @@ somewhere else. A view that only filters keeps space order and stays grouped.
 When it is off, the panel renders exactly as `group_by = "none"`
 does. Scrolling into the middle of a run scrolls past that run's header; Herdr
 does not pin headers.
+
+Clicking the order label in the Agent panel header cycles **grouped**,
+**priority** and **needs me**. **needs me** keeps priority order and shows only
+blocked agents, from every workspace, so the panel answers "who is waiting on
+me"; an empty result says `no agents need you`. The palette's `toggle needs me`
+row and the optional `keys.toggle_needs_me` binding switch it on and off. It is
+session state: a config reload keeps it, and it is not saved.
 
 #### Grouping Agent rows by a metadata token
 

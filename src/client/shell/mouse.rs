@@ -2326,12 +2326,23 @@ impl ClientShellState {
                     return;
                 }
                 if super::contains(self.hits.agent_sort_toggle, point) {
-                    let sort = match self.config.agent_panel_sort {
-                        crate::config::AgentPanelSortConfig::Spaces => {
+                    // Fork: the toggle cycles grouped → priority → needs me →
+                    // grouped. "needs me" keeps the priority sort underneath
+                    // and is session-only, so only the sort is persisted.
+                    let sort = match (
+                        self.config.agent_panel_sort,
+                        self.config.agents.needs_me_only,
+                    ) {
+                        (_, true) => {
+                            self.config.agents.needs_me_only = false;
+                            crate::config::AgentPanelSortConfig::Spaces
+                        }
+                        (crate::config::AgentPanelSortConfig::Spaces, false) => {
                             crate::config::AgentPanelSortConfig::Priority
                         }
-                        crate::config::AgentPanelSortConfig::Priority => {
-                            crate::config::AgentPanelSortConfig::Spaces
+                        (crate::config::AgentPanelSortConfig::Priority, false) => {
+                            self.config.agents.needs_me_only = true;
+                            crate::config::AgentPanelSortConfig::Priority
                         }
                     };
                     self.config.agent_panel_sort = sort;

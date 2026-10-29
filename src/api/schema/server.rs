@@ -59,4 +59,9 @@ pub struct ServerCapabilities {
     /// field. A server without this flag would ignore `env` and still succeed.
     #[serde(default)]
     pub agent_start_env: bool,
+    /// Fork (cameronsjo/herdr#110): `agent.start` honors its optional `exec`
+    /// field. A server without this flag would ignore `exec` and launch the
+    /// kind's default executable.
+    #[serde(default)]
+    pub agent_start_exec: bool,
 }
