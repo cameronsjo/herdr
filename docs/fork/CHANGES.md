@@ -302,13 +302,13 @@ next sync is likely to conflict again:
 
 ## One name follows one agent (issue [#97](https://github.com/cameronsjo/herdr/issues/97))
 
-### feat: keep tab labels, pane labels and the pane title in sync with the agent name
+### feat: keep tab and pane labels in sync with the agent name
 
-- **PR:** (pending)
+- **PR:** [cameronsjo/herdr#149](https://github.com/cameronsjo/herdr/pull/149)
 - **Files:** `src/app/agents.rs`, `src/app/api/tabs.rs`, `src/terminal/state.rs`, tests in `src/app/api/agents.rs`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/labels/spec.md` (via the archived `sync-agent-name-labels` change)
-- **Replaces:** upstream's pane border, which puts the agent's reported title over everything, and upstream's independent tab and agent names. A named agent now titles its pane. A tab holding exactly one named agent follows its name while auto-named or labeled with it: `agent start` and `agent rename` relabel it, and `tab rename` to a valid, free agent name renames the agent. A pane label equal to the old name follows `agent rename`. A label that differs is left alone, so upstream's `agent_rename_does_not_replace_the_pane_label` still passes. The sidebar half of #97 is the `name` token.
-- **Collision:** `rename_agent_target` and `start_agent` in `agents.rs`, `handle_tab_rename` (now split into `set_tab_label`) in `tabs.rs`, and `TerminalState::border_label`.
-- **Regression check:** `cargo nextest run -E 'test(/agent_rename|tab_rename|border_label/)'`. Live: `herdr tab create --label w1`, `herdr agent start w1 --kind claude --pane <its pane>`, `herdr agent rename w1 w2`; the tab and the pane border both read `w2`.
+- **Replaces:** upstream's pane border, which puts the agent's reported title over everything. While a named agent is live, its border shows the pane label, else the name; once the agent leaves, upstream's order is back. `agent rename` now also carries a tab label or a pane label that equals the old name (the tab only when it holds no other named live agent). A label that differs is left alone, so upstream's `agent_rename_does_not_replace_the_pane_label` still passes. `tab rename` and `agent start` are unchanged. The sidebar half of #97 is the `name` token (cameronsjo/herdr#146).
+- **Collision:** `rename_agent_target` in `agents.rs`, `handle_tab_rename` (now split into `set_tab_label`) in `tabs.rs`, and `TerminalState::border_label`.
+- **Regression check:** `cargo nextest run -E 'test(/agent_rename|tab_rename|border_label/)'`. Live: `herdr tab create --label w1`, `herdr agent start w1 --kind claude --pane <its pane>`, `herdr agent rename w1 w2`; the tab and the pane border both read `w2`, and the border drops `w2` once Claude exits.
 - **Render scaling:** not affected; `border_label` checks one more field per drawn border.
 
 ## Codex state comes from screen detection only, as upstream (issue [#114](https://github.com/cameronsjo/herdr/issues/114))

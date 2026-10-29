@@ -153,31 +153,7 @@ impl App {
         let Some((ws_idx, tab_idx)) = self.parse_tab_id(&params.tab_id) else {
             return tab_not_found(id, &params.tab_id);
         };
-        // Read the link before the label changes: the tab's only named agent
-        // follows the rename while the tab is auto-named or carries its name.
-        let linked_agent = self
-            .sole_named_agent_in_tab(ws_idx, tab_idx)
-            .filter(|(_, name)| {
-                self.state.workspaces[ws_idx].tabs[tab_idx]
-                    .custom_name
-                    .as_deref()
-                    .is_none_or(|label| label == name)
-            });
-        self.set_tab_label(ws_idx, tab_idx, params.label.clone());
-        if let Some((pane_id, name)) = linked_agent {
-            // Checked on the raw label, as every agent-name path is. A label
-            // that is no valid or free agent name renames only the tab.
-            if params.label != name && crate::label::valid_agent_name(&params.label) {
-                if let Some(target) = self.public_pane_id(ws_idx, pane_id) {
-                    if self
-                        .rename_agent_target(&target, Some(params.label))
-                        .is_err()
-                    {
-                        tracing::info!(pane = %target, "tab rename left the agent name unchanged");
-                    }
-                }
-            }
-        }
+        self.set_tab_label(ws_idx, tab_idx, params.label);
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
 
         encode_success(id, ResponseResult::TabInfo { tab })
@@ -203,6 +179,11 @@ impl App {
         tab.set_custom_name(label.clone());
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         self.schedule_session_save();
+        // The event names only a real public id: the positional fallback
+        // above is good enough for a log line but could name another tab.
+        let Some(tab_id) = self.public_tab_id(ws_idx, tab_idx) else {
+            return;
+        };
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
             data: EventData::TabRenamed {

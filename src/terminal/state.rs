@@ -2424,23 +2424,27 @@ impl TerminalState {
         }
     }
 
-    /// The pane's border title. An agent name outranks the agent's own title,
-    /// which a session often derives from its first prompt, so a pane started
-    /// or renamed as `reviewer` reads `reviewer` everywhere it is drawn.
+    /// The pane's border title. A live named agent reads as its pane label,
+    /// else its name, ahead of the title the agent reports, which a session
+    /// often derives from its first prompt. A name the agent has left behind
+    /// falls back to the usual order.
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
-        self.agent_name
-            .clone()
-            .or_else(|| self.effective_title())
-            .or_else(|| {
-                self.manual_label.clone().or_else(|| {
-                    show_agent_labels
-                        .then(|| {
-                            self.effective_display_agent()
-                                .or_else(|| self.effective_agent_label().map(str::to_string))
-                        })
-                        .flatten()
-                })
+        if self.agent_name_routes() {
+            return self
+                .manual_label
+                .clone()
+                .or_else(|| self.agent_name.clone());
+        }
+        self.effective_title().or_else(|| {
+            self.manual_label.clone().or_else(|| {
+                show_agent_labels
+                    .then(|| {
+                        self.effective_display_agent()
+                            .or_else(|| self.effective_agent_label().map(str::to_string))
+                    })
+                    .flatten()
             })
+        })
     }
 
     fn recompute_effective_state(
@@ -4363,16 +4367,18 @@ mod tests {
     }
 
     #[test]
-    fn border_label_prefers_agent_name_over_every_other_label() {
+    fn border_label_names_a_live_named_agent() {
         let mut terminal = test_terminal();
         terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
-        terminal.set_manual_label("notes".into());
         terminal.set_agent_name("reviewer".into());
-
         assert_eq!(terminal.border_label(false).as_deref(), Some("reviewer"));
 
-        terminal.clear_agent_name();
+        terminal.set_manual_label("notes".into());
         assert_eq!(terminal.border_label(false).as_deref(), Some("notes"));
+
+        terminal.clear_manual_label();
+        terminal.set_detected_state(None, AgentState::Unknown);
+        assert_eq!(terminal.border_label(false), None);
     }
 
     #[test]

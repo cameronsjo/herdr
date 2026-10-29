@@ -135,11 +135,11 @@ impl App {
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
-        if let Some(name) = normalized_name {
+        if let (Some(previous_name), Some(name)) = (previous_name, normalized_name) {
             self.sync_tab_label_to_agent_name(
                 resolved.ws_idx,
                 resolved.pane_id,
-                previous_name.as_deref(),
+                &previous_name,
                 &name,
             );
         }
@@ -246,7 +246,6 @@ impl App {
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
-        self.sync_tab_label_to_agent_name(ws_idx, pane_id, None, &name);
 
         let agent = self
             .agent_info(ws_idx, pane_id)
@@ -456,36 +455,33 @@ impl App {
         })
     }
 
-    /// The pane, and its agent name, when exactly one pane in the tab carries
-    /// an agent name.
-    pub(super) fn sole_named_agent_in_tab(
+    /// The one pane in the tab whose agent name routes to a live agent, when
+    /// exactly one does. A name an agent has left behind does not count.
+    fn sole_named_agent_in_tab(
         &self,
         ws_idx: usize,
         tab_idx: usize,
-    ) -> Option<(crate::layout::PaneId, String)> {
+    ) -> Option<crate::layout::PaneId> {
         let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
         let mut named = tab.panes.iter().filter_map(|(pane_id, pane)| {
-            let name = self
-                .state
+            self.state
                 .terminals
-                .get(&pane.attached_terminal_id)?
-                .agent_name
-                .clone()?;
-            Some((*pane_id, name))
+                .get(&pane.attached_terminal_id)
+                .is_some_and(|terminal| terminal.agent_name_routes())
+                .then_some(*pane_id)
         });
         let sole = named.next()?;
         named.next().is_none().then_some(sole)
     }
 
-    /// Lets the tab label follow the agent name of the tab's only named
-    /// agent. The tab follows while it is linked: auto-named, or labeled with
-    /// the agent's previous name. A label that differs is the user's own and
-    /// stays.
+    /// Lets a tab label that spells the agent's previous name follow a
+    /// rename, when the agent is the tab's only named one. Any other label is
+    /// the user's own and stays.
     fn sync_tab_label_to_agent_name(
         &mut self,
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
-        previous_name: Option<&str>,
+        previous_name: &str,
         name: &str,
     ) {
         let Some(tab_idx) = self
@@ -496,20 +492,14 @@ impl App {
         else {
             return;
         };
-        if self
-            .sole_named_agent_in_tab(ws_idx, tab_idx)
-            .is_none_or(|(sole, _)| sole != pane_id)
-        {
+        if self.sole_named_agent_in_tab(ws_idx, tab_idx) != Some(pane_id) {
             return;
         }
-        let linked = match self.state.workspaces[ws_idx].tabs[tab_idx]
+        if self.state.workspaces[ws_idx].tabs[tab_idx]
             .custom_name
             .as_deref()
+            == Some(previous_name)
         {
-            None => true,
-            Some(label) => label != name && Some(label) == previous_name,
-        };
-        if linked {
             self.set_tab_label(ws_idx, tab_idx, name.to_string());
         }
     }
