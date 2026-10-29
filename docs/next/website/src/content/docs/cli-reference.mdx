@@ -254,8 +254,9 @@ answer a prompt without leaving where you are. Neither tab's layout changes:
 the pane is shown at overlay size while peeked and gets its layout size back
 when the peek closes. `pane peek --close` closes it, and it closes on its own
 when the pane exits. Peeking another pane replaces an open peek; a plugin popup
-blocks it. A pane already on screen in the current tab is refused with
-`pane_visible`.
+blocks it. A pane in the current tab is refused with `pane_visible`, and a
+peek closes if its pane is moved into the tab it is shown over. The title
+always shows the pane id, so a label cannot pass one pane off as another.
 
 After `pane move`, use `.result.move_result.pane.pane_id` for later commands. A cross-workspace move changes the workspace-qualified pane ID; the prior value remains at `.result.move_result.previous_pane_id`. The running process keeps its launch-time `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID`; Herdr retains the old pane ID as an alias for that terminal, so pane commands using `--current` still resolve it. A live agent name follows the terminal and continues to resolve after the move.
 

@@ -199,11 +199,9 @@ impl App {
             Err(crate::app::popup::PeekOpenError::PaneNotFound) => {
                 pane_not_found(id, &target.pane_id)
             }
-            Err(crate::app::popup::PeekOpenError::PaneVisible) => encode_error(
-                id,
-                "pane_visible",
-                "pane is already visible in the current tab",
-            ),
+            Err(crate::app::popup::PeekOpenError::PaneVisible) => {
+                encode_error(id, "pane_visible", "pane is in the current tab")
+            }
             Err(crate::app::popup::PeekOpenError::PopupOpen) => {
                 encode_error(id, "popup_open", "another popup is open")
             }

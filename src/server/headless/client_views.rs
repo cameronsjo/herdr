@@ -126,6 +126,7 @@ impl HeadlessServer {
     }
 
     pub(super) fn reconcile_client_shell_locations(&mut self) {
+        let peek_before = self.peeked_terminal_id();
         if self.app.state.popup_pane.is_none() {
             self.popup_owner_tab_id = None;
         } else if self
@@ -135,10 +136,16 @@ impl HeadlessServer {
         {
             self.popup_owner_tab_id = None;
             self.app.close_popup_pane();
+        } else if self.peeked_pane_moved_under_its_overlay() {
+            self.app.close_popup_pane();
         } else if self.popup_owner_tab_id.is_none() {
             self.popup_owner_tab_id = self
                 .default_shell_target()
                 .and_then(|target| self.tab_id_for_target(target));
+        }
+        if peek_before.is_some() && self.peeked_terminal_id().is_none() {
+            // The peeked pane goes back to its tab's layout size.
+            self.reapply_controlled_shell_tab_geometry(false);
         }
         let topology = self.client_shell_topology();
         let live_clients = self.clients.keys().copied().collect::<HashSet<_>>();
@@ -945,6 +952,27 @@ impl HeadlessServer {
         let geometry_changed = (method_claims_geometry || peek_changed)
             && self.reapply_controlled_shell_tab_geometry(false);
         changed | geometry_changed
+    }
+
+    /// A peeked pane that a move or merge put into the tab its overlay sits
+    /// over would show twice, so the peek gives way.
+    fn peeked_pane_moved_under_its_overlay(&self) -> bool {
+        let Some(popup) = self
+            .app
+            .state
+            .popup_pane
+            .as_ref()
+            .filter(|popup| popup.peek.is_some())
+        else {
+            return false;
+        };
+        let Some((workspace_index, _)) = self.app.find_pane(popup.pane_id) else {
+            return false;
+        };
+        let pane_tab_id = self.app.state.workspaces[workspace_index]
+            .find_tab_index_for_pane(popup.pane_id)
+            .and_then(|tab_index| self.app.public_tab_id(workspace_index, tab_index));
+        pane_tab_id.is_some() && pane_tab_id == self.popup_owner_tab_id
     }
 
     fn peeked_terminal_id(&self) -> Option<crate::terminal::TerminalId> {

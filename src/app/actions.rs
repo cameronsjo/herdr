@@ -663,6 +663,14 @@ impl AppState {
                 })
             });
             if !still_attached
+                && self
+                    .popup_pane
+                    .as_ref()
+                    .is_some_and(|popup| popup.peek.is_some() && popup.terminal_id == terminal_id)
+            {
+                self.popup_pane = None;
+            }
+            if !still_attached
                 && self.terminals.remove(&terminal_id).is_some()
                 && !self.terminal_runtime_shutdowns.contains(&terminal_id)
             {
