@@ -390,6 +390,7 @@ Agent rows accept these built-in tokens:
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.
+- `location` — `workspace · tab` (or just the workspace when its tab name is hidden) for an agent outside the focused workspace; omitted for agents in it. Useful in `grouped_rows` with `group_by = { token = "..." }`, whose groups span workspaces, for example `["state_icon", "agent", "location"]`.
 - `pane` — pane name when available.
 - `agent` — detected or reported agent display name.
 - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.

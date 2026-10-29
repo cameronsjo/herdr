@@ -629,6 +629,8 @@ pub(super) fn agent_row(
             machine,
             workspace: &workspace.label,
             tab: tab_label,
+            outside_focused_workspace: snapshot.focused_workspace_id.as_deref()
+                != Some(agent.workspace_id.as_str()),
             pane: agent
                 .title
                 .as_deref()

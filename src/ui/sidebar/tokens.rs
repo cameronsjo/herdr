@@ -56,6 +56,9 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    /// Whether the agent lives outside the focused workspace; the `location`
+    /// token draws only then.
+    pub(crate) outside_focused_workspace: bool,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
     pub(crate) terminal_title: Option<&'a str>,
@@ -92,6 +95,14 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Tab => context
                             .tab
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                        AgentSidebarToken::Location => {
+                            context.outside_focused_workspace.then(|| {
+                                ResolvedTokenKind::Workspace(match context.tab {
+                                    Some(tab) => format!("{} · {tab}", context.workspace),
+                                    None => context.workspace.to_string(),
+                                })
+                            })
+                        }
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
@@ -222,6 +233,7 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            outside_focused_workspace: false,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
             terminal_title: entry.terminal_title.as_deref(),
