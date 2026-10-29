@@ -119,6 +119,20 @@ pub(crate) fn render_collapsed_sidebar(
             &"─".repeat(workspace_area.width as usize),
             Style::default().fg(palette.surface_dim),
         );
+        // Too narrow for a "needs me" label, so the divider carries a mark
+        // that the agent list below is filtered.
+        if config.agents.needs_me_only {
+            put_text(
+                buffer,
+                workspace_area.x,
+                divider_y,
+                workspace_area.width.min(1),
+                "!",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
     }
 
     let detail_content = Rect::new(

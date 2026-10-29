@@ -409,9 +409,13 @@ impl ClientShellState {
     }
 
     /// Shows only blocked agents, or every agent again. Client-side and
-    /// session-only: nothing is sent, and a config reload keeps it.
+    /// session-only: nothing is sent, and a config reload keeps it. The list
+    /// underneath is always in priority order while the filter is on.
     pub(super) fn toggle_needs_me(&mut self, outcome: &mut ClientShellInput) {
         self.config.agents.needs_me_only = !self.config.agents.needs_me_only;
+        if self.config.agents.needs_me_only {
+            self.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+        }
         self.agent_scroll = 0;
         outcome.repaint = true;
     }

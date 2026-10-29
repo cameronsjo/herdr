@@ -142,6 +142,7 @@ fn the_palette_clears_an_agent_view() {
 #[test]
 fn the_palette_toggles_the_needs_me_filter() {
     let mut state = shell();
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
     for expected in [true, false] {
         enter_prefix(&mut state);
         open_palette(&mut state);
@@ -162,6 +163,11 @@ fn the_palette_toggles_the_needs_me_filter() {
             "the filter is client-side and sends nothing"
         );
         assert_eq!(state.config.agents.needs_me_only, expected);
+        assert_eq!(
+            state.config.agent_panel_sort,
+            crate::config::AgentPanelSortConfig::Priority,
+            "the filter always sits on the priority order"
+        );
     }
 }
 

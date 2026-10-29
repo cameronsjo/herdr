@@ -354,7 +354,11 @@ impl ClientShellConfig {
                 let needs_me_only = self.agents.needs_me_only;
                 self.agents = ui.sidebar.agents.clone();
                 self.agents.needs_me_only = needs_me_only;
-                self.agent_panel_sort = ui.agent_panel_sort;
+                self.agent_panel_sort = if needs_me_only {
+                    crate::config::AgentPanelSortConfig::Priority
+                } else {
+                    ui.agent_panel_sort
+                };
                 self.status_indicators = ui.status_indicators;
                 self.sound_enabled = ui.sound.enabled;
                 self.toast_delivery = ui.toast.delivery;

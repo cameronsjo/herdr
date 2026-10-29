@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Needs me shows only blocked agents
-While the "needs me" filter is on, the Agent panel SHALL list only agents whose status is `blocked`, from every workspace and, in the multi-machine list, every machine. An empty result MUST say ` no agents need you`. The filter is client state: it sends nothing, survives a config reload, and is not saved.
+While the "needs me" filter is on, the Agent panel SHALL list only agents whose status is `blocked`, from every workspace and, in the multi-machine list, every machine. An empty result MUST say ` no agents need you`; the mobile list is titled `agents · needs me`, and the collapsed sidebar marks its divider with `!`. The filter is client state: it sends nothing, survives a config reload, and is not saved.
 
 #### Scenario: One agent is blocked
 - **WHEN** the filter is on and one of three agents is blocked

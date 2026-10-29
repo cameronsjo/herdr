@@ -672,3 +672,49 @@ fn mobile_switcher_scroll_close_and_width_transition_clear_mobile_hits() {
     assert!(state.hits.mobile_close.is_empty());
     assert!(state.hits.mobile_targets.is_empty());
 }
+
+#[test]
+fn mobile_switcher_says_when_needs_me_hides_every_agent() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.agents.needs_me_only = true;
+    let mut projected = snapshot();
+    projected.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("pi".into()),
+        display_agent: Some("pi".into()),
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    });
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(44, 20).expect("mobile header");
+    let switch = state.hits.mobile_switch;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: switch.x,
+        row: switch.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let switcher = state.compose(44, 20).expect("mobile switcher");
+    let text = switcher
+        .cells
+        .chunks(switcher.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("agents · needs me"), "{text}");
+    assert!(text.contains("no agents need you"), "{text}");
+}
