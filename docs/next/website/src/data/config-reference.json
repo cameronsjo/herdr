@@ -1142,7 +1142,7 @@
         {
           "key": "ui.sidebar.agents.grouped_rows",
           "type": "list of token rows",
-          "default": "[[\"state_icon\", \"tab\", \"agent\"]]",
+          "default": "[[\"state_icon\", \"tab\", \"agent\"], [\"$task\"]]",
           "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; it takes precedence over a rows_by_agent override while grouping is active."
         },
         {
@@ -1154,7 +1154,7 @@
         {
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
-          "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
+          "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"], [\"$task\"]]",
           "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. At most 16 rows and 16 tokens per row."
         },
         {
@@ -1574,6 +1574,12 @@
           "type": "integer",
           "default": "10000000",
           "description": "Maximum scrollback buffer size in bytes retained per pane terminal. The legacy key name `scrollback_lines` is accepted as an alias."
+        },
+        {
+          "key": "advanced.agent_process_names",
+          "type": "table of string lists",
+          "default": "{}",
+          "description": "More executable names to identify as a built-in agent kind, keyed by kind, for example `{ claude = [\"my-claude\"] }` for a Claude Code wrapper installed under its own name. Names match the executable's basename, ignoring case and a `.exe`, `.cmd`, `.bat`, `.ps1` or `.js` suffix. Shell, runtime and launcher names such as `zsh`, `node` or `sudo`, and names that already belong to another kind, are ignored with a config warning. Reloads with the config."
         }
       ]
     },

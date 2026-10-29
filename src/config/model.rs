@@ -1123,6 +1123,10 @@ pub struct AdvancedConfig {
     /// Maximum scrollback buffer size in bytes retained per pane terminal. Default: 10000000.
     #[serde(alias = "scrollback_lines")]
     pub scrollback_limit_bytes: usize,
+    /// Fork: more executable names to identify as a built-in agent kind, keyed
+    /// by kind, e.g. `{ claude = ["my-claude"] }` for a Claude Code wrapper
+    /// installed under its own name. Default: empty.
+    pub agent_process_names: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1417,6 +1421,7 @@ impl Default for AdvancedConfig {
     fn default() -> Self {
         Self {
             scrollback_limit_bytes: DEFAULT_SCROLLBACK_LIMIT_BYTES,
+            agent_process_names: std::collections::BTreeMap::new(),
         }
     }
 }

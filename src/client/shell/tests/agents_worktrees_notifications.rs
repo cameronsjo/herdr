@@ -2628,3 +2628,70 @@ fn the_sort_toggle_cycles_through_needs_me_which_shows_only_blocked_agents() {
     assert!(state.hits.agents.is_empty());
     assert!(frame_rows(&frame).join("\n").contains("no agents need you"));
 }
+
+#[test]
+fn location_token_names_workspace_and_tab_only_outside_the_focused_workspace() {
+    let mut projected = snapshot();
+    let mut away = projected.workspaces[0].clone();
+    away.workspace_id = "ws_2".into();
+    away.label = "homelab".into();
+    away.focused = false;
+    projected.workspaces.push(away);
+    projected.tabs.push(ClientShellTab {
+        tab_id: "tab_2".into(),
+        workspace_id: "ws_2".into(),
+        number: 1,
+        label: "review".into(),
+        custom_label: true,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    let agent = |pane_id: &str, workspace_id: &str, tab_id: &str, name: &str| ClientShellAgent {
+        pane_id: pane_id.into(),
+        workspace_id: workspace_id.into(),
+        tab_id: tab_id.into(),
+        name: Some(name.into()),
+        display_agent: None,
+        agent: Some("pi".into()),
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Working,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: false,
+    };
+    projected.agents = vec![
+        agent("pane_1", "ws_1", "tab_1", "here"),
+        agent("pane_2", "ws_2", "tab_2", "there"),
+    ];
+    let mut config = Config::default();
+    config.ui.sidebar.agents.rows = vec![vec![
+        crate::config::AgentSidebarToken::Agent,
+        crate::config::AgentSidebarToken::Location,
+    ]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 30).expect("agent sidebar frame");
+    let row_text = |pane_id: &str| {
+        let rect = state
+            .hits
+            .agents
+            .iter()
+            .find(|(_, id)| id == pane_id)
+            .expect("agent row hit")
+            .0;
+        (rect.x..rect.right())
+            .map(|x| {
+                frame.cells[rect.y as usize * frame.width as usize + x as usize]
+                    .symbol
+                    .clone()
+            })
+            .collect::<String>()
+    };
+    assert_eq!(row_text("pane_1").trim(), "here");
+    assert_eq!(row_text("pane_2").trim(), "there · homelab · review");
+}

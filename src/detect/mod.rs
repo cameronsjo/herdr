@@ -3,8 +3,11 @@
 //! Each pane's live bottom-of-buffer text is read periodically and matched
 //! against known agent output patterns to determine state.
 
+mod fork_process_names;
 pub mod manifest;
 pub mod manifest_update;
+
+pub(crate) use fork_process_names::{extra_process_names, set_extra_process_names};
 
 /// The detected state of a terminal pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -241,9 +244,11 @@ fn is_muse_versioned_binary(name: &str) -> bool {
 }
 
 /// Identify which agent is running from the process name.
-/// Returns `None` for plain shells or unrecognized programs.
+/// Returns `None` for plain shells or unrecognized programs. Fork: also
+/// matches the names configured in `[advanced] agent_process_names`.
 pub fn identify_agent(process_name: &str) -> Option<Agent> {
     parse_agent_label(process_name)
+        .or_else(|| fork_process_names::lookup_extra_process_name(process_name))
 }
 
 pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Agent, String)> {
@@ -889,7 +894,9 @@ fn resolved_agent_name_from_path_token(token: &str) -> Option<String> {
 }
 
 fn agent_name_from_basename(basename: &str) -> Option<String> {
-    let agent = parse_agent_label(basename)?;
+    // Fork: `identify_agent`, so wrapper scripts run through an interpreter
+    // also match `[advanced] agent_process_names`.
+    let agent = identify_agent(basename)?;
     Some(agent_label(agent).to_string())
 }
 

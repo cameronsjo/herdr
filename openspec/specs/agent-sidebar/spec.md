@@ -121,8 +121,34 @@ Clicking the panel header's order toggle SHALL cycle `grouped`, `priority`, `nee
 - **WHEN** the operator runs `toggle needs me` from the palette twice
 - **THEN** the filter turns on and then off, and no endpoint method is sent
 
+### Requirement: Location names where an agent lives
+The agent row token `location` SHALL draw `<workspace label> · <tab label>` for an agent whose workspace is not the snapshot's focused workspace, or only the workspace label when the tab label is hidden (one tab without a custom label). For an agent in the focused workspace it MUST draw nothing. In the multi-machine endpoint list each machine's own focused workspace decides.
+
+#### Scenario: Agent in another workspace
+- **WHEN** rows are `[["agent", "location"]]`, the focused workspace is `client-shell`, and agent `there` runs in workspace `homelab` on the custom-labelled tab `review`
+- **THEN** its row reads `there · homelab · review`
+
+#### Scenario: Agent in the focused workspace
+- **WHEN** the same rows are used for agent `here` in the focused workspace
+- **THEN** its row reads `here`
+
+### Requirement: Agents show a one-line task
+`herdr agent task <TEXT>` SHALL set the pane metadata token `task` to TEXT with source `herdr:task`, and `herdr agent task --clear` SHALL clear it. Without `--target` it MUST act on the calling pane named by `HERDR_PANE_ID`, and fail with usage when that is unset; `--target` takes an agent name or pane id, resolved through `agent.get`. The default `rows` and `grouped_rows` SHALL end with a `["$task"]` row, which, like any row whose tokens are all unset, is not drawn until a task is set.
+
+#### Scenario: An agent reports its own task
+- **WHEN** an agent in pane `p_1_2` runs `herdr agent task "fixing homelab#1093"` with the default rows
+- **THEN** `pane.report_metadata` is sent for `p_1_2` with tokens `{"task": "fixing homelab#1093"}`, and the agent's sidebar entry shows that text on a line under its name
+
+#### Scenario: No task set
+- **WHEN** an agent has no `task` token and the default rows are in use
+- **THEN** its sidebar entry draws no task line
+
+#### Scenario: Clear a worker's task
+- **WHEN** an orchestrator runs `herdr agent task --clear --target worker-1`
+- **THEN** the CLI resolves `worker-1` to its pane with `agent.get` and sends `pane.report_metadata` with tokens `{"task": null}`
+
 ### Requirement: Agent name token
-Agent sidebar rows SHALL accept a `name` token that shows the agent's herdr name, as set by `herdr agent start <name>` or `agent rename`. It MUST NOT fall back to a reported display name, the agent kind or a title, and MUST be omitted when the agent has no herdr name. The `agent` token and the default rows are unchanged. `name` is distinct from the custom token `$name`.
+Agent sidebar rows SHALL accept a `name` token that shows the agent's herdr name, as set by `herdr agent start <name>` or `agent rename`. It MUST NOT fall back to a reported display name, the agent kind or a title, and MUST be omitted when the agent has no herdr name. The `name` token leaves the `agent` token and the default rows as they are. `name` is distinct from the custom token `$name`.
 
 #### Scenario: Named Claude worker with a reported display name
 - **WHEN** a row is `["name", "agent"]` and agent `cos-cadence` has reported display name `claude · feat/x`

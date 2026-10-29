@@ -2424,7 +2424,17 @@ impl TerminalState {
         }
     }
 
+    /// The pane's border title. A live named agent reads as its pane label,
+    /// else its name, ahead of the title the agent reports, which a session
+    /// often derives from its first prompt. A name the agent has left behind
+    /// falls back to the usual order.
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
+        if self.agent_name_routes() {
+            return self
+                .manual_label
+                .clone()
+                .or_else(|| self.agent_name.clone());
+        }
         self.effective_title().or_else(|| {
             self.manual_label.clone().or_else(|| {
                 show_agent_labels
@@ -4354,6 +4364,21 @@ mod tests {
         terminal.set_manual_label("reviewer".into());
         terminal.clear_manual_label();
         assert_eq!(terminal.border_label(true).as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn border_label_names_a_live_named_agent() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Claude), AgentState::Idle);
+        terminal.set_agent_name("reviewer".into());
+        assert_eq!(terminal.border_label(false).as_deref(), Some("reviewer"));
+
+        terminal.set_manual_label("notes".into());
+        assert_eq!(terminal.border_label(false).as_deref(), Some("notes"));
+
+        terminal.clear_manual_label();
+        terminal.set_detected_state(None, AgentState::Unknown);
+        assert_eq!(terminal.border_label(false), None);
     }
 
     #[test]
