@@ -28,6 +28,15 @@ impl App {
     }
 
     pub(crate) fn shutdown_terminal_runtime(&mut self, terminal_id: crate::terminal::TerminalId) {
+        // A peek of a pane that is going away has nothing left to show.
+        if self
+            .state
+            .popup_pane
+            .as_ref()
+            .is_some_and(|popup| popup.peek.is_some() && popup.terminal_id == terminal_id)
+        {
+            self.close_popup_pane();
+        }
         if let Some(runtime) = self.terminal_runtimes.remove(&terminal_id) {
             runtime.shutdown();
         }

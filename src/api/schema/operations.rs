@@ -203,6 +203,8 @@ mod tests {
             "pane.release_agent",
             "pane.close",
             "popup.close",
+            "pane.peek",
+            "pane.peek_close",
             "plugin.unlink",
             "plugin.disable",
             "plugin.action.invoke",

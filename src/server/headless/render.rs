@@ -417,14 +417,19 @@ impl HeadlessServer {
             if !client.is_active_shell_client() || client.writer.is_none() {
                 return false;
             }
-            if self
+            if let Some(popup) = self
                 .app
                 .state
                 .popup_pane
                 .as_ref()
-                .is_some_and(|popup| popup.pane_id == pane_id)
+                .filter(|popup| popup.pane_id == pane_id)
             {
-                return self.popup_owner_tab_id == self.shell_tab_id_for_client(client_id);
+                let shows_popup =
+                    self.popup_owner_tab_id == self.shell_tab_id_for_client(client_id);
+                // A peeked pane is also still tiled in its own tab.
+                if shows_popup || popup.peek.is_none() {
+                    return shows_popup;
+                }
             }
             let Some(target) = self.shell_target_for_client(client_id) else {
                 return false;
