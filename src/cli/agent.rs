@@ -383,9 +383,16 @@ fn agent_start(params: AgentStartParams, parent: Option<&str>) -> std::io::Resul
                     .as_str()
                     .unwrap_or(&pane_id)
                     .to_owned();
-                if let Some(error) = super::fork_agent_parent::record_parent(link, &child_pane_id)?
-                {
-                    return super::print_response(&error);
+                // The agent is already running, so a failed record never
+                // turns the start into a failure: it rides along instead.
+                if let Some(error) = super::fork_agent_parent::parent_record_failure(
+                    super::fork_agent_parent::record_parent(link, &child_pane_id),
+                ) {
+                    eprintln!(
+                        "warning: agent started but --parent was not recorded: {}",
+                        error["message"].as_str().unwrap_or("unknown error")
+                    );
+                    response["result"]["parent_error"] = error;
                 }
             }
             super::print_response(&response)

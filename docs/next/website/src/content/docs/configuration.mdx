@@ -508,7 +508,9 @@ An agent whose name equals its group's value leads that group, ahead of blocked
 members. That is how orchestrators nest their workers: `herdr agent start
 worker-1 --parent orch ...` tags the worker, and `orch` itself, with
 `parent = orch`, so with `group_by = { token = "parent" }` the `orch` header
-lists `orch` first and its workers under it, wherever they run. Add `location`
+lists `orch` first and its workers under it, wherever they run. An `orch`
+that was itself started with `--parent` keeps its own `parent` token and stays
+in that group instead. Add `location`
 to `grouped_rows` to see where each worker lives.
 
 Set `blocked_first = true` to move blocked agents to the top of their group, or

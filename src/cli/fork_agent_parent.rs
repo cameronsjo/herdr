@@ -17,6 +17,8 @@ const PARENT_SOURCE: &str = "herdr:parent";
 
 /// Splits `--parent NAME` or `--parent=NAME` out of `agent start` arguments.
 /// Only arguments before `--` are options; everything after is the agent's.
+/// This relies on no `start` option taking a hyphen-leading value; one that
+/// does (`allow_hyphen_values`) needs this revisited.
 pub(super) fn take_parent(args: &[String]) -> Result<(Vec<String>, Option<String>), String> {
     let mut rest = Vec::with_capacity(args.len());
     let mut parent = None;
@@ -128,6 +130,21 @@ pub(super) fn record_parent(
     Ok(None)
 }
 
+/// The error object to attach to a successful start when recording the
+/// parent failed, whether the server refused a report or the socket did.
+pub(super) fn parent_record_failure(
+    recorded: std::io::Result<Option<serde_json::Value>>,
+) -> Option<serde_json::Value> {
+    match recorded {
+        Ok(None) => None,
+        Ok(Some(response)) => Some(response["error"].clone()),
+        Err(err) => Some(serde_json::json!({
+            "code": "parent_record_transport_failed",
+            "message": err.to_string(),
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +208,22 @@ mod tests {
         };
         assert_eq!(panes(&link(false)), vec!["p_1_2", "p_1_1"]);
         assert_eq!(panes(&link(true)), vec!["p_1_2"]);
+    }
+
+    #[test]
+    fn parent_record_failure_keeps_the_error_without_failing_the_start() {
+        assert_eq!(parent_record_failure(Ok(None)), None);
+        let refused = serde_json::json!({
+            "id": "cli:agent:start",
+            "error": {"code": "pane_not_found", "message": "pane p_1_1 not found"},
+        });
+        assert_eq!(
+            parent_record_failure(Ok(Some(refused))),
+            Some(serde_json::json!({"code": "pane_not_found", "message": "pane p_1_1 not found"}))
+        );
+        let dropped = parent_record_failure(Err(std::io::Error::other("socket closed")))
+            .expect("a transport error is reported");
+        assert_eq!(dropped["code"], "parent_record_transport_failed");
+        assert_eq!(dropped["message"], "socket closed");
     }
 }

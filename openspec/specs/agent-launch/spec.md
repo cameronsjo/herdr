@@ -79,3 +79,7 @@ After an agent started with `--parent NAME` is ready, the CLI SHALL set the pane
 #### Scenario: Worker started under an orchestrator
 - **WHEN** `herdr agent start worker-1 --kind claude --pane p_2_1 --parent orch` succeeds and `orch` has no `parent` token
 - **THEN** both `worker-1`'s pane and `orch`'s pane report token `parent = orch`
+
+#### Scenario: Recording fails after the start
+- **WHEN** the agent starts but a `pane.report_metadata` call for the `parent` token fails
+- **THEN** the command still prints the start result, with the failure under `result.parent_error`, warns on stderr, and exits as a successful start
