@@ -1136,7 +1136,7 @@
         {
           "key": "ui.sidebar.agents.grouped_rows",
           "type": "list of token rows",
-          "default": "[[\"state_icon\", \"tab\", \"agent\"]]",
+          "default": "[[\"state_icon\", \"tab\", \"agent\"], [\"$task\"]]",
           "description": "Expanded Agent sidebar layout used while ui.sidebar.agents.group_by groups entries. Same token and size rules as ui.sidebar.agents.rows; it takes precedence over a rows_by_agent override while grouping is active."
         },
         {
@@ -1148,7 +1148,7 @@
         {
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
-          "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
+          "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"], [\"$task\"]]",
           "description": "Default expanded Agent sidebar layout. Entries may be token strings or inline { token, fg, bold, dim, rules } style tables. Text-valued built-ins and $name metadata tokens accept up to 16 ordered rules using equals, contains, starts_with, gt, or lt; the first match overrides specified styles. Text conditions optionally accept ignore_case for ASCII matching; numeric conditions require full finite numbers. state_icon accepts fixed styles only. At most 16 rows and 16 tokens per row."
         },
         {

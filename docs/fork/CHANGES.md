@@ -246,6 +246,18 @@ next sync is likely to conflict again:
 - **Build:** this session's `cargo build` needed the Zig dependencies
   prefetched (`just zig-prefetch`); see that entry below.
 
+## Agents show a one-line task (Linear CAM-439, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(agent): set an agent's sidebar task line with agent task
+
+- **PR:** [cameronsjo/herdr#144](https://github.com/cameronsjo/herdr/pull/144)
+- **Files:** `src/cli/fork_agent_task.rs` (new), `src/cli.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/config/sidebar.rs`, `src/config.rs`, `src/ui/sidebar/tokens.rs` (test), `docs/next/website/src/content/docs/{cli-reference,configuration}.mdx` plus the ja and zh-cn default-row blocks, `docs/next/website/src/data/config-reference.json`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-task-line` change)
+- **Adds:** `herdr agent task [--target TARGET] [--] <TEXT>|--clear`, which patches the pane metadata token `task` (source `herdr:task`) on the calling pane (`HERDR_PANE_ID`) or on the `--target` agent, resolved with `agent.get`. It keeps its own parser, like `agent register`. The default agent `rows` and `grouped_rows` end with a `["$task"]` row; an unset token drops the row, so layouts look the same until a task is set. No API, protocol or server change.
+- **Replaces:** upstream's default `rows` (`[["state_icon","machine","workspace","tab"],["agent"]]`) gains the third row.
+- **Collision:** `AgentsSidebarConfig::default()` in `src/config/sidebar.rs`, the default-rows blocks in the three `configuration.mdx` files and `config-reference.json`, and the fork dispatch at the top of `run_agent_command` in `src/cli/agent.rs`.
+- **Regression check:** `cargo nextest run -E 'test(/task_/) | test(/default_rows_draw_the_task_line/)'`. Dropping the `$task` default row reddens `default_rows_draw_the_task_line_only_once_a_task_is_set`. Live: in an agent pane run `herdr agent task "probe"`; the sidebar entry gains a `probe` line, and `herdr agent task --clear` removes it.
+- **Render scaling:** one more row per entry to resolve, a `HashMap` lookup that is skipped when the token is unset; no new per-pane work.
+
 ## A wrapper under its own executable name is identified as its agent (issue [#110](https://github.com/cameronsjo/herdr/issues/110), Linear CAM-447)
 
 ### feat(detect): identify extra process names as a built-in agent kind

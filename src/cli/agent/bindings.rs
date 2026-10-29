@@ -259,6 +259,7 @@ pub(crate) fn command() -> Command {
         .subcommand_required(true)
         .subcommand(leaf("list", Vec::new(), "List agents"))
         .subcommands(crate::cli::fork_registered_agents::commands())
+        .subcommand(crate::cli::fork_agent_task::command())
         .subcommand(leaf("get", TargetProjection::arguments(), "Show an agent"))
         .subcommand(leaf("focus", TargetProjection::arguments(), "Focus an agent"))
         .subcommand(leaf("read", AgentReadProjection::arguments(), "Read agent terminal output")

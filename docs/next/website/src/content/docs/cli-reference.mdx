@@ -373,6 +373,7 @@ herdr agent send-keys <target> <key> [key ...]
 herdr agent type-submit <target> <text>
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
+herdr agent task [--target TARGET] [--] <text>|--clear
 herdr agent focus <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
@@ -394,6 +395,8 @@ A successful start returns only after the expected agent owns the same terminal 
 `idle` and `done` both mean ready for input. The CLI/API uses the server's seen state: `done` is idle but not yet marked seen, explicit `pane focus` / `agent focus` commands mark the target seen, and reads do not. Each TUI client tracks viewed completions independently, so its Done badge can differ from the CLI or another client. `blocked` means Herdr recognized an approval or question UI. `unknown` means an agent is present but Herdr cannot classify it confidently, not that its work succeeded.
 
 `agent send-keys` sends logical terminal keys such as `enter`, `up`, `esc`, or `ctrl+c`. `agent type-submit` sends literal text plus Enter as one interactive UI submission; use it for slash commands or other harness commands that must be typed into the agent UI instead of sent as model prompts. Herdr validates every key or type-submit text before writing any bytes. `agent read` reads the resolved terminal stream, and `agent rename` names an already detected agent.
+
+`agent task` sets the one-line task an agent's sidebar entry shows under its name, such as `herdr agent task "fixing homelab#1093"`; `--clear` removes it. Without `--target` it sets the task of the calling pane (`HERDR_PANE_ID`), so an agent can report its own; with `--target` an orchestrator can set a worker's. The task is the pane metadata token `task`, reported with source `herdr:task`, so it shows as `$task` in sidebar rows (the default layouts end with a `$task` row that appears only once a task is set) and as `tokens.task` in `agent get`. Put `--` before a task that starts with `-`. The task stays until cleared, replaced, or the pane closes; it is not cleared when the agent exits, so clear it when the work ends, or a later agent in the same pane shows it. A pane-less registered agent sets it with `agent register --token task=TEXT`.
 
 `agent explain` asks the running server to classify the same bottom-buffer detection snapshot used by screen detection, so live output reflects the server's active manifest cache. Because this uses the `agent.explain` socket method, restart or hand off to an updated server after upgrading Herdr before using live explain. Use `--file PATH --agent LABEL` to explain a saved fixture locally instead. The default output shows the agent, final state, manifest source and version, matched rule with its region evidence, and any fallback, skip, or warning reasons. Add `--verbose` for visible evidence flags, cached remote version, local override shadowing, remote update status, and the full evaluated-rules list with matcher and region evidence. Add `--json` for issue reports or tests.
 
