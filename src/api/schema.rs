@@ -97,8 +97,8 @@ operations::define_operations! {
     AgentSendKeys(AgentSendKeysParams) => "agent.send_keys", true, false;
     AgentTypeSubmit(AgentTypeSubmitParams) => "agent.type_submit", true, false;
     AgentRename(AgentRenameParams) => "agent.rename", true, false;
-    AgentPin(AgentTarget) => "agent.pin", true, false;
-    AgentUnpin(AgentTarget) => "agent.unpin", true, false;
+    AgentPin(AgentTarget) => "agent.pin", true, true;
+    AgentUnpin(AgentTarget) => "agent.unpin", true, true;
     AgentViewSet(AgentViewSetParams) => "agent.view.set", true, false;
     AgentViewClear(AgentViewClearParams) => "agent.view.clear", true, true;
     AgentFocus(AgentTarget) => "agent.focus", true, false;

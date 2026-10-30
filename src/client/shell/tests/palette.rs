@@ -171,6 +171,53 @@ fn the_palette_toggles_the_needs_me_filter() {
     }
 }
 
+/// Fork (cameronsjo/herdr#96): the palette pins the focused pane's agent, and
+/// unpins it once the snapshot says it is pinned.
+#[test]
+fn fork_agent_pin_the_palette_toggles_the_focused_agents_pin() {
+    let mut state = shell();
+    let mut agents = super::agents_worktrees_notifications::grouped_agents_snapshot();
+    agents.focused_pane_id = Some("pane_1".into());
+    state.set_snapshot(Box::new(agents.clone()));
+
+    let run = |state: &mut ClientShellState| {
+        enter_prefix(state);
+        open_palette(state);
+        for character in "pin agent".chars() {
+            press(state, KeyCode::Char(character));
+        }
+        assert_eq!(
+            state
+                .filtered_palette_commands()
+                .first()
+                .map(|row| row.command.id.clone())
+                .as_deref(),
+            Some("core:toggle-agent-pin")
+        );
+        endpoint_methods(&press(state, KeyCode::Enter))
+    };
+
+    let sent = run(&mut state);
+    assert!(matches!(
+        sent.as_slice(),
+        [crate::api::schema::Method::AgentPin(target)] if target.target == "pane_1"
+    ));
+
+    agents
+        .agents
+        .iter_mut()
+        .find(|agent| agent.pane_id == "pane_1")
+        .expect("pane_1 is an agent")
+        .tokens
+        .push((crate::fork_agent_pin::PIN_TOKEN.into(), "1".into()));
+    state.set_snapshot(Box::new(agents));
+    let sent = run(&mut state);
+    assert!(matches!(
+        sent.as_slice(),
+        [crate::api::schema::Method::AgentUnpin(target)] if target.target == "pane_1"
+    ));
+}
+
 #[test]
 fn a_remembered_command_leads_the_next_empty_palette() {
     let mut state = shell();

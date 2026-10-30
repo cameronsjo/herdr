@@ -432,8 +432,8 @@ fn agent_start(params: AgentStartParams, pin: bool, parent: Option<&str>) -> std
 /// is left running and the error says why it is not pinned.
 fn pin_started_agent(mut response: serde_json::Value) -> std::io::Result<i32> {
     let Some(pane_id) = response["result"]["agent"]["pane_id"].as_str() else {
-        return super::print_response(&cli_agent_error(
-            "cli:agent:start",
+        return super::print_response(&pin_failure(
+            &response,
             "agent_pin_failed",
             "the agent started, but the start response did not include its pane_id to pin",
         ));
@@ -443,8 +443,8 @@ fn pin_started_agent(mut response: serde_json::Value) -> std::io::Result<i32> {
         true,
     ))?;
     if let Some(error) = pinned.get("error") {
-        return super::print_response(&cli_agent_error(
-            "cli:agent:start",
+        return super::print_response(&pin_failure(
+            &response,
             error["code"].as_str().unwrap_or("agent_pin_failed"),
             format!(
                 "the agent started, but pinning it failed: {}",
@@ -454,6 +454,21 @@ fn pin_started_agent(mut response: serde_json::Value) -> std::io::Result<i32> {
     }
     response["result"]["agent"] = pinned["result"]["agent"].clone();
     super::print_response(&response)
+}
+
+/// The error `agent start --pin` prints when the pin fails. A `--parent`
+/// record that also failed stays in it as `error.parent_error`, so neither
+/// failure hides the other.
+pub(super) fn pin_failure(
+    start_response: &serde_json::Value,
+    code: &str,
+    message: impl Into<String>,
+) -> serde_json::Value {
+    let mut error = cli_agent_error("cli:agent:start", code, message);
+    if let Some(parent_error) = start_response["result"].get("parent_error") {
+        error["error"]["parent_error"] = parent_error.clone();
+    }
+    error
 }
 
 /// Fork (#103, #110): a server that predates `env` or `exec` would drop it and

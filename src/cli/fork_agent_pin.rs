@@ -164,4 +164,22 @@ mod tests {
             Method::AgentUnpin(_)
         ));
     }
+
+    #[test]
+    fn a_failed_pin_keeps_a_failed_parent_record() {
+        let start = serde_json::json!({
+            "id": "cli:agent:start",
+            "result": {
+                "agent": { "pane_id": "w1:p2" },
+                "parent_error": { "code": "parent_not_found", "message": "no such parent" },
+            }
+        });
+        let error = super::super::agent::pin_failure(&start, "method_not_found", "pin failed");
+        assert_eq!(error["error"]["code"], "method_not_found");
+        assert_eq!(error["error"]["parent_error"]["code"], "parent_not_found");
+
+        let start = serde_json::json!({ "result": { "agent": { "pane_id": "w1:p2" } } });
+        let error = super::super::agent::pin_failure(&start, "method_not_found", "pin failed");
+        assert!(error["error"].get("parent_error").is_none());
+    }
 }

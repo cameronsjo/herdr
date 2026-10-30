@@ -1,4 +1,6 @@
 {
+  "agent.pin": "99d8dc8995050befb79b3fef74876dbfe3f480ae7e61bf3fa437b35140e18a45",
+  "agent.unpin": "de90c44ed6c2e0880e8a35619d8a4f7eda92db520c8bd07b0e96ce961a167bfb",
   "agent.view.clear": "c6bd7146f73be620b73fb47a286b663c1396620e18b0e7fa8ab3b4485f4982d5",
   "client_shell.surface.set": "919df2ba99fe7d5df003a051dbbaf9929998387c53ccb652b6262bd8e4650330",
   "command.invoke": "b16817652442b1ea2405e60a0443826a55baca461e938f524e79b16a675c5899",

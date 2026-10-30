@@ -384,6 +384,9 @@ pub struct KeysConfig {
     /// Show only the agents that need you (blocked), or every agent again.
     /// Unset by default.
     pub toggle_needs_me: BindingConfig,
+    /// Pin the focused pane's agent to the top of the agents panel, or unpin
+    /// it. Unset by default.
+    pub toggle_agent_pin: BindingConfig,
     /// Select the previous workspace. Unset by default.
     pub previous_workspace: BindingConfig,
     /// Select the next workspace. Unset by default.
@@ -543,6 +546,8 @@ pub(crate) struct KeysConfigOverlay {
     clear_agent_view: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_needs_me: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toggle_agent_pin: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     previous_workspace: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -713,6 +718,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(open_notification_target);
         apply_field!(clear_agent_view);
         apply_field!(toggle_needs_me);
+        apply_field!(toggle_agent_pin);
         apply_field!(previous_workspace);
         apply_field!(next_workspace);
         apply_field!(move_workspace_previous);
@@ -829,6 +835,7 @@ impl KeysConfig {
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
         copy_effective_action_field!(clear_agent_view, keybinds.clear_agent_view);
         copy_effective_action_field!(toggle_needs_me, keybinds.toggle_needs_me);
+        copy_effective_action_field!(toggle_agent_pin, keybinds.toggle_agent_pin);
         copy_effective_action_field!(previous_workspace, keybinds.previous_workspace);
         copy_effective_action_field!(next_workspace, keybinds.next_workspace);
         copy_effective_action_field!(move_workspace_previous, keybinds.move_workspace_previous);
@@ -1227,6 +1234,7 @@ impl Default for KeysConfig {
             open_notification_target: BindingConfig::one("prefix+o"),
             clear_agent_view: BindingConfig::empty(),
             toggle_needs_me: BindingConfig::empty(),
+            toggle_agent_pin: BindingConfig::empty(),
             previous_workspace: BindingConfig::empty(),
             next_workspace: BindingConfig::empty(),
             move_workspace_previous: BindingConfig::empty(),

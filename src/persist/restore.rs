@@ -629,6 +629,7 @@ fn unavailable_restored_terminal(
             (Some(name), None) => terminal.set_agent_name(name.clone()),
             _ => {}
         }
+        terminal.pin_order = pane.pin_order;
     }
     terminal
 }
@@ -701,6 +702,9 @@ fn restore_tab(
             .and_then(|pane| pane.managed_agent_kind.as_deref())
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
+        // Fork: a pin is the agent's, so it comes back only where the agent
+        // does - a live import or a native resume - never on a fresh shell.
+        let saved_pin_order = saved_pane.and_then(|p| p.pin_order);
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
         let saved_agent_resume = saved_pane.and_then(saved_reported_resume);
         let saved_history =
@@ -777,6 +781,7 @@ fn restore_tab(
                 (Some(_), None) => {}
                 (None, _) => {}
             }
+            terminal.pin_order = saved_pin_order;
             if let Some(agent) = initial_restore_agent {
                 let _ = terminal.set_detected_state_with_screen_signals_at(
                     Some(agent),
@@ -894,6 +899,9 @@ fn restore_tab(
                         drop_cold_agent_name_into_label(&mut terminal, agent_name);
                     }
                     (None, _) => {}
+                }
+                if was_imported {
+                    terminal.pin_order = saved_pin_order;
                 }
                 if let Some(agent) = initial_restore_agent {
                     let _ = terminal.set_detected_state_with_screen_signals_at(
@@ -1755,6 +1763,7 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            pin_order: None,
                         },
                     )]),
                     zoomed: false,
@@ -1821,6 +1830,7 @@ mod tests {
             }),
             agent_resume: None,
             launch_argv: None,
+            pin_order: None,
         }
     }
 
@@ -1902,6 +1912,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fork_agent_pin_survives_a_native_agent_resume() {
+        let mut pane = resumable_agent_pane("orchestrator", "pi-pinned.jsonl");
+        pane.pin_order = Some(3);
+        let snapshot =
+            restore_agent_name_snapshot(HashMap::from([(0, pane)]), LayoutSnapshot::Pane(0));
+
+        let terminals = restore_with_agent_resume(&snapshot);
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert_eq!(terminal.agent_name.as_deref(), Some("orchestrator"));
+        assert_eq!(terminal.pin_order, Some(3));
+    }
+
+    #[tokio::test]
+    async fn fork_agent_pin_is_dropped_when_the_pane_comes_back_as_a_fresh_shell() {
+        let snapshot = restore_agent_name_snapshot(
+            HashMap::from([(
+                0,
+                super::super::snapshot::PaneSnapshot {
+                    cwd: std::env::current_dir().unwrap(),
+                    label: None,
+                    agent_name: Some("orchestrator".into()),
+                    managed_agent_kind: Some("opencode".into()),
+                    agent_session: None,
+                    agent_resume: None,
+                    launch_argv: None,
+                    pin_order: Some(3),
+                },
+            )]),
+            LayoutSnapshot::Pane(0),
+        );
+        let (events, _event_rx) = mpsc::channel(4);
+
+        let (_workspaces, terminals, _runtimes) = restore(
+            &snapshot,
+            None,
+            24,
+            80,
+            0,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+
+        let terminal = terminals
+            .values()
+            .next()
+            .expect("restored terminal should exist");
+        assert_eq!(terminal.pin_order, None);
+    }
+
+    #[tokio::test]
     async fn cold_restore_drops_a_managed_agent_name_and_keeps_it_as_a_label() {
         // resume_agents_on_restore = false, so this pane comes back as a fresh
         // shell with no agent. The name is the routing key for agent.prompt, so
@@ -1917,6 +1984,7 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    pin_order: None,
                 },
             )]),
             LayoutSnapshot::Pane(0),
@@ -1973,6 +2041,7 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    pin_order: None,
                 },
             )]),
             LayoutSnapshot::Pane(0),
@@ -2021,6 +2090,7 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    pin_order: None,
                 },
             )]),
             LayoutSnapshot::Pane(0),
@@ -2114,6 +2184,7 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                pin_order: None,
                             },
                         ),
                         (
@@ -2126,6 +2197,7 @@ mod tests {
                                 agent_session: None,
                                 agent_resume: None,
                                 launch_argv: None,
+                                pin_order: None,
                             },
                         ),
                     ]),
@@ -2180,6 +2252,7 @@ mod tests {
                     agent_session: None,
                     agent_resume: None,
                     launch_argv: None,
+                    pin_order: None,
                 },
             )
         };
@@ -2196,6 +2269,7 @@ mod tests {
             }),
             agent_resume: None,
             launch_argv: None,
+            pin_order: None,
         };
         let snapshot = SessionSnapshot {
             version: super::super::snapshot::SNAPSHOT_VERSION,
@@ -2348,6 +2422,7 @@ mod tests {
                             }),
                             agent_resume: None,
                             launch_argv: None,
+                            pin_order: None,
                         },
                     )]),
                     zoomed: false,
@@ -2654,6 +2729,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                pin_order: None,
             },
         );
         let mut history = SessionHistorySnapshot {

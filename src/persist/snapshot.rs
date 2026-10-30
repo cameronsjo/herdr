@@ -111,6 +111,10 @@ pub struct PaneSnapshot {
     pub agent_resume: Option<PaneAgentResumeSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_argv: Option<Vec<String>>,
+    /// Fork: the agent's pin order (cameronsjo/herdr#96). Restored only where
+    /// the agent comes back with the pane; see `persist::restore`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -338,7 +342,7 @@ fn capture_tab(
             .or_else(|| terminal.map(|terminal| terminal.cwd.clone()))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
         let label = terminal.and_then(|terminal| terminal.manual_label.clone());
-        let (agent_name, managed_agent_kind) = terminal
+        let (agent_name, managed_agent_kind, pin_order) = terminal
             .filter(|terminal| !terminal.managed_agent_launch_pending())
             .map(|terminal| {
                 (
@@ -346,6 +350,7 @@ fn capture_tab(
                     terminal
                         .managed_agent_kind()
                         .map(|agent| crate::detect::agent_label(agent).to_string()),
+                    terminal.pin_order,
                 )
             })
             .unwrap_or_default();
@@ -388,6 +393,7 @@ fn capture_tab(
                 agent_session,
                 agent_resume,
                 launch_argv,
+                pin_order,
             },
         );
     }
@@ -632,6 +638,27 @@ mod tests {
     }
 
     #[test]
+    fn fork_agent_pin_snapshot_keeps_the_pin_order() {
+        let mut state = state_with_workspaces(&["pinned-snapshot"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].tabs[0].panes[&root]
+            .attached_terminal_id
+            .clone();
+        let snapshot = capture_from_state(&state);
+        assert_eq!(
+            snapshot.workspaces[0].tabs[0].panes[&root.raw()].pin_order,
+            None
+        );
+
+        state.terminals.get_mut(&terminal_id).unwrap().pin_order = Some(3);
+        let snapshot = capture_from_state(&state);
+        let pane = &snapshot.workspaces[0].tabs[0].panes[&root.raw()];
+        assert_eq!(pane.pin_order, Some(3));
+        let json = serde_json::to_value(pane).unwrap();
+        assert_eq!(json["pin_order"], 3);
+    }
+
+    #[test]
     fn layout_fingerprint_survives_json_round_trip() {
         let mut snapshot = parse_snapshot(include_str!(
             "../../tests/fixtures/session/current-herdr-session.json"
@@ -707,6 +734,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                pin_order: None,
             },
         );
         panes.insert(
@@ -719,6 +747,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                pin_order: None,
             },
         );
 
@@ -1405,6 +1434,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                pin_order: None,
             },
         );
         panes.insert(
@@ -1419,6 +1449,7 @@ mod tests {
                 agent_session: None,
                 agent_resume: None,
                 launch_argv: None,
+                pin_order: None,
             },
         );
 
