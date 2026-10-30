@@ -3291,6 +3291,53 @@ fn aggregate_dragging_respects_endpoint_ownership_and_release_position() {
 }
 
 #[test]
+fn pinned_agents_lead_their_machine_in_space_order_and_every_machine_in_priority() {
+    use crate::api::schema::AgentStatus;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+
+    let mut local = snapshot();
+    local.agents = vec![agent("local blocked", AgentStatus::Blocked, 2)];
+    state.set_snapshot(Box::new(local));
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    let mut other = agent("remote other", AgentStatus::Idle, 1);
+    other.pane_id = "pane_9".into();
+    let mut orchestrator = agent("remote orchestrator", AgentStatus::Idle, 1);
+    orchestrator
+        .tokens
+        .push((crate::fork_agent_pin::PIN_TOKEN.into(), "1".into()));
+    remote.agents = vec![other, orchestrator];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    let names = |sort| {
+        aggregate_navigation::aggregate_agent_rows(
+            &state.endpoints,
+            &state.active_endpoint_id,
+            sort,
+            &crate::config::AgentsSidebarConfig::default(),
+        )
+        .into_iter()
+        .map(|row| row.agent.name.clone().expect("agent name"))
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        names(crate::config::AgentPanelSortConfig::Spaces),
+        ["local blocked", "remote orchestrator", "remote other"],
+        "the pin leads its own machine's run"
+    );
+    assert_eq!(
+        names(crate::config::AgentPanelSortConfig::Priority),
+        ["remote orchestrator", "local blocked", "remote other"],
+        "the pin leads an order that mixes machines"
+    );
+}
+
+#[test]
 fn aggregate_rows_put_a_token_group_leader_first() {
     use crate::api::schema::AgentStatus;
 

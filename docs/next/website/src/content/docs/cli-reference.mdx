@@ -373,11 +373,13 @@ herdr agent send-keys <target> <key> [key ...]
 herdr agent type-submit <target> <text>
 herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
+herdr agent pin <target>|--current
+herdr agent unpin <target>|--current
 herdr agent task [--target TARGET] [--] <text>|--clear
 herdr agent focus <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
-herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--env KEY=VALUE]... [--exec PATH] [--parent NAME] [-- <agent-args...>]
+herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--env KEY=VALUE]... [--exec PATH] [--parent NAME] [--pin] [-- <agent-args...>]
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
@@ -399,6 +401,8 @@ A successful start returns only after the expected agent owns the same terminal 
 `idle` and `done` both mean ready for input. The CLI/API uses the server's seen state: `done` is idle but not yet marked seen, explicit `pane focus` / `agent focus` commands mark the target seen, and reads do not. Each TUI client tracks viewed completions independently, so its Done badge can differ from the CLI or another client. `blocked` means Herdr recognized an approval or question UI. `unknown` means an agent is present but Herdr cannot classify it confidently, not that its work succeeded.
 
 `agent send-keys` sends logical terminal keys such as `enter`, `up`, `esc`, or `ctrl+c`. `agent type-submit` sends literal text plus Enter as one interactive UI submission; use it for slash commands or other harness commands that must be typed into the agent UI instead of sent as model prompts. Herdr validates every key or type-submit text before writing any bytes. `agent read` reads the resolved terminal stream, and `agent rename` names an already detected agent.
+
+`agent pin` keeps an agent at the top of the agents panel, whatever its status, and `agent unpin` returns it to its usual place. Pinned agents are listed in the order they were pinned. `--current` targets the agent in the calling pane (`HERDR_PANE_ID`), so an orchestrator can pin itself, and `agent start --pin` pins the new agent once it is ready. A pin belongs to the agent: it is cleared when the agent exits, and it does not yet survive a server restart, live handoff, or update.
 
 `agent task` sets the one-line task an agent's sidebar entry shows under its name, such as `herdr agent task "fixing homelab#1093"`; `--clear` removes it. Without `--target` it sets the task of the calling pane (`HERDR_PANE_ID`), so an agent can report its own; with `--target` an orchestrator can set a worker's. The task is the pane metadata token `task`, reported with source `herdr:task`, so it shows as `$task` in sidebar rows (the default layouts end with a `$task` row that appears only once a task is set) and as `tokens.task` in `agent get`. Put `--` before a task that starts with `-`. The task stays until cleared, replaced, or the pane closes; it is not cleared when the agent exits, so clear it when the work ends, or a later agent in the same pane shows it. A pane-less registered agent sets it with `agent register --token task=TEXT`.
 

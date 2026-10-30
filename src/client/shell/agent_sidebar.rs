@@ -38,6 +38,8 @@ pub(super) struct AgentRow {
 pub(super) enum AgentGroupKey<S> {
     Workspace(S),
     Token(S),
+    /// Fork: every pinned agent, whatever `group_by` says.
+    Pinned,
 }
 
 impl AgentGroupKey<&str> {
@@ -45,11 +47,13 @@ impl AgentGroupKey<&str> {
         match self {
             Self::Workspace(id) => AgentGroupKey::Workspace(id.to_owned()),
             Self::Token(value) => AgentGroupKey::Token(value.to_owned()),
+            Self::Pinned => AgentGroupKey::Pinned,
         }
     }
 }
 
-/// The group key for one agent. Token mode keys by the pane's token value,
+/// The group key for one agent. A pinned agent is keyed `Pinned` in every
+/// mode, so the pinned agents lead as one run. Token mode keys by the pane's token value,
 /// then by the same token on the agent's workspace, and falls back to the
 /// workspace itself, so an agent with neither keeps the grouping it had under
 /// `group_by = "workspace"`.
@@ -63,6 +67,9 @@ pub(super) fn agent_group_key<'a>(
     workspaces: &'a [ClientShellWorkspace],
     group_by: &crate::config::AgentGroupBy,
 ) -> AgentGroupKey<&'a str> {
+    if is_pinned(agent) {
+        return AgentGroupKey::Pinned;
+    }
     let crate::config::AgentGroupBy::Token(name) = group_by else {
         return AgentGroupKey::Workspace(agent.workspace_id.as_str());
     };
@@ -93,7 +100,31 @@ pub(super) fn group_header<'a>(
     match key {
         AgentGroupKey::Token(value) => value,
         AgentGroupKey::Workspace(_) => workspace.label.as_str(),
+        AgentGroupKey::Pinned => "pinned",
     }
+}
+
+fn is_pinned(agent: &ClientShellAgent) -> bool {
+    crate::fork_agent_pin::pin_order(&agent.tokens).is_some()
+}
+
+/// Fork: moves pinned items to the front in their pin order, keeping every
+/// other item's order. `order` gives an item's place among the pinned, or
+/// `None` for an item that is not pinned.
+///
+/// It runs before grouping and `blocked_first`, which both keep pinned agents
+/// in one leading run, so the hit-test, scrolling and agent navigation see the
+/// pinned agents where they are drawn.
+pub(super) fn pinned_first<T, O: Ord>(items: &mut [T], order: impl Fn(&T) -> Option<O>) {
+    // Most panels pin nothing; skip the sort for them.
+    if !items.iter().any(|item| order(item).is_some()) {
+        return;
+    }
+    // Unpinned items share one key, and `sort_by_key` is stable.
+    items.sort_by_key(|item| match order(item) {
+        Some(order) => (false, Some(order)),
+        None => (true, None),
+    });
 }
 
 /// Moves every item up behind the first item with the same key, keeping the
@@ -270,7 +301,7 @@ pub(super) fn ordered_agent_pane_ids(
 ) -> Vec<String> {
     let group_by = &agents_config.group_by;
     let mut agents = if snapshot.agent_view_label.is_some() {
-        // An active view's order is the view's; only grouping and
+        // An active view's order is the view's; only pinning, grouping and
         // blocked_first below adjust it.
         snapshot
             .agent_order
@@ -297,6 +328,9 @@ pub(super) fn ordered_agent_pane_ids(
     if agents_config.needs_me_only {
         agents.retain(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked);
     }
+    pinned_first(&mut agents, |agent| {
+        crate::fork_agent_pin::pin_order(&agent.tokens)
+    });
     if gathers_group_runs(group_by, sort) {
         agents = gather_runs(agents, |agent| {
             agent_group_key(agent, &snapshot.workspaces, group_by)
@@ -308,8 +342,11 @@ pub(super) fn ordered_agent_pane_ids(
             group_by,
             sort,
             |agent| Some(agent_group_key(agent, &snapshot.workspaces, group_by)),
-            |_| None,
-            |agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked,
+            // Pinned agents stay one run ahead of the rest, in pin order.
+            |agent| is_pinned(agent).then_some(AgentGroupKey::Pinned),
+            |agent| {
+                agent.agent_status == crate::api::schema::AgentStatus::Blocked && !is_pinned(agent)
+            },
         );
     }
     // Fork: the agent a token group is named after leads it, ahead of

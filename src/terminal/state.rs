@@ -162,6 +162,9 @@ pub struct TerminalState {
     agent_process_acquisition_pending: bool,
     pub pending_agent_resume_plan: Option<crate::agent_resume::AgentResumePlan>,
     pub restore_error: Option<String>,
+    /// Fork: set while the agent is pinned to the top of the agents panel.
+    /// Lower values were pinned earlier. See `crate::fork_agent_pin`.
+    pub pin_order: Option<u64>,
 }
 
 impl TerminalState {
@@ -202,6 +205,7 @@ impl TerminalState {
             agent_process_acquisition_pending: false,
             pending_agent_resume_plan: None,
             restore_error: None,
+            pin_order: None,
         }
     }
 
@@ -637,7 +641,7 @@ impl TerminalState {
         // already keeps the name, so free it at the point the agent actually
         // leaves the pane - a recorded exit with no agent detected any more.
         if agent.is_none() && self.recent_agent_process_exit.is_some() {
-            self.clear_agent_name();
+            self.forget_agent();
         }
         let effective_state_change = self.recompute_effective_state(
             previous_agent_label,
@@ -1853,7 +1857,7 @@ impl TerminalState {
             self.fallback_state = AgentState::Unknown;
             self.fallback_visible_blocker = false;
             self.fallback_observed_at = None;
-            self.clear_agent_name();
+            self.forget_agent();
         }
         self.hook_authority = None;
         self.forget_reported_resume_of(source, agent_label);
@@ -1903,7 +1907,7 @@ impl TerminalState {
         self.fallback_state = AgentState::Unknown;
         self.fallback_visible_blocker = false;
         self.fallback_observed_at = None;
-        self.clear_agent_name();
+        self.forget_agent();
         let current_session = self.current_session_identity_for_persistence();
         Some(TerminalStateMutation {
             effective_state_change: self.recompute_effective_state(
@@ -2245,7 +2249,7 @@ impl TerminalState {
                 && observed_expected
                 && known_agent.is_none();
         if clear {
-            self.clear_agent_name();
+            self.forget_agent();
             return true;
         }
         if managed.phase == ManagedAgentPhase::Blocked {
@@ -2278,7 +2282,7 @@ impl TerminalState {
                 return true;
             }
             if now >= deadline {
-                self.clear_agent_name();
+                self.forget_agent();
                 return true;
             }
             if ready_after.is_none_or(|ready_after| now >= ready_after) {
@@ -2336,6 +2340,13 @@ impl TerminalState {
         });
     }
 
+    /// The agent has left the pane: frees its name and, fork, its pin.
+    /// `agent rename --clear` calls `clear_agent_name` alone and keeps the pin.
+    pub(crate) fn forget_agent(&mut self) {
+        self.clear_agent_name();
+        self.pin_order = None;
+    }
+
     pub fn clear_agent_name(&mut self) {
         self.codex_prompt_ready = false;
         if self
@@ -2370,7 +2381,7 @@ impl TerminalState {
         self.recent_agent_process_exit = None;
         self.agent_process_acquisition_pending = false;
         self.pending_agent_resume_plan = None;
-        self.clear_agent_name();
+        self.forget_agent();
     }
 
     pub fn is_agent_terminal(&self) -> bool {
@@ -6022,6 +6033,36 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_goes_with_its_agent_but_not_on_a_mere_exit_observation() {
+        let now = Instant::now();
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
+        terminal.pin_order = Some(1);
+
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            now,
+        );
+        assert_eq!(terminal.pin_order, Some(1));
+
+        terminal.set_detected_state_with_screen_signals_at(
+            None,
+            AgentState::Unknown,
+            false,
+            false,
+            false,
+            false,
+            now + Duration::from_secs(1),
+        );
+        assert_eq!(terminal.pin_order, None);
+    }
+
+    #[test]
     fn a_confirmed_agent_exit_still_frees_the_name_for_reuse() {
         // The other side of `a_process_exit_observation_alone_does_not_free_the_name`:
         // once the agent is actually gone from the pane the name must be
@@ -6079,6 +6120,32 @@ mod tests {
         assert!(!mutation.agent_released);
         assert_eq!(terminal.agent_name.as_deref(), Some("replacement"));
         assert_eq!(terminal.detected_agent, Some(Agent::Codex));
+    }
+
+    #[test]
+    fn a_released_agent_takes_its_pin_but_a_cleared_name_does_not() {
+        let mut terminal = test_terminal();
+        terminal
+            .set_hook_authority(
+                "custom:pi".into(),
+                "pi".into(),
+                AgentState::Working,
+                None,
+                Some(10),
+            )
+            .expect("custom state should be accepted");
+        terminal.set_agent_name("orchestrator".into());
+        terminal.pin_order = Some(1);
+
+        // `agent rename --clear` drops the name only.
+        terminal.clear_agent_name();
+        assert_eq!(terminal.pin_order, Some(1));
+
+        terminal
+            .release_agent_with_mutation("custom:pi", "pi", Some(11))
+            .expect("custom release should be accepted");
+        assert_eq!(terminal.effective_agent_label(), None);
+        assert_eq!(terminal.pin_order, None);
     }
 
     #[test]

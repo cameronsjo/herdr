@@ -23,6 +23,7 @@ pub(crate) mod agent;
 mod api;
 mod completion;
 mod fork_agent_parent;
+mod fork_agent_pin;
 mod fork_agent_task;
 mod fork_registered_agents;
 mod integration;
