@@ -629,7 +629,6 @@ fn unavailable_restored_terminal(
             (Some(name), None) => terminal.set_agent_name(name.clone()),
             _ => {}
         }
-        terminal.pin_order = pane.pin_order;
     }
     terminal
 }

@@ -210,6 +210,15 @@ fn fork_agent_pin_the_palette_toggles_the_focused_agents_pin() {
         .expect("pane_1 is an agent")
         .tokens
         .push((crate::fork_agent_pin::PIN_TOKEN.into(), "1".into()));
+    state.set_snapshot(Box::new(agents.clone()));
+    let sent = run(&mut state);
+    assert!(matches!(
+        sent.as_slice(),
+        [crate::api::schema::Method::AgentUnpin(target)] if target.target == "pane_1"
+    ));
+
+    // No listed agent: unpin, so a pin left by an undetected agent can go.
+    agents.agents.retain(|agent| agent.pane_id != "pane_1");
     state.set_snapshot(Box::new(agents));
     let sent = run(&mut state);
     assert!(matches!(

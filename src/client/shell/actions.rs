@@ -425,8 +425,9 @@ impl ClientShellState {
     }
 
     /// Fork: pins the focused pane's agent, or unpins it when it is already
-    /// pinned. A pane without an agent still sends `agent.pin`, so the server's
-    /// `agent_not_found` answer is what the user sees.
+    /// pinned. A pane the snapshot lists no agent for sends `agent.unpin`: it
+    /// clears a pin left behind by an agent that is no longer detected, and
+    /// the server's `agent_not_found` answer is what the user sees.
     pub(super) fn toggle_agent_pin(&mut self, outcome: &mut ClientShellInput) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -438,7 +439,7 @@ impl ClientShellState {
             .agents
             .iter()
             .find(|agent| agent.pane_id == pane_id)
-            .is_some_and(|agent| crate::fork_agent_pin::pin_order(&agent.tokens).is_some());
+            .is_none_or(|agent| crate::fork_agent_pin::pin_order(&agent.tokens).is_some());
         let target = crate::api::schema::AgentTarget { target: pane_id };
         let method = if pinned {
             crate::api::schema::Method::AgentUnpin(target)

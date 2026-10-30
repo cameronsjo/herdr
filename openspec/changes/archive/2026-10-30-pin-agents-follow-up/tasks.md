@@ -6,7 +6,7 @@
 ## 2. Restore
 
 - [x] 2.1 Capture `pin_order` in `PaneSnapshot`
-- [x] 2.2 Restore it on a handoff import, a native agent resume and an unavailable pane; drop it on a fresh shell
+- [x] 2.2 Restore it on a handoff import and a native agent resume; drop it on a fresh shell and an unavailable pane
 
 ## 3. CLI
 
