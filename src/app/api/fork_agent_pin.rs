@@ -60,6 +60,8 @@ impl App {
             _ => false,
         };
         if changed {
+            // The pin is in the session snapshot, so a change is saved.
+            self.state.mark_session_dirty();
             self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
         }
         match self.agent_info(resolved.ws_idx, resolved.pane_id) {
@@ -87,6 +89,7 @@ impl App {
             return;
         };
         if terminal.pin_order.take().is_some() {
+            self.state.mark_session_dirty();
             self.emit_pane_updated(ws_idx, pane_id);
         }
     }
@@ -136,6 +139,21 @@ mod tests {
             panic!("expected agent info, got {response}");
         };
         agent.pin_order
+    }
+
+    #[test]
+    fn a_pin_change_marks_the_session_for_saving_and_a_no_op_does_not() {
+        let mut app = app_with_two_agents();
+        app.state.session_dirty = false;
+        assert_eq!(pin_order(&mut app, 0, true), Some(1));
+        assert!(app.state.session_dirty);
+
+        app.state.session_dirty = false;
+        assert_eq!(pin_order(&mut app, 0, true), Some(1));
+        assert!(!app.state.session_dirty, "re-pinning changes nothing");
+
+        assert_eq!(pin_order(&mut app, 0, false), None);
+        assert!(app.state.session_dirty);
     }
 
     #[test]
