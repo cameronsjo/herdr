@@ -367,6 +367,7 @@ pub struct Keybinds {
     pub open_notification_target: ActionKeybinds,
     pub clear_agent_view: ActionKeybinds,
     pub toggle_needs_me: ActionKeybinds,
+    pub toggle_agent_pin: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
     pub next_workspace: ActionKeybinds,
     pub move_workspace_previous: ActionKeybinds,
@@ -561,6 +562,7 @@ impl Config {
             open_notification_target: empty_action!(),
             clear_agent_view: empty_action!(),
             toggle_needs_me: empty_action!(),
+            toggle_agent_pin: empty_action!(),
             previous_workspace: empty_action!(),
             next_workspace: empty_action!(),
             move_workspace_previous: empty_action!(),
@@ -705,6 +707,7 @@ impl Config {
             );
             apply_action!(keybinds.clear_agent_view, clear_agent_view, source);
             apply_action!(keybinds.toggle_needs_me, toggle_needs_me, source);
+            apply_action!(keybinds.toggle_agent_pin, toggle_agent_pin, source);
             apply_action!(keybinds.previous_workspace, previous_workspace, source);
             apply_action!(keybinds.next_workspace, next_workspace, source);
             apply_action!(

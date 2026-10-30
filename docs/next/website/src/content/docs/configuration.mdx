@@ -530,7 +530,10 @@ under an agent view; **priority** order already puts blocked agents first.
 
 Agents pinned with `herdr agent pin` lead the list in every order, under a
 `pinned` header when the panel is grouped, and `blocked_first` never moves an
-agent above them.
+agent above them. A pinned agent leaves its group for the pinned run, and the
+**needs me** filter still hides a pinned agent that is not blocked. The
+palette's `toggle agent pin` row and the optional `keys.toggle_agent_pin`
+binding pin the focused pane's agent, or unpin it when it is already pinned.
 
 Override the complete Agent layout for a known agent under `rows_by_agent`:
 

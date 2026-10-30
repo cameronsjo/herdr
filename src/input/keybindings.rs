@@ -79,6 +79,7 @@ pub(crate) enum KeybindAction {
     OpenNotificationTarget,
     ClearAgentView,
     ToggleNeedsMe,
+    ToggleAgentPin,
     Detach,
     OpenNavigator,
 }
@@ -145,6 +146,7 @@ impl KeybindAction {
             Self::OpenNotificationTarget => Some("core:open-notification-target"),
             Self::ClearAgentView => Some("core:clear-agent-view"),
             Self::ToggleNeedsMe => Some("core:toggle-needs-me"),
+            Self::ToggleAgentPin => Some("core:toggle-agent-pin"),
             Self::Detach => Some("core:detach"),
             Self::OpenNavigator => Some("core:session-navigator"),
             Self::OpenCommandPalette
@@ -264,6 +266,7 @@ pub(crate) fn resolve_non_indexed_action(
         ),
         (&keybinds.clear_agent_view, KeybindAction::ClearAgentView),
         (&keybinds.toggle_needs_me, KeybindAction::ToggleNeedsMe),
+        (&keybinds.toggle_agent_pin, KeybindAction::ToggleAgentPin),
         (&keybinds.detach, KeybindAction::Detach),
         (&keybinds.goto, KeybindAction::OpenNavigator),
     ] {

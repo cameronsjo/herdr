@@ -155,6 +155,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # open_notification_target = "prefix+o"
 # clear_agent_view = "" # optional, unset by default
 # toggle_needs_me = "" # optional, unset by default
+# toggle_agent_pin = "" # optional, unset by default
 # workspace_picker = "prefix+w"
 # command_palette = "prefix+/"
 # goto = "prefix+g"

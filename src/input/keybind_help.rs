@@ -162,6 +162,12 @@ pub(crate) fn keybind_help_groups(
                     KeybindAction::ToggleNeedsMe,
                     &["blocked agents", "waiting on me", "filter agents"],
                 ),
+                action_entry_kw(
+                    binding_label(&keybinds.toggle_agent_pin),
+                    "toggle agent pin",
+                    KeybindAction::ToggleAgentPin,
+                    &["pin agent", "unpin agent", "keep agent on top"],
+                ),
             ],
         ),
         (

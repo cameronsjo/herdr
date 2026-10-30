@@ -129,6 +129,10 @@ impl ClientShellState {
                     self.toggle_needs_me(outcome);
                     return;
                 }
+                if action == crate::input::KeybindAction::ToggleAgentPin {
+                    self.toggle_agent_pin(outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::ReloadConfig {
                     self.push_endpoint_method_with_kind(
                         crate::api::schema::Method::ServerReloadConfig(
@@ -417,6 +421,32 @@ impl ClientShellState {
             self.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         }
         self.agent_scroll = 0;
+        outcome.repaint = true;
+    }
+
+    /// Fork: pins the focused pane's agent, or unpins it when it is already
+    /// pinned. A pane the snapshot lists no agent for sends `agent.unpin`: it
+    /// clears a pin left behind by an agent that is no longer detected, and
+    /// the server's `agent_not_found` answer is what the user sees.
+    pub(super) fn toggle_agent_pin(&mut self, outcome: &mut ClientShellInput) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let Some(pane_id) = snapshot.focused_pane_id.clone() else {
+            return;
+        };
+        let pinned = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane_id)
+            .is_none_or(|agent| crate::fork_agent_pin::pin_order(&agent.tokens).is_some());
+        let target = crate::api::schema::AgentTarget { target: pane_id };
+        let method = if pinned {
+            crate::api::schema::Method::AgentUnpin(target)
+        } else {
+            crate::api::schema::Method::AgentPin(target)
+        };
+        self.push_endpoint_method(method, outcome);
         outcome.repaint = true;
     }
 
