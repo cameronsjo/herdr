@@ -382,6 +382,24 @@ cli_projection! { pub(crate) PaneTargetProjection for PaneTarget {
     pane_id => Field::new(String::new()).input(pane_id()),
 } }
 
+fn peek_arguments() -> Vec<clap::Arg> {
+    let mut arguments = PaneTargetProjection::arguments();
+    for argument in &mut arguments {
+        *argument = argument
+            .clone()
+            .required(false)
+            .required_unless_present("close")
+            .conflicts_with("close");
+    }
+    arguments.push(
+        clap::Arg::new("close")
+            .long("close")
+            .action(clap::ArgAction::SetTrue)
+            .help("Close the open peek instead"),
+    );
+    arguments
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Output {
     Json,
@@ -403,6 +421,7 @@ impl Leaf {
         let command = projection::command(self.name, (self.arguments)()).about(self.about);
         match self.name {
             "input" => command.group(clap::ArgGroup::new("selector").args(["pane_id", "pane", "current"]).required(true)),
+            "focus" => command.group(clap::ArgGroup::new("focus_target").args(["pane_id", "direction"]).required(true)),
             "move" => command.group(clap::ArgGroup::new("destination").args(["tab", "new-tab", "new-workspace"]).required(true)),
             "send-text" => command.after_help("next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"),
             "send-keys" => command.after_help("Use esc as the canonical Escape key name; escape is also accepted."),
@@ -547,14 +566,14 @@ pub(super) const LEAVES: &[Leaf] = &[
             Ok(Method::PaneEdges(params))
         },
     },
-    leaf!(
-        "focus",
-        "Focus a neighboring pane",
-        "cli:pane:focus",
-        Json,
-        PaneFocusProjection,
-        PaneFocusDirection
-    ),
+    Leaf {
+        name: "focus",
+        about: "Focus a neighboring pane, or jump to a pane by id",
+        id: "cli:pane:focus",
+        output: Output::Json,
+        arguments: super::focus_arguments,
+        method: super::focus,
+    },
     leaf!(
         "resize",
         "Resize a pane split",
@@ -571,6 +590,19 @@ pub(super) const LEAVES: &[Leaf] = &[
         PaneZoomProjection,
         PaneZoom
     ),
+    Leaf {
+        name: "peek",
+        about: "Show a pane from another tab as a temporary overlay",
+        id: "cli:pane:peek",
+        output: Output::Json,
+        arguments: peek_arguments,
+        method: |matches| {
+            if matches.get_flag("close") {
+                return Ok(Method::PanePeekClose(Default::default()));
+            }
+            PaneTargetProjection::from_matches(matches).map(Method::PanePeek)
+        },
+    },
     Leaf {
         name: "read",
         about: "Read pane terminal output",

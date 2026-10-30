@@ -5,6 +5,7 @@ pub mod commands;
 pub mod common;
 pub mod events;
 pub mod fork_agent_env;
+pub mod fork_prompt_delivery;
 pub mod fork_registered_agents;
 pub mod integrations;
 pub(crate) mod operations;
@@ -22,6 +23,7 @@ pub use commands::*;
 pub use common::*;
 pub use events::*;
 pub use fork_agent_env::*;
+pub use fork_prompt_delivery::*;
 pub use fork_registered_agents::*;
 pub use integrations::*;
 pub use panes::*;
@@ -158,6 +160,8 @@ operations::define_operations! {
     PluginPaneOpen(PluginPaneOpenParams) => "plugin.pane.open", true, true;
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
+    PanePeek(PaneTarget) => "pane.peek", true, false;
+    PanePeekClose(EmptyParams) => "pane.peek_close", true, false;
 }
 
 #[cfg(test)]

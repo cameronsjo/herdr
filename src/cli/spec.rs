@@ -528,7 +528,6 @@ mod tests {
             (&["workspace", "move"][..], &["index"][..]),
             (&["workspace", "report-metadata"][..], &["source"][..]),
             (&["pane", "neighbor"][..], &["direction"][..]),
-            (&["pane", "focus"][..], &["direction"][..]),
             (&["pane", "resize"][..], &["direction"][..]),
             (&["pane", "report-agent"][..], &["source", "agent"][..]),
             (
@@ -547,6 +546,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn pane_focus_requires_a_direction_or_a_pane_id() {
+        let focus = |args: &[&str]| {
+            super::command().try_get_matches_from(
+                ["herdr", "pane", "focus"]
+                    .iter()
+                    .chain(args)
+                    .copied()
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert!(focus(&[]).is_err());
+        assert!(focus(&["--direction", "left"]).is_ok());
+        assert!(focus(&["w1:p2"]).is_ok());
     }
 
     #[test]
@@ -690,6 +705,8 @@ mod tests {
         assert!(has_option(agent_start, "pane"));
         // Fork (cameronsjo/herdr#103): `--env` returns, scoped to the agent process.
         assert!(has_option(agent_start, "env"));
+        // Fork (cameronsjo/herdr#110): `--exec` launches a wrapper in place of the default.
+        assert!(has_option(agent_start, "exec"));
         for legacy in ["cwd", "workspace", "tab", "split", "focus", "argv"] {
             assert!(!has_option(agent_start, legacy), "legacy option --{legacy}");
         }

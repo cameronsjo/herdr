@@ -287,6 +287,13 @@ pub(super) fn blocked_first_order<T, K: PartialEq>(
     }
 }
 
+/// Whether `agent` is the one its token group is named after: an
+/// orchestrator under `group_by = { token = "parent" }`, whose workers carry
+/// `parent = <its name>`. Such an agent leads its group.
+pub(super) fn leads_its_token_group(agent: &ClientShellAgent, key: AgentGroupKey<&str>) -> bool {
+    matches!(key, AgentGroupKey::Token(value) if agent.name.as_deref() == Some(value))
+}
+
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
@@ -318,6 +325,9 @@ pub(super) fn ordered_agent_pane_ids(
         }
         agents
     };
+    if agents_config.needs_me_only {
+        agents.retain(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked);
+    }
     pinned_first(&mut agents, |agent| {
         crate::fork_agent_pin::pin_order(&agent.tokens)
     });
@@ -336,6 +346,20 @@ pub(super) fn ordered_agent_pane_ids(
             |agent| is_pinned(agent).then_some(AgentGroupKey::Pinned),
             |agent| {
                 agent.agent_status == crate::api::schema::AgentStatus::Blocked && !is_pinned(agent)
+            },
+        );
+    }
+    // Fork: the agent a token group is named after leads it, ahead of
+    // blocked members; runs are contiguous here, so this never splits one.
+    if gathers_group_runs(group_by, sort) {
+        agents = blocked_first_within_runs(
+            agents,
+            |agent| agent_group_key(agent, &snapshot.workspaces, group_by),
+            |agent| {
+                leads_its_token_group(
+                    agent,
+                    agent_group_key(agent, &snapshot.workspaces, group_by),
+                )
             },
         );
     }
@@ -372,10 +396,7 @@ pub(super) fn render_agent_panel(
         buffer,
         area,
         &rows,
-        snapshot
-            .agent_view_label
-            .as_ref()
-            .map(|_| " no matching agents"),
+        empty_agent_list_message(snapshot.agent_view_label.is_some(), config),
         config,
         agent_scroll,
         hits,
@@ -388,6 +409,21 @@ pub(super) fn render_agent_panel(
             render_agent_row(buffer, rect, row, config);
         },
     );
+}
+
+/// What an empty agent list says: a view or the "needs me" filter can hide
+/// every agent, and an unexplained blank panel reads as broken.
+pub(super) fn empty_agent_list_message(
+    view_active: bool,
+    config: &ClientShellConfig,
+) -> Option<&'static str> {
+    if config.agents.needs_me_only {
+        Some(" no agents need you")
+    } else if view_active {
+        Some(" no matching agents")
+    } else {
+        None
+    }
 }
 
 pub(super) fn render_agent_panel_header(
@@ -429,6 +465,7 @@ pub(super) fn render_agent_panel_header(
             let room = (area.width as usize).saturating_sub(display_width(" agents ✕ ") + 1);
             format!("{} ✕", crate::ui::truncate_end(label, room)).into()
         }
+        None if config.agents.needs_me_only => "needs me".into(),
         None => match config.agent_panel_sort {
             crate::config::AgentPanelSortConfig::Spaces => "grouped",
             crate::config::AgentPanelSortConfig::Priority => "priority",
@@ -456,11 +493,13 @@ pub(super) fn render_agent_panel_header(
         sort_rect.width,
         &sort_label,
         Style::default()
-            .fg(if agent_view_label.is_some() {
-                config.palette.accent
-            } else {
-                config.palette.overlay0
-            })
+            .fg(
+                if agent_view_label.is_some() || config.agents.needs_me_only {
+                    config.palette.accent
+                } else {
+                    config.palette.overlay0
+                },
+            )
             .add_modifier(Modifier::BOLD),
     );
     true
@@ -666,11 +705,14 @@ pub(super) fn agent_row(
             machine,
             workspace: &workspace.label,
             tab: tab_label,
+            outside_focused_workspace: snapshot.focused_workspace_id.as_deref()
+                != Some(agent.workspace_id.as_str()),
             pane: agent
                 .title
                 .as_deref()
                 .or_else(|| pane.and_then(|pane| pane.label.as_deref())),
             agent_label,
+            agent_name: agent.name.as_deref(),
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             canonical_agent,

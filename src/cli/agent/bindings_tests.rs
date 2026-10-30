@@ -271,6 +271,47 @@ fn agent_start_env_rejects_bad_pairs_without_echoing_them() {
 }
 
 #[test]
+fn agent_start_exec_is_sent_as_exec() {
+    assert_eq!(
+        params(&[
+            "start",
+            "name",
+            "--kind=claude",
+            "--pane=1",
+            "--exec",
+            "/opt/bin/my-claude",
+            "--",
+            "--exec",
+            "x",
+        ]),
+        serde_json::json!({
+            "name":"name", "kind":"claude", "pane_id":"1",
+            "exec": "/opt/bin/my-claude",
+            "args":["--exec","x"],
+        })
+    );
+}
+
+#[test]
+fn agent_start_exec_requires_the_server_capability() {
+    let mut capabilities = crate::api::schema::ServerCapabilities {
+        live_handoff: false,
+        detached_server_daemon: false,
+        endpoint_protocol_generation: None,
+        surface_interest: false,
+        health_check: false,
+        ssh_agent_registration: false,
+        agent_start_env: true,
+        agent_start_exec: false,
+    };
+    let error = super::agent_start_exec_support_error(Some(&capabilities)).unwrap();
+    assert_eq!(error["error"]["code"], "agent_start_exec_unsupported");
+    assert!(super::agent_start_exec_support_error(None).is_some());
+    capabilities.agent_start_exec = true;
+    assert!(super::agent_start_exec_support_error(Some(&capabilities)).is_none());
+}
+
+#[test]
 fn agent_start_env_requires_the_server_capability() {
     let mut capabilities = crate::api::schema::ServerCapabilities {
         live_handoff: false,
@@ -280,6 +321,7 @@ fn agent_start_env_requires_the_server_capability() {
         health_check: false,
         ssh_agent_registration: false,
         agent_start_env: false,
+        agent_start_exec: false,
     };
     let error = super::agent_start_env_support_error(Some(&capabilities)).unwrap();
     assert_eq!(error["error"]["code"], "agent_start_env_unsupported");

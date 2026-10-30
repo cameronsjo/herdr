@@ -2514,6 +2514,21 @@ impl HeadlessServer {
                     return runtime.scroll_metrics() != scroll_before;
                 }
                 let interaction = client_pane_input_has_interaction(&events);
+                let is_peek = self
+                    .app
+                    .state
+                    .popup_pane
+                    .as_ref()
+                    .is_some_and(|popup| popup.peek.is_some());
+                let peek_dismiss = if is_peek {
+                    let keybindings = super::keybindings::app_keybindings(&self.app);
+                    super::pane_input::first_prefix_press(&events, &keybindings)
+                } else {
+                    None
+                };
+                if let Some(index) = peek_dismiss {
+                    events.truncate(index);
+                }
                 if let Some(client) = self.clients.get_mut(&client_id) {
                     client.track_shell_input(
                         ClientShellInputTarget::Popup(terminal_id.clone()),
@@ -2541,6 +2556,24 @@ impl HeadlessServer {
                 }
                 if let Err(err) = input_result {
                     warn!(client_id, terminal_id, err = %err, "targeted client popup input failed");
+                }
+                if peek_dismiss.is_some() {
+                    // Release what this shell still holds in the pane (a modifier
+                    // pressed before the prefix), or its app sees it stuck down.
+                    let held = self
+                        .clients
+                        .get_mut(&client_id)
+                        .map(|client| {
+                            client.drain_shell_held_inputs_for(&ClientShellInputTarget::Popup(
+                                terminal_id.clone(),
+                            ))
+                        })
+                        .unwrap_or_default();
+                    self.release_client_shell_inputs(client_id, held);
+                    self.app.close_popup_pane();
+                    self.reconcile_client_shell_locations();
+                    self.reapply_controlled_shell_tab_geometry(false);
+                    return true;
                 }
                 foreground_changed | geometry_changed || scroll_changed
             }

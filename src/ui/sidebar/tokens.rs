@@ -56,8 +56,12 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
     pub(crate) tab: Option<&'a str>,
+    /// Whether the agent lives outside the focused workspace; the `location`
+    /// token draws only then.
+    pub(crate) outside_focused_workspace: bool,
     pub(crate) pane: Option<&'a str>,
     pub(crate) agent_label: Option<&'a str>,
+    pub(crate) agent_name: Option<&'a str>,
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) canonical_agent: Option<crate::detect::Agent>,
@@ -92,11 +96,22 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::Tab => context
                             .tab
                             .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                        AgentSidebarToken::Location => {
+                            context.outside_focused_workspace.then(|| {
+                                ResolvedTokenKind::Workspace(match context.tab {
+                                    Some(tab) => format!("{} · {tab}", context.workspace),
+                                    None => context.workspace.to_string(),
+                                })
+                            })
+                        }
                         AgentSidebarToken::Pane => context
                             .pane
                             .map(|value| ResolvedTokenKind::Pane(value.to_string())),
                         AgentSidebarToken::Agent => context
                             .agent_label
+                            .map(|value| ResolvedTokenKind::Agent(value.to_string())),
+                        AgentSidebarToken::Name => context
+                            .agent_name
                             .map(|value| ResolvedTokenKind::Agent(value.to_string())),
                         AgentSidebarToken::TerminalTitle => context
                             .terminal_title
@@ -198,6 +213,7 @@ mod tests {
         tab: Option<String>,
         pane: Option<String>,
         agent_label: Option<String>,
+        agent_name: Option<String>,
         terminal_title: Option<String>,
         terminal_title_stripped: Option<String>,
         canonical_agent: Option<crate::detect::Agent>,
@@ -210,6 +226,7 @@ mod tests {
             tab: None,
             pane: None,
             agent_label: Some("pi".into()),
+            agent_name: None,
             terminal_title: None,
             terminal_title_stripped: None,
             canonical_agent: Some(crate::detect::Agent::Pi),
@@ -222,13 +239,69 @@ mod tests {
             machine: None,
             workspace: &entry.workspace,
             tab: entry.tab.as_deref(),
+            outside_focused_workspace: false,
             pane: entry.pane.as_deref(),
             agent_label: entry.agent_label.as_deref(),
+            agent_name: entry.agent_name.as_deref(),
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             canonical_agent: entry.canonical_agent,
             tokens: &entry.tokens,
         }
+    }
+
+    #[test]
+    fn location_token_resolves_only_outside_the_focused_workspace() {
+        let config: AgentsSidebarConfig = toml::from_str(r#"rows = [["location"]]"#).unwrap();
+        let mut entry = entry();
+        assert!(agent_rows(&config, context(&entry), "idle", false).is_empty());
+        for (tab, expected) in [(None, "repo"), (Some("review"), "repo · review")] {
+            entry.tab = tab.map(str::to_owned);
+            let mut context = context(&entry);
+            context.outside_focused_workspace = true;
+            assert_eq!(
+                agent_rows(&config, context, "idle", false),
+                vec![vec![ResolvedToken::unstyled(ResolvedTokenKind::Workspace(
+                    expected.into()
+                ))]]
+            );
+        }
+    }
+
+    #[test]
+    fn default_rows_draw_the_task_line_only_once_a_task_is_set() {
+        let config = AgentsSidebarConfig::default();
+        let mut entry = entry();
+        for grouped in [false, true] {
+            let rows = agent_rows(&config, context(&entry), "working", grouped);
+            assert!(
+                rows.iter()
+                    .flatten()
+                    .all(|token| !matches!(token.kind, ResolvedTokenKind::Custom(_))),
+                "grouped={grouped}"
+            );
+        }
+        let untasked = agent_rows(&config, context(&entry), "working", false).len();
+        entry.tokens.insert(
+            crate::config::AGENT_TASK_TOKEN.into(),
+            "fixing homelab#1093".into(),
+        );
+        for grouped in [false, true] {
+            let rows = agent_rows(&config, context(&entry), "working", grouped);
+            assert_eq!(
+                rows.last().map(|row| row.as_slice()),
+                Some(
+                    &[ResolvedToken::unstyled(ResolvedTokenKind::Custom(
+                        "fixing homelab#1093".into()
+                    ))][..]
+                ),
+                "grouped={grouped}"
+            );
+        }
+        assert_eq!(
+            agent_rows(&config, context(&entry), "working", false).len(),
+            untasked + 1
+        );
     }
 
     #[test]
@@ -436,6 +509,31 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
             let rows = agent_rows(&config, context(&entry), "working", false);
             assert_eq!(rows[0][0].kind, ResolvedTokenKind::Agent("pi".into()));
         }
+    }
+
+    #[test]
+    fn name_token_shows_only_the_herdr_agent_name() {
+        let config: AgentsSidebarConfig = toml::from_str("rows = [[\"name\", \"agent\"]]").unwrap();
+        let mut entry = entry();
+        entry.agent_label = Some("claude · feat/x".into());
+        let rows = agent_rows(&config, context(&entry), "working", false);
+        assert_eq!(
+            rows[0],
+            vec![ResolvedToken::unstyled(ResolvedTokenKind::Agent(
+                "claude · feat/x".into()
+            ))],
+            "an unnamed agent drops the name token"
+        );
+
+        entry.agent_name = Some("cos-cadence".into());
+        let rows = agent_rows(&config, context(&entry), "working", false);
+        assert_eq!(
+            rows[0],
+            vec![
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("cos-cadence".into())),
+                ResolvedToken::unstyled(ResolvedTokenKind::Agent("claude · feat/x".into())),
+            ]
+        );
     }
 
     #[test]

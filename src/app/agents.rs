@@ -11,6 +11,7 @@ pub(crate) const MAX_AGENT_START_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const AGENT_START_SETTLE_DELAY: Duration = Duration::from_secs(3);
 const INVALID_AGENT_TIMEOUT_MESSAGE: &str =
     "agent start timeout must be greater than 3000ms and at most 300000ms";
+const INVALID_AGENT_EXEC_MESSAGE: &str = "agent exec must be a path to a program: it contains a /, uses only ASCII letters, digits and _ . / : + -, starts with a letter, _, /, ./ or ../, and does not end in /, . or ..";
 const INVALID_AGENT_NAME_MESSAGE: &str = "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)";
 
 impl App {
@@ -121,12 +122,31 @@ impl App {
         if terminal.effective_agent_label().is_none() {
             return Err(AgentRenameError::NotAgent);
         }
-        match normalized_name {
-            Some(name) => terminal.set_agent_name(name),
+        let previous_name = terminal.agent_name.clone();
+        match normalized_name.clone() {
+            Some(name) => {
+                // A pane label that spells the old name is the name, often one
+                // a cold restore kept; one that differs is the user's own.
+                if previous_name.is_some() && terminal.manual_label == previous_name {
+                    terminal.set_manual_label(name.clone());
+                }
+                terminal.set_agent_name(name)
+            }
             None => terminal.clear_agent_name(),
         }
         self.state.mark_session_dirty();
         self.schedule_session_save();
+        if let Some((previous_name, name)) = previous_name
+            .zip(normalized_name)
+            .filter(|(previous, name)| previous != name)
+        {
+            self.sync_tab_label_to_agent_name(
+                resolved.ws_idx,
+                resolved.pane_id,
+                &previous_name,
+                &name,
+            );
+        }
         self.emit_pane_updated(resolved.ws_idx, resolved.pane_id);
         self.agent_info(resolved.ws_idx, resolved.pane_id)
             .ok_or_else(|| {
@@ -155,8 +175,20 @@ impl App {
             return Err(AgentStartError::InvalidArgument);
         }
         params.env.validate().map_err(AgentStartError::InvalidEnv)?;
-        let persisted_agent_session =
-            crate::agent_resume::persisted_session_from_launch_args(kind, &params.args);
+        if params
+            .exec
+            .as_deref()
+            .is_some_and(|exec| !valid_agent_exec(exec))
+        {
+            return Err(AgentStartError::InvalidExec);
+        }
+        // Fork (#110): a restore resumes with the kind's default executable, so
+        // a session started through a wrapper is not recorded for resume.
+        let persisted_agent_session = params
+            .exec
+            .is_none()
+            .then(|| crate::agent_resume::persisted_session_from_launch_args(kind, &params.args))
+            .flatten();
         let conflicts = self.agent_name_conflicts(&name, "");
         if !conflicts.is_empty() {
             return Err(AgentStartError::DuplicateName {
@@ -195,7 +227,10 @@ impl App {
             ));
         }
 
-        let mut argv = vec![crate::detect::interactive_agent_executable(kind).to_string()];
+        let executable = params
+            .exec
+            .unwrap_or_else(|| crate::detect::interactive_agent_executable(kind).to_string());
+        let mut argv = vec![executable];
         argv.extend(params.args);
         let env = params.env.iter().collect::<Vec<_>>();
         let command = crate::platform::interactive_agent_shell_command(&argv, &env, &shell_name)
@@ -249,6 +284,10 @@ impl App {
             AgentStartError::UnsupportedKind(kind) => crate::api::schema::ErrorBody {
                 code: "unsupported_agent_kind".into(),
                 message: format!("unsupported interactive agent kind {kind}"),
+            },
+            AgentStartError::InvalidExec => crate::api::schema::ErrorBody {
+                code: "invalid_agent_exec".into(),
+                message: INVALID_AGENT_EXEC_MESSAGE.into(),
             },
             AgentStartError::InvalidArgument => crate::api::schema::ErrorBody {
                 code: "invalid_agent_argument".into(),
@@ -440,6 +479,55 @@ impl App {
         })
     }
 
+    /// The one pane in the tab whose agent name routes to a live agent, when
+    /// exactly one does. A name an agent has left behind does not count.
+    fn sole_named_agent_in_tab(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+    ) -> Option<crate::layout::PaneId> {
+        let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
+        let mut named = tab.panes.iter().filter_map(|(pane_id, pane)| {
+            self.state
+                .terminals
+                .get(&pane.attached_terminal_id)
+                .is_some_and(|terminal| terminal.agent_name_routes())
+                .then_some(*pane_id)
+        });
+        let sole = named.next()?;
+        named.next().is_none().then_some(sole)
+    }
+
+    /// Lets a tab label that spells the agent's previous name follow a
+    /// rename, when the agent is the tab's only named one. Any other label is
+    /// the user's own and stays.
+    fn sync_tab_label_to_agent_name(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        previous_name: &str,
+        name: &str,
+    ) {
+        let Some(tab_idx) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.find_tab_index_for_pane(pane_id))
+        else {
+            return;
+        };
+        if self.sole_named_agent_in_tab(ws_idx, tab_idx) != Some(pane_id) {
+            return;
+        }
+        if self.state.workspaces[ws_idx].tabs[tab_idx]
+            .custom_name
+            .as_deref()
+            == Some(previous_name)
+        {
+            self.set_tab_label(ws_idx, tab_idx, name.to_string());
+        }
+    }
+
     fn agent_name_conflicts(
         &self,
         name: &str,
@@ -484,6 +572,29 @@ fn live_runtime_agent(runtime: &crate::terminal::TerminalRuntime) -> Option<crat
         })
 }
 
+/// Fork (#110): `exec` is typed as the command word in every pane shell, so
+/// it is limited to characters no supported shell quotes or expands, and is a
+/// path: it holds a `/` and starts with a letter, `_`, `/`, `./` or `../`. No
+/// builtin name holds a `/`, so `exit` or `eval` can never run in its place,
+/// and a leading digit would be arithmetic in PowerShell. A path that ends in
+/// `/`, `.` or `..` names a directory, which fish and auto-cd shells read as a
+/// `cd`, so it is refused. A function or alias the user names with a `/` can
+/// still shadow the path in zsh or bash. A path with spaces or `~` can go
+/// through a symlink.
+fn valid_agent_exec(exec: &str) -> bool {
+    let starts_like_a_path = exec
+        .starts_with(|ch: char| ch.is_ascii_alphabetic() || matches!(ch, '_' | '/'))
+        || exec.starts_with("./")
+        || exec.starts_with("../");
+    let last = exec.rsplit('/').next().unwrap_or_default();
+    exec.contains('/')
+        && starts_like_a_path
+        && !matches!(last, "" | "." | "..")
+        && exec
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | ':' | '+' | '-'))
+}
+
 pub(super) enum AgentStartError {
     InvalidName,
     UnsupportedKind(String),
@@ -492,6 +603,8 @@ pub(super) enum AgentStartError {
     /// Fork (#103): the pane's shell has no verified env quoting. Carries the
     /// shell's process name only.
     EnvUnsupportedShell(String),
+    /// Fork (#110): `exec` is not a plain path; see `valid_agent_exec`.
+    InvalidExec,
     InvalidArgument,
     InvalidTimeout,
     TargetNotFound(String),

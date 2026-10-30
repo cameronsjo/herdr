@@ -222,8 +222,10 @@ herdr pane process-info [--pane ID|--current]
 herdr pane neighbor --direction left|right|up|down [--pane ID|--current]
 herdr pane edges [--pane ID|--current]
 herdr pane focus --direction left|right|up|down [--pane ID|--current]
+herdr pane focus <pane_id>
 herdr pane resize --direction left|right|up|down [--amount FLOAT] [--pane ID|--current]
 herdr pane zoom [<pane_id>|--pane ID|--current] [--toggle|--on|--off]
+herdr pane peek <pane_id>|--close
 herdr pane rename <pane_id> <label>|--clear
 herdr pane input [<pane_id>|--pane ID|--current] --right-click herdr|pane
 herdr pane split [<pane_id>|--pane ID|--current] --direction right|down [--ratio FLOAT] [--cwd PATH] [--env KEY=VALUE] [--right-click herdr|pane] [--focus] [--no-focus]
@@ -234,6 +236,8 @@ herdr pane move <pane_id> --new-tab [--workspace ID] [--label TEXT] [--focus|--n
 herdr pane move <pane_id> --new-workspace [--label TEXT] [--tab-label TEXT] [--focus|--no-focus]
 herdr pane close <pane_id>
 ```
+
+`pane focus <pane_id>` jumps to that pane from anywhere: it switches to the pane's workspace and tab, then focuses it, in one call. With `--direction`, `pane focus` moves to a neighboring pane as before. The jump prints the focused pane's info, the same shape as `pane get`; the directional move prints its own result.
 
 For pane commands that accept `--current`, Herdr uses the calling pane's
 `HERDR_PANE_ID` when the command runs inside a Herdr pane. For `pane split`,
@@ -246,6 +250,19 @@ The split response exposes the new pane ID as `.result.pane.pane_id`.
 mouse-reporting pane application. `herdr` restores the default pane menu.
 Right-clicking the pane frame still opens Herdr's menu. `pane split
 --right-click pane` applies the same policy to the new pane at creation.
+
+`pane peek` shows a pane from another tab or workspace as a temporary
+overlay over the current tab, with keys and mouse routed to it, so you can
+answer a prompt without leaving where you are. Neither tab's layout changes:
+the pane is shown at overlay size while peeked and gets its layout size back
+when the peek closes. Press the prefix key, or run `pane peek --close`, to
+close it; it also closes on its own when the pane exits. The prefix key does
+not reach a peeked pane, so a program in it never sees that key; only a key
+press counts, not the same character typed through an input method. Peeking
+another pane replaces an open peek; a plugin popup blocks it. A pane in the
+current tab is refused with `pane_visible`, and a peek closes if its pane is
+moved into the tab it is shown over. The title always shows the pane id, so a
+label cannot pass one pane off as another.
 
 After `pane move`, use `.result.move_result.pane.pane_id` for later commands. A cross-workspace move changes the workspace-qualified pane ID; the prior value remains at `.result.move_result.previous_pane_id`. The running process keeps its launch-time `HERDR_PANE_ID`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID`; Herdr retains the old pane ID as an alias for that terminal, so pane commands using `--current` still resolve it. A live agent name follows the terminal and continues to resolve after the move.
 
@@ -262,7 +279,7 @@ herdr pane read <pane_id> --source recent-unwrapped --lines 120
 Send input:
 
 ```bash
-herdr pane send-text <pane_id> <text>
+herdr pane send-text [--paste] <pane_id> <text>
 herdr pane send-keys <pane_id> <key> [key ...]
 herdr pane run <pane_id> <command>
 ```
@@ -276,6 +293,8 @@ aliases for `ctrl+c`.
 `esc` is the canonical spelling; `escape` is also accepted.
 
 On macOS, `send-text` is refused with `pane_send_failed` when the pane's terminal is in canonical mode and a line of the text exceeds the 1024-byte limit; the tty would otherwise drop it silently. Split the text into shorter lines or wait for a raw-mode prompt.
+
+`send-text --paste` sends the text as a bracketed paste when the pane has enabled bracketed-paste mode, and as raw bytes when it has not. Use it for long or multi-line text sent to an agent's prompt, which can read an unbracketed burst as typing. `--paste` goes before the pane id; after the text starts, it is part of the text. Text containing ESC or the C1 CSI character (U+009B) is refused with `invalid_paste_text`, since it could end the paste early.
 
 `pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
@@ -356,10 +375,11 @@ herdr agent prompt <target> <text> [--wait] [--until STATUS]... [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent pin <target>|--current
 herdr agent unpin <target>|--current
+herdr agent task [--target TARGET] [--] <text>|--clear
 herdr agent focus <target>
 herdr agent wait <target> [--until STATUS]... [--timeout MS]
 herdr agent attach <target> [--takeover]
-herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--env KEY=VALUE]... [--pin] [-- <agent-args...>]
+herdr agent start <name> --kind KIND --pane ID [--timeout MS] [--env KEY=VALUE]... [--exec PATH] [--parent NAME] [--pin] [-- <agent-args...>]
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
@@ -370,15 +390,21 @@ Agent targets are either a unique live agent name or the pane ID that currently 
 
 `--env KEY=VALUE` (repeatable) sets an environment variable for the agent process only; the pane's shell does not keep it after the agent exits. Keys must match `^[A-Za-z_][A-Za-z0-9_]*$`, values are passed literally (no `~` or `$VAR` expansion), and values may not contain control, line-separator or format characters. It works when the pane's shell is sh, bash, dash, zsh, ksh, mksh, fish or pwsh, and in any pane on Windows; other shells (nu, xonsh, elvish, csh, tcsh) fail with `agent_env_unsupported_shell` before anything is typed. The value is visible in the pane and may enter its shell history. Env is not saved with the session, so an agent resumed by a session restore starts without it. Servers that support `--env` report `capabilities.agent_start_env`; against an older server the CLI fails with `agent_start_env_unsupported` instead of starting the agent without it.
 
+`--parent NAME` records which agent launched this one. Herdr checks that `NAME` is a live agent before typing anything, and once the new agent is ready it sets the pane metadata token `parent=NAME` on the new pane and, unless it already has one, on the parent's pane (source `herdr:parent`). With `[ui.sidebar.agents] group_by = { token = "parent" }` the sidebar then groups an orchestrator with its workers under one header, the orchestrator first. If recording fails after the agent has started, the command still succeeds: it prints the start result with a `parent_error` field and a warning on stderr. A parent that already has a `parent` token keeps it, so it stays in its own parent's group rather than leading its workers' group. The token stays with the pane until it is cleared (`herdr pane report-metadata <pane> --source herdr:parent --clear-token parent`) or the pane closes.
+
+`--exec PATH` launches that executable instead of the kind's default, for example a wrapper around Claude Code: `herdr agent start w1 --kind claude --exec /opt/bin/my-claude --pane 3`. It is a path to a program: it contains a `/` (use `./my-claude` for one in the pane's directory), uses only ASCII letters, digits and `_ . / : + -`, starts with a letter, `_`, `/`, `./` or `../`, and does not end in `/`, `.` or `..`, so a shell never runs a builtin such as `exit` in its place. A function or alias you define with that exact path in zsh or bash still takes precedence, and a path to a directory changes the pane's directory in fish or a shell with auto-cd on. For a path with spaces, `~` or backslashes, use a symlink or forward slashes. Anything else fails with `invalid_agent_exec`. The kind still picks the screen rules, and Herdr must identify the running process as that kind, either because the wrapper runs the real agent or because its name is listed under `[advanced] agent_process_names`; otherwise the start times out. A session started with `--exec` is not resumed by a session restore, since the restore would use the kind's default executable. Servers that support `--exec` report `capabilities.agent_start_exec`; against an older server the CLI fails with `agent_start_exec_unsupported` instead of launching the default executable.
+
 A successful start returns only after the expected agent owns the same terminal and is ready for interactive input. If detection reports `blocked` during startup, the command returns `agent_not_ready` immediately. The name remains available for `agent read`, `agent send-keys`, and `agent type-submit`, and becomes ready for prompts after detection reports `idle`. The default startup timeout is 30000 milliseconds; explicit values must be greater than 3000 and no more than 300000.
 
-`agent prompt` honors live bracketed-paste mode and writes text followed by delayed Enter as one ordered submission, including while the agent is working. Success without `--wait` acknowledges the writes, not the start of a turn. On Windows, Codex receives a paste boundary before Enter so submission does not depend on prompt size; the caller timeout includes submission time. If the agent is already `blocked`, it returns `agent_blocked` without sending input. With `--wait`, a prompt sent from another non-working state has up to five seconds after submission to produce an observed `working` or `blocked` state or Herdr returns `agent_prompt_stalled`; if the caller timeout expires first, Herdr returns the normal `timeout` error. This prevents unrelated `idle`, `done`, or session changes from completing the wait. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
+`agent prompt` honors live bracketed-paste mode and writes text followed by delayed Enter as one ordered submission, including while the agent is working. Success without `--wait` acknowledges the writes, not the start of a turn. The result's `.result.delivered` says whether the text reached the agent's input: `typed` when an agent that was not working starts a turn or shows the prompt's opening text; `queued` when an agent that was already working shows it, or finishes its turn and starts another; `unknown` when neither appears within 1.5 seconds. A turn start is evidence that the agent took input after the write, not proof that it was this prompt, so two callers prompting one idle agent at once can both read `typed`. Agents that collapse long or multi-line pastes never show the text, and a pane too narrow for the first 32 characters wraps them, so such a prompt to a working agent reads `unknown`. On Windows, Codex receives a paste boundary before Enter so submission does not depend on prompt size; the caller timeout includes submission time. If the agent is already `blocked`, it returns `agent_blocked` without sending input. With `--wait`, a prompt sent from another non-working state has up to five seconds after submission to produce an observed `working` or `blocked` state or Herdr returns `agent_prompt_stalled`; if the caller timeout expires first, Herdr returns the normal `timeout` error. This prevents unrelated `idle`, `done`, or session changes from completing the wait. After activity is observed, it waits for the first requested settled status. It does not track individual turns. If the agent is already working, completion of that active turn may satisfy the wait. `--until` narrows the matching states and is rejected unless `--wait` is also present. Standalone `agent wait` returns immediately when the current status matches. Both default to `idle`, `done`, or `blocked`; use `--until unknown` explicitly when needed.
 
 `idle` and `done` both mean ready for input. The CLI/API uses the server's seen state: `done` is idle but not yet marked seen, explicit `pane focus` / `agent focus` commands mark the target seen, and reads do not. Each TUI client tracks viewed completions independently, so its Done badge can differ from the CLI or another client. `blocked` means Herdr recognized an approval or question UI. `unknown` means an agent is present but Herdr cannot classify it confidently, not that its work succeeded.
 
 `agent send-keys` sends logical terminal keys such as `enter`, `up`, `esc`, or `ctrl+c`. `agent type-submit` sends literal text plus Enter as one interactive UI submission; use it for slash commands or other harness commands that must be typed into the agent UI instead of sent as model prompts. Herdr validates every key or type-submit text before writing any bytes. `agent read` reads the resolved terminal stream, and `agent rename` names an already detected agent.
 
 `agent pin` keeps an agent at the top of the agents panel, whatever its status, and `agent unpin` returns it to its usual place. Pinned agents are listed in the order they were pinned. `--current` targets the agent in the calling pane (`HERDR_PANE_ID`), so an orchestrator can pin itself, and `agent start --pin` pins the new agent once it is ready. A pin belongs to the agent: it is cleared when the agent exits, and it does not yet survive a server restart, live handoff, or update.
+
+`agent task` sets the one-line task an agent's sidebar entry shows under its name, such as `herdr agent task "fixing homelab#1093"`; `--clear` removes it. Without `--target` it sets the task of the calling pane (`HERDR_PANE_ID`), so an agent can report its own; with `--target` an orchestrator can set a worker's. The task is the pane metadata token `task`, reported with source `herdr:task`, so it shows as `$task` in sidebar rows (the default layouts end with a `$task` row that appears only once a task is set) and as `tokens.task` in `agent get`. Put `--` before a task that starts with `-`. The task stays until cleared, replaced, or the pane closes; it is not cleared when the agent exits, so clear it when the work ends, or a later agent in the same pane shows it. A pane-less registered agent sets it with `agent register --token task=TEXT`.
 
 `agent explain` asks the running server to classify the same bottom-buffer detection snapshot used by screen detection, so live output reflects the server's active manifest cache. Because this uses the `agent.explain` socket method, restart or hand off to an updated server after upgrading Herdr before using live explain. Use `--file PATH --agent LABEL` to explain a saved fixture locally instead. The default output shows the agent, final state, manifest source and version, matched rule with its region evidence, and any fallback, skip, or warning reasons. Add `--verbose` for visible evidence flags, cached remote version, local override shadowing, remote update status, and the full evaluated-rules list with matcher and region evidence. Add `--json` for issue reports or tests.
 

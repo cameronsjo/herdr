@@ -257,6 +257,134 @@ next sync is likely to conflict again:
 - **Regression check:** `cargo nextest run -E 'test(/fork_agent_pin/) | test(/pin/)'`. Live: start two agents, `herdr agent pin <second>`; it moves to the top of the agents panel and stays there as the other changes state.
 - **Render scaling:** `pinned_first` is a scan with an early return when nothing is pinned, and a stable sort otherwise, once per ordering pass; `agent_group_key` adds a scan of the agent's token list (capped at 32). Not measured with `just bench-render-scale`: the cloud sandbox cannot build the vendored terminal library.
 
+## Workers group under the agent that launched them (Linear CAM-442, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(agent): record an agent's launcher with agent start --parent
+
+- **PR:** [cameronsjo/herdr#153](https://github.com/cameronsjo/herdr/pull/153)
+- **Files:** `src/cli/fork_agent_parent.rs` (new), `src/cli.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/client/shell/{agent_sidebar,aggregate_navigation}.rs`, `src/client/shell/tests/{agents_worktrees_notifications,endpoints}.rs`, `docs/next/website/src/content/docs/{cli-reference,configuration}.mdx`, `openspec/specs/{agent-launch,agent-sidebar}/spec.md` (via the archived `agent-start-parent` change)
+- **Adds:** `run_agent_command` takes `--parent NAME` out of `agent start`'s options (before `--`) ahead of clap, so `AgentStartParams` and the endpoint shapes are untouched; the clap leaf lists it for help only. `agent_start` resolves the parent with `agent.get` before typing anything and, once the agent is ready, sends `pane.report_metadata` with `parent=NAME` (source `herdr:parent`) for the new pane and for the parent's pane when it has no `parent` token. A failed report after the start does not fail it: `parent_record_failure` attaches the error as `result.parent_error` and warns on stderr. In the sidebar, `leads_its_token_group` moves the agent a token group is named after to the front of its run in `ordered_agent_pane_ids` and `aggregate_agent_rows`, after `blocked_first`. No server change.
+- **Collision:** the start branch at the top of `run_agent_command` and the success arm of `agent_start` in `src/cli/agent.rs`, the `start` leaf in `bindings.rs`, and the tails of `ordered_agent_pane_ids` and `aggregate_agent_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/parent_/) | test(/token_group_is_named_after/) | test(/token_group_leader/)'`. Dropping the leader pass reddens `the_agent_a_token_group_is_named_after_leads_it` (local) and `aggregate_rows_put_a_token_group_leader_first` (multi-machine). Live: `herdr agent start w1 --kind claude --pane <id> --parent <orchestrator>` with `group_by = { token = "parent" }`; the orchestrator heads one group with `w1` under it.
+- **Render scaling:** one more stable sort over the gathered list per frame while token grouping is on, which computes each agent's group key twice more (run key and leader check); off otherwise.
+
+## The Agent panel can show only the agents that need you (Linear CAM-441, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(sidebar): add a needs-me filter that lists only blocked agents
+
+- **PR:** [cameronsjo/herdr#150](https://github.com/cameronsjo/herdr/pull/150)
+- **Files:** `src/config/{sidebar,keybinds,model}.rs`, `src/input/{keybindings,keybind_help}.rs`, `src/main.rs`, `src/client/shell/{agent_sidebar,aggregate_navigation,endpoint_agents,actions,config,mouse,mobile,sidebar}.rs`, `src/client/shell/tests/{palette,agents_worktrees_notifications,mobile}.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/data/config-reference.json`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-needs-me-filter` change)
+- **Adds:** `AgentsSidebarConfig::needs_me_only`, a `#[serde(skip)]` runtime field (never read from or written to config) that `ordered_agent_pane_ids` and `aggregate_agent_rows` use to keep only blocked agents. The header's order toggle cycles grouped → priority → needs me; `KeybindAction::ToggleNeedsMe` (`core:toggle-needs-me`) serves the palette and an optional `keys.toggle_needs_me`. `apply_live_config` carries the flag across a reload, and turning it on (or reloading with it on) sets the priority sort. The empty panel and the mobile list say ` no agents need you` (`empty_agent_list_message`); the mobile section is titled `agents · needs me`, and the collapsed sidebar draws an accent `!` on its divider. Client only.
+- **Replaces:** upstream's two-state sort toggle click in `mouse.rs` becomes three-state.
+- **Collision:** the sort-toggle branch in `ClientShellState` mouse handling, the `sort_label` match in `render_agent_panel_header`, the empty-list message in `render_agent_panel` and `endpoint_agents::render_expanded`, the `clear_agent_view` neighbours in the keybinding tables, and the head of `aggregate_agent_rows`.
+- **Regression check:** `cargo nextest run -E 'test(/needs_me/)'`. Removing the `retain` in `ordered_agent_pane_ids` reddens `the_sort_toggle_cycles_through_needs_me_which_shows_only_blocked_agents`; dropping the palette entry or the priority sort in `toggle_needs_me` reddens `the_palette_toggles_the_needs_me_filter`; dropping the mobile title reddens `mobile_switcher_says_when_needs_me_hides_every_agent`.
+- **Render scaling:** while on, a `retain` over the agent list before ordering, which shrinks the per-agent work after it; off, one bool check per frame.
+
+## Agent rows can say where an agent lives (Linear CAM-440, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(sidebar): add a location token for agents outside the focused workspace
+
+- **PR:** [cameronsjo/herdr#145](https://github.com/cameronsjo/herdr/pull/145)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `src/client/shell/tests/agents_worktrees_notifications.rs`, `docs/next/website/src/content/docs/{,ja/,zh-cn/}configuration.mdx`, the `DEFAULT_CONFIG` token list in `src/main.rs`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-location-token` change)
+- **Adds:** `AgentSidebarToken::Location`, written `location`. It resolves to a `Workspace`-styled `workspace · tab` (or the workspace alone when the tab label is hidden) when the agent's workspace is not the snapshot's `focused_workspace_id`, and to nothing otherwise. `AgentTokenContext` gains `outside_focused_workspace`. Defaults are unchanged. Client only.
+- **Collision:** the `AgentSidebarToken` enum and `agent_token_name` / parse table in `src/config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `src/ui/sidebar/tokens.rs`, and the context literal in `agent_row`.
+- **Regression check:** `cargo nextest run -E 'test(/location_token/)'`; `location_token_resolves_only_outside_the_focused_workspace` covers the hidden-tab case. Dropping the `outside_focused_workspace` gate reddens `location_token_names_workspace_and_tab_only_outside_the_focused_workspace` (the focused agent's row gains its workspace).
+- **Render scaling:** one string comparison per agent row; the token formats a string only for configured, out-of-workspace agents.
+
+## Agents show a one-line task (Linear CAM-439, issue [#98](https://github.com/cameronsjo/herdr/issues/98))
+
+### feat(agent): set an agent's sidebar task line with agent task
+
+- **PR:** [cameronsjo/herdr#144](https://github.com/cameronsjo/herdr/pull/144)
+- **Files:** `src/cli/fork_agent_task.rs` (new), `src/cli.rs`, `src/cli/agent.rs`, `src/cli/agent/bindings.rs`, `src/config/sidebar.rs`, `src/config.rs`, `src/ui/sidebar/tokens.rs` (test), `docs/next/website/src/content/docs/{cli-reference,configuration}.mdx` plus the ja and zh-cn default-row blocks, `docs/next/website/src/data/config-reference.json`, `openspec/specs/agent-sidebar/spec.md` (via the archived `agent-task-line` change)
+- **Adds:** `herdr agent task [--target TARGET] [--] <TEXT>|--clear`, which patches the pane metadata token `task` (source `herdr:task`) on the calling pane (`HERDR_PANE_ID`) or on the `--target` agent, resolved with `agent.get`. It keeps its own parser, like `agent register`. The default agent `rows` and `grouped_rows` end with a `["$task"]` row; an unset token drops the row, so layouts look the same until a task is set. No API, protocol or server change.
+- **Replaces:** upstream's default `rows` (`[["state_icon","machine","workspace","tab"],["agent"]]`) gains the third row.
+- **Collision:** `AgentsSidebarConfig::default()` in `src/config/sidebar.rs`, the default-rows blocks in the three `configuration.mdx` files and `config-reference.json`, and the fork dispatch at the top of `run_agent_command` in `src/cli/agent.rs`.
+- **Regression check:** `cargo nextest run -E 'test(/task_/) | test(/default_rows_draw_the_task_line/)'`. Dropping the `$task` default row reddens `default_rows_draw_the_task_line_only_once_a_task_is_set`. Live: in an agent pane run `herdr agent task "probe"`; the sidebar entry gains a `probe` line, and `herdr agent task --clear` removes it.
+- **Render scaling:** one more row per entry to resolve, a `HashMap` lookup that is skipped when the token is unset; no new per-pane work.
+
+## A wrapper under its own executable name is identified as its agent (issue [#110](https://github.com/cameronsjo/herdr/issues/110), Linear CAM-447)
+
+### feat(agent): launch another executable with agent start --exec
+
+- **PR:** [cameronsjo/herdr#154](https://github.com/cameronsjo/herdr/pull/154)
+- **Files:** `src/api/schema/agents.rs` (`AgentStartParams.exec`); `src/api/schema/server.rs` (`ServerCapabilities.agent_start_exec`) and its literals in `src/api/server.rs` (`true` in `default_capabilities`), `src/cli/status.rs`, `src/update.rs`, `src/api/schema/tests.rs`; `src/app/agents.rs` (`start_agent` validates `exec` and types it in place of `interactive_agent_executable(kind)`; `AgentStartError::InvalidExec`); `src/cli/agent.rs` (one capability fetch for `--env` and `--exec`, `agent_start_exec_support_error`); `src/cli/agent/bindings.rs` (`--exec PATH`); `AgentStartParams` literals in `src/app/mod.rs`, `src/api/schema/tests.rs`, `src/platform/macos/input_tests.rs`; `docs/next/api/herdr-api.schema.json`; `docs/next/website/src/content/docs/cli-reference.mdx` (English only); `openspec/specs/agent-launch/` (via the archived `agent-start-exec` change).
+- **Adds:** `herdr agent start w1 --kind claude --exec /opt/bin/my-claude --pane 3` types `/opt/bin/my-claude` instead of `claude`, and the response's `argv` starts with it. The kind still drives detection and the managed launch, so the process must identify as that kind, by running the real agent or through `[advanced] agent_process_names`; otherwise the start times out. `exec` is limited to ASCII letters, digits and `_ . / : + -`, starting with a letter, `_`, `/`, `./` or `../`, containing a `/` and not ending in `/`, `.` or `..` (`valid_agent_exec`), so it never needs quoting in any shell and is never read as an assignment (`LD_PRELOAD=…`), a job spec (`%1`), PowerShell arithmetic (`1/2`), a builtin (`eval`, `exit`, since no builtin name holds a `/`) or a directory that fish or an auto-cd shell would `cd` into (`/`, `../`); a function or alias the user names with that exact path still wins in zsh or bash: the shared quoters break on typographic quotes in PowerShell and on nu, elvish, fish and csh (the security review of PR #154; the same gap in `args` predates this PR and is tracked separately). Anything else fails with `invalid_agent_exec` before anything is typed. **Compatibility:** `exec` is optional and omitted when unset. An older server would ignore it and launch the default executable, so the server advertises `capabilities.agent_start_exec` and the CLI refuses `--exec` with `agent_start_exec_unsupported` without it. **Worth knowing:** a session started with `exec` is not recorded for resume (`persisted_session_from_launch_args` is skipped), since a restore would resume it with the kind's default executable.
+- **Collision:** upstream edits to `AgentStartParams`, `start_agent`'s argv line, `ServerCapabilities`, the `agent start` CLI binding and its capability check, and the `agent start` section of `cli-reference.mdx`. Any new `ServerCapabilities` literal from upstream needs `agent_start_exec`.
+- **Regression check:** `cargo nextest run -E 'test(/agent_start_exec/) + test(/agent_start_env/) + test(generated_protocol_schema_artifact_is_current)'`. Live: `herdr agent start w1 --kind claude --exec "$(command -v claude)" --pane <id>` starts and becomes idle like a plain start.
+- **Render scaling:** not affected.
+
+### feat(detect): identify extra process names as a built-in agent kind
+
+- **PR:** [cameronsjo/herdr#152](https://github.com/cameronsjo/herdr/pull/152)
+- **Files:** new fork file `src/detect/fork_process_names.rs` (validation into a name-to-kind map with diagnostics, the process-wide map behind an `AtomicBool` fast path, the lookup); `src/detect/mod.rs` (module line, re-export, an `or_else` in `identify_agent`, and `agent_name_from_basename` calling `identify_agent` so interpreter-run wrapper scripts match too); `src/config/model.rs` (`AdvancedConfig.agent_process_names` and its default); `src/config.rs` (diagnostics in `collect_diagnostics`); `src/app/mod.rs` (set at the top of `App::try_new`, and in the `advanced` branch of `apply_live_config` with its diagnostics); `docs/next/website/src/data/config-reference.json`; `docs/next/website/src/content/docs/agents.mdx` (English only); `openspec/specs/agent-detection/` (via the archived `agent-process-names` change).
+- **Adds:** `[advanced] agent_process_names = { claude = ["my-claude"] }` makes a process whose basename is `my-claude` (case-insensitive, same suffix stripping as built-in names) identified as `claude`. The name is also recovered from a wrapper script run by an interpreter (`bash /opt/bin/my-claude`), a name over 15 bytes also matches its 15-byte cut (Linux's process name), and kind keys ignore case. Built-in names win; label parsing, so `agent start --kind`, does not accept the extra names. Unknown kinds, empty, path-like or dash-led names (a login shell's argv0 is `-zsh`), shell, runtime and launcher names (`is_generic_runtime_or_shell` plus `dash`, `ksh`, `nu`, `npm`, `uvx`, `sudo`, `env`, `ssh` and similar, since claiming one would make a pane's shell count as the agent and let `agent prompt` type into it), names that already identify another kind, and names under two kinds are dropped with a config warning. Applied at startup and on config reload. With nothing configured, identification only reads one atomic flag more than upstream. **Worth knowing:** a session restore resumes the agent with the built-in executable (`claude --resume`), not the wrapper.
+- **Collision:** `identify_agent` in `src/detect/mod.rs`, `AdvancedConfig` and its `Default`, `Config::collect_diagnostics`, the start of `App::try_new`, and the `advanced` branch of `apply_live_config`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_process_names/)'`, and `python3 scripts/config_reference_check.py`. Live: with `agent_process_names = { claude = ["my-claude"] }`, run `ln -s $(command -v claude) /tmp/my-claude && /tmp/my-claude` in a pane; the sidebar shows it as Claude with working, blocked and idle states.
+- **Render scaling:** not affected. Identification runs on the process poll, not in render, and adds one atomic load when nothing is configured.
+
+## Peek a pane from another tab as a temporary overlay (issue [#95](https://github.com/cameronsjo/herdr/issues/95), Linear CAM-438)
+
+### feat(pane): close a peek with the prefix key
+
+- **PR:** [cameronsjo/herdr#148](https://github.com/cameronsjo/herdr/pull/148)
+- **Files:** `src/server/{headless,pane_input,clients}.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `peek-prefix-dismiss` change)
+- **Adds:** in the `ClientShellPopupInput` arm, when the popup is a peek, `first_prefix_press` finds the first press of a configured prefix key; that event and everything after it in the batch are dropped, the peek closes, and tab geometry is reapplied. Presses the client still holds in the peeked pane (a modifier pressed before the prefix) are released first through `drain_shell_held_inputs_for`, so the pane's program never sees a key stuck down. Plugin popups still receive the prefix. Only a key press counts as the prefix, not the same character committed as text.
+- **Collision:** the `ClientShellPopupInput` arm of `handle_server_event` in `headless.rs`.
+- **Regression check:** `cargo nextest run -E 'test(/prefix_key_/)'`. Live: open a peek, type into it, press the prefix key; the overlay closes and the key does not reach the pane.
+
+### feat(pane): show a pane from another tab as a temporary overlay
+
+- **PR:** [cameronsjo/herdr#147](https://github.com/cameronsjo/herdr/pull/147)
+- **Files:** `src/app/{popup,state,runtime,api}.rs`, `src/app/api/panes.rs`, `src/api/schema{,/operations}.rs`, `src/cli/pane{,/bindings}.rs`, `src/server/{client_shell,headless/client_views,headless/render}.rs`, `src/ui/panes.rs`, `src/server/headless/tests/fork_peek.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-peek/spec.md` (via the archived `pane-peek` change)
+- **Adds:** `pane.peek` / `herdr pane peek <pane_id>` shows a pane from another tab or space in the popup overlay over the current tab, with input and mouse routed to it; `pane.peek_close` / `herdr pane peek --close` closes it. `PopupPaneState.peek` marks a popup that borrows a tiled pane's terminal instead of owning one, so closing it shuts nothing down. `AppState::tab_resize_locked` keeps tab layout from resizing a peeked terminal, and a public request that opens or closes a peek reapplies tab geometry so the pane gets its layout size back. A peek closes when its terminal shuts down, and the popup branch of `PaneDied` no longer skips the pane's own exit handling for a peek. `reconcile_client_shell_locations` closes a peek whose pane was moved into the overlay's own tab, and reapplies geometry whenever it closes a peek; `remove_unattached_terminal_ids` drops a peek of a closed pane at once; the kitty graphics surface builds a popup target only for a client that shows the popup, so a client on the peeked pane's own tab keeps its pane target. The title always carries the pane's public id. Server only: the client already renders and routes popups, so no wire codec changes.
+- **Collision:** `PopupPaneState` and `close_popup_pane` in `src/app/{state,popup}.rs`, the popup branch of `PaneDied` in `src/app/api.rs`, `shutdown_terminal_runtime` in `src/app/runtime.rs`, `any_shell_surface_contains_pane` in `render.rs`, the popup target in `src/kitty_graphics/surface.rs`, `remove_unattached_terminal_ids` in `src/app/actions.rs`, the popup branch of `reconcile_client_shell_locations`, `public_request_may_change_geometry` and the end of `handle_api_request_with_shutdown_check` in `client_views.rs`, the popup title in `render_popup_surface`, and the four `tab_resize_locked` checks in `src/ui/panes.rs`. The popup invariant in `assert_invariants_for_test` now allows an attached terminal only for a peek.
+- **Regression check:** `cargo nextest run -E 'test(/peek/)'`. Live: with an agent in tab 2, run `herdr pane peek <its pane id>` from tab 1; the agent shows in an overlay titled `peek: …`, keys reach it, and `herdr pane peek --close` returns it to tab 2 at its layout size.
+- **Render scaling:** none added to pane loops; the lock check is one hash lookup and one comparison per pane resize.
+
+## A `name` token shows the herdr agent name in sidebar rows (issue [#97](https://github.com/cameronsjo/herdr/issues/97), Linear CAM-434)
+
+### feat: add a name token to agent sidebar rows
+
+- **PR:** [cameronsjo/herdr#146](https://github.com/cameronsjo/herdr/pull/146)
+- **Files:** `src/config/sidebar.rs`, `src/ui/sidebar/tokens.rs`, `src/client/shell/agent_sidebar.rs`, `docs/next/website/src/content/docs/configuration.mdx`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/agent-sidebar/spec.md` (via the archived `sidebar-name-token` change)
+- **Adds:** `AgentSidebarToken::Name` (`"name"`), resolved from the agent's herdr name only through a new `agent_name` field on `AgentTokenContext`, and drawn as `ResolvedTokenKind::Agent` so it styles like `agent`. Omitted for an unnamed agent. `agent` (display name, then name, kind, title) and the default rows are unchanged, so herdr-bridge's `claude · <session>` display still shows; `["name", "agent"]` puts the herdr name beside it.
+- **Collision:** the `AgentSidebarToken` enum and its name/parse tables in `config/sidebar.rs`, `AgentTokenContext` and `agent_rows` in `ui/sidebar/tokens.rs`, and the `AgentTokenContext` construction in `agent_row`.
+- **Regression check:** `cargo nextest run -E 'test(/name_token/) | test(parses_builtin_and_arbitrary_custom_tokens)'`. Live: with `rows = [["state_icon", "name", "agent"]]`, an agent started as `cos-cadence` shows `cos-cadence · claude · <branch>`.
+- **Render scaling:** not affected; one more `Option<&str>` per row build.
+
+## `pane focus <pane_id>` jumps to a pane from anywhere (issue [#94](https://github.com/cameronsjo/herdr/issues/94), Linear CAM-433)
+
+### feat: jump to a pane by id with pane focus
+
+- **PR:** [cameronsjo/herdr#142](https://github.com/cameronsjo/herdr/pull/142)
+- **Files:** `src/cli/pane.rs`, `src/cli/pane/bindings.rs`, `src/cli/spec.rs`, `docs/next/website/src/content/docs/cli-reference.mdx`, `openspec/specs/pane-focus/spec.md` (via the archived `pane-focus-jump` change)
+- **Adds:** a positional pane id on `pane focus`, which sends the existing `pane.focus` (it switches workspace and tab before focusing). `--direction` is now required unless a pane id is given, and still sends `pane.focus_direction`; a pane id cannot be combined with `--direction`, `--pane` or `--current`. CLI only, so a candidate to offer upstream.
+- **Collision:** the `focus` leaf in `bindings.rs` (now a hand-built `Leaf` with `focus_arguments`/`focus` in `pane.rs`, plus a required `focus_target` group in `Leaf::command`) and the dropped `pane focus` row in `spec_marks_runtime_required_options_as_required`.
+- **Regression check:** `cargo nextest run -E 'test(/pane_focus/)'`. Live: from workspace 1, `herdr pane focus <pane in workspace 2>` lands on that pane.
+- **Render scaling:** not affected; CLI parsing only.
+
+## `agent prompt` reports whether the text reached the agent (issue [#102](https://github.com/cameronsjo/herdr/issues/102), Linear CAM-436)
+
+### feat(agent): report prompt delivery as typed, queued or unknown
+
+- **PR:** [cameronsjo/herdr#141](https://github.com/cameronsjo/herdr/pull/141)
+- **Files:** new fork files `src/api/fork_prompt_delivery.rs` (baseline capture, the post-write poll, the echo needle and `with_delivery`) and `src/api/schema/fork_prompt_delivery.rs` (`PromptDelivery`); `src/api/mod.rs` and `src/api/schema.rs` (module lines); `src/api/schema/response.rs` (`AgentPrompted.delivered`); `src/api/wait.rs` (`prompt_agent` captures a baseline on both paths and observes after the write; `agent_prompt_success` takes the delivery); `src/app/api/agents.rs` (`delivered: None` from the app; the server fills it); `tests/cli/agents.rs`; `docs/next/api/herdr-api.schema.json`; `cli-reference.mdx` and `agent-automation.mdx` (English only); `openspec/specs/agent-registry/`.
+- **Replaces:** nothing upstream. Upstream's success means the bytes were written. The fork then watches for up to 1.5 seconds (capped by a `--wait` timeout, which also bounds each app call in the window): a non-working agent whose pane reports working or blocked (replayed from the event hub, so a sub-poll turn counts) or shows the prompt's opening text is `typed`; an already working agent that shows it, or settles and starts another turn, is `queued`; otherwise `unknown`. With `--wait`, the window counts toward the five-second `agent_prompt_stalled` gate. **Compatibility:** `delivered` is optional and an unknown value reads as `unknown`; no parameter, method or capability changes. **Worth knowing:** a prompt with no evidence returns up to 1.5 seconds later than upstream's; collapsed pastes never echo, so a long prompt to a working agent reads `unknown`.
+- **Regression check:** `cargo nextest run -E 'test(/fork_prompt_delivery/) + test(agent_start_command_works)'`. On a sync, any upstream change to `prompt_agent` or the `AgentPrompted` variant must keep `delivered` on both prompt paths. **Collision:** `prompt_agent` and `agent_prompt_success` in `src/api/wait.rs`, the `AgentPrompted` variant, and the `agent prompt` paragraphs of the two docs pages.
+- **Render scaling:** not affected; the check runs once per `agent.prompt` call, off the render path.
+
+## `pane send-text --paste` sends a bracketed paste (issue [#121](https://github.com/cameronsjo/herdr/issues/121), Linear CAM-432)
+
+### feat: opt-in bracketed paste for pane send-text
+
+- **PR:** [cameronsjo/herdr#140](https://github.com/cameronsjo/herdr/pull/140)
+- **Files:** `src/api/schema/panes.rs`, `src/app/api/panes.rs`, `src/cli/pane.rs`, `src/platform/macos/input_tests.rs`, `docs/next/api/herdr-api.schema.json`, `docs/next/website/src/content/docs/{cli-reference,socket-api}.mdx`, `openspec/specs/pane-input/spec.md` (via the archived `send-text-paste` change)
+- **Adds:** an optional `paste` field on `pane.send_text` (CLI `--paste`, before the pane id). Set, the text is wrapped with `encode_api_text`, the same live bracketed-paste check `pane run` uses, before the canonical-mode admission check; unset, the bytes are unchanged and the field is not serialized. A paste refuses text containing ESC or U+009B (`invalid_paste_text`) so it cannot end the paste early. Like `pane run`, it skips the Windows CRLF conversion the TUI paste path applies; untested on Windows. Whether it fixes the cut-off text in a Claude Code pane still needs the live repro on #121.
+- **Collision:** `PaneSendTextParams` and `handle_pane_send_text`. If upstream adds its own paste option, drop this one and the `pane-input` requirement in the same sync.
+- **Regression check:** `cargo nextest run -E 'test(/send_text/)'`. Live: `herdr pane send-text --paste <claude-pane> "$(cat long.md)"` lands as one `[Pasted text]` block.
+- **Render scaling:** not affected; one request-time branch.
+
 ## Drag a pane onto another pane to rearrange it (Linear CAM-396)
 
 ### feat: drag a pane by its frame to swap it with another pane
@@ -267,6 +395,17 @@ next sync is likely to conflict again:
 - **Collision:** `pane_drop_target_at` (now takes the source pane id) and the left-press pane branch in `mouse.rs`, `ClientPaneDropTarget` in `state.rs`, the drop-target overlay pass before `render_link_hover` in `composition.rs`, and the agent-row sentence in `concepts.mdx`.
 - **Regression check:** `cargo nextest run -E 'test(/pane_frame/) | test(/agent_row_click/) | test(/pane_dragged_onto/)'`. Live: in a two-pane tab, drag one pane's top border onto the other; the target is outlined, and on release the panes trade places.
 - **Render scaling:** the overlay pass runs only while a pane drag has a pane target, once per frame, over one pane's outline.
+
+## One name follows one agent (issue [#97](https://github.com/cameronsjo/herdr/issues/97))
+
+### feat: keep tab and pane labels in sync with the agent name
+
+- **PR:** [cameronsjo/herdr#149](https://github.com/cameronsjo/herdr/pull/149)
+- **Files:** `src/app/agents.rs`, `src/app/api/tabs.rs`, `src/terminal/state.rs`, tests in `src/app/api/agents.rs`, `docs/next/website/src/content/docs/agents.mdx`, `openspec/specs/labels/spec.md` (via the archived `sync-agent-name-labels` change)
+- **Replaces:** upstream's pane border, which puts the agent's reported title over everything. While a named agent is live, its border shows the pane label, else the name; once the agent leaves, upstream's order is back. `agent rename` now also carries a tab label or a pane label that equals the old name (the tab only when it holds no other named live agent). A label that differs is left alone, so upstream's `agent_rename_does_not_replace_the_pane_label` still passes. `tab rename` and `agent start` are unchanged. The sidebar half of #97 is the `name` token (cameronsjo/herdr#146).
+- **Collision:** `rename_agent_target` in `agents.rs`, `handle_tab_rename` (now split into `set_tab_label`) in `tabs.rs`, and `TerminalState::border_label`.
+- **Regression check:** `cargo nextest run -E 'test(/agent_rename|agent_name_clear|tab_rename|border_label/)'`. Live: `herdr tab create --label w1`, `herdr agent start w1 --kind claude --pane <its pane>`, `herdr agent rename w1 w2`; the tab and the pane border both read `w2`, and the border drops `w2` once Claude exits.
+- **Render scaling:** not affected; `border_label` checks one more field per drawn border.
 
 ## Codex state comes from screen detection only, as upstream (issue [#114](https://github.com/cameronsjo/herdr/issues/114))
 

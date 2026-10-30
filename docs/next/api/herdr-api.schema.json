@@ -1465,6 +1465,13 @@
               "$ref": "#/schemas/request/$defs/AgentEnv",
               "description": "Fork: environment variables for the agent process only. Keys must match\n`^[A-Za-z_][A-Za-z0-9_]*$`; values must not contain control, line-separator\nor format characters. Refused with `agent_env_unsupported_shell` in panes\nwhose shell has no verified quoting (nu, xonsh, elvish, csh, tcsh).\nServers that accept this field advertise `capabilities.agent_start_env`."
             },
+            "exec": {
+              "description": "Fork: the path of the executable to launch in place of the kind's\ndefault. It must contain a `/` and only ASCII letters, digits and\n`_ . / : + -`, start with a letter, `_`, `/`, `./` or `../`, and not\nend in `/`, `.` or `..`, so a shell never runs a builtin such as\n`exit` in its place; use a symlink for other paths. Detection\nstill needs the process to identify as `kind`, by a built-in name or\n`[advanced] agent_process_names`.\nServers that accept this field advertise `capabilities.agent_start_exec`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "type": "string"
             },
@@ -3367,6 +3374,10 @@
           "properties": {
             "pane_id": {
               "type": "string"
+            },
+            "paste": {
+              "description": "Fork: wrap the text in bracketed paste when the pane has enabled\nit, so an agent's input reads it as one paste, not typing.",
+              "type": "boolean"
             },
             "text": {
               "type": "string"
@@ -6785,6 +6796,38 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.peek",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.peek_close",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9685,6 +9728,26 @@
             }
           ]
         },
+        "PromptDelivery": {
+          "description": "What herdr saw after writing a prompt into an agent's pane.\n\nHerdr cannot look inside the agent, so this is screen and status evidence,\nnot an acknowledgement from the agent.",
+          "oneOf": [
+            {
+              "const": "typed",
+              "description": "The agent was not working, and it started working or its screen\nshowed the prompt.",
+              "type": "string"
+            },
+            {
+              "const": "queued",
+              "description": "The agent was already working and its screen showed the prompt, so the\nagent holds it for after the current turn.",
+              "type": "string"
+            },
+            {
+              "const": "unknown",
+              "description": "Neither showed up in time. The bytes were written; a resend may\ndeliver the prompt twice.",
+              "type": "string"
+            }
+          ]
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -10104,6 +10167,17 @@
               "properties": {
                 "agent": {
                   "$ref": "#/schemas/success_response/$defs/AgentInfo"
+                },
+                "delivered": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/PromptDelivery"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Fork (cameronsjo/herdr#102): whether the prompt reached the\nagent's input. Absent from servers that do not check."
                 },
                 "type": {
                   "const": "agent_prompted",
@@ -11109,6 +11183,11 @@
             "agent_start_env": {
               "default": false,
               "description": "Fork (cameronsjo/herdr#103): `agent.start` honors its optional `env`\nfield. A server without this flag would ignore `env` and still succeed.",
+              "type": "boolean"
+            },
+            "agent_start_exec": {
+              "default": false,
+              "description": "Fork (cameronsjo/herdr#110): `agent.start` honors its optional `exec`\nfield. A server without this flag would ignore `exec` and launch the\nkind's default executable.",
               "type": "boolean"
             },
             "detached_server_daemon": {

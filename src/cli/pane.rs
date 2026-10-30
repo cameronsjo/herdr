@@ -3,7 +3,9 @@ pub(crate) mod bindings;
 use clap::ArgMatches;
 
 use super::projection::ParseError;
-use crate::api::schema::panes::{PaneMetadataProjection, PaneMoveProjection, PaneSwapProjection};
+use crate::api::schema::panes::{
+    PaneFocusProjection, PaneMetadataProjection, PaneMoveProjection, PaneSwapProjection,
+};
 use crate::api::schema::{Method, PaneDirection, PaneMoveDestination};
 
 pub(crate) fn command() -> clap::Command {
@@ -135,6 +137,45 @@ fn swap(matches: &ArgMatches) -> Result<Method, ParseError> {
         .target_pane_id
         .map(|value| super::normalize_pane_id(&value));
     Ok(Method::PaneSwap(params))
+}
+
+/// `--direction` keeps `pane focus` a neighbor move; a bare pane id makes it
+/// a jump through `pane.focus`, which switches workspace and tab first.
+fn focus_arguments() -> Vec<clap::Arg> {
+    let mut arguments = PaneFocusProjection::arguments()
+        .into_iter()
+        .map(|argument| {
+            // The `focus_target` group in `Leaf::command` requires exactly one
+            // of `--direction` or a pane id.
+            if argument.get_id() == "direction" {
+                argument.required(false)
+            } else {
+                argument
+            }
+        })
+        .collect::<Vec<_>>();
+    arguments.push(
+        clap::Arg::new("pane_id")
+            .value_name("PANE_ID")
+            .index(1)
+            .allow_hyphen_values(true)
+            .conflicts_with_all(["pane", "current"])
+            .help("Jump to this pane, switching workspace and tab"),
+    );
+    arguments
+}
+
+fn focus(matches: &ArgMatches) -> Result<Method, ParseError> {
+    let Some(pane_id) = matches.get_one::<String>("pane_id") else {
+        return PaneFocusProjection::from_matches(matches).map(Method::PaneFocusDirection);
+    };
+    // Single-dash ids are accepted; `--` words are mistyped options.
+    if pane_id.starts_with("--") {
+        return Err(ParseError::Usage(format!("unknown option: {pane_id}")));
+    }
+    Ok(Method::PaneFocus(crate::api::schema::PaneTarget {
+        pane_id: super::normalize_pane_id(pane_id),
+    }))
 }
 
 fn move_pane(matches: &ArgMatches) -> Result<Method, ParseError> {
@@ -306,6 +347,13 @@ mod tests {
                 json!({"mode": "toggle"}),
             ),
             (
+                "peek",
+                vec!["pane"],
+                "cli:pane:peek",
+                "pane.peek",
+                json!({"pane_id": "pane"}),
+            ),
+            (
                 "read",
                 vec!["pane"],
                 "cli:pane:read",
@@ -421,6 +469,16 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn pane_peek_needs_a_pane_or_close_but_not_both() {
+        assert_eq!(
+            serde_json::to_value(request("peek", &["--close"]).unwrap()).unwrap(),
+            serde_json::json!({"id": "cli:pane:peek", "method": "pane.peek_close", "params": {}})
+        );
+        assert!(request("peek", &[]).is_err());
+        assert!(request("peek", &["pane", "--close"]).is_err());
     }
 
     #[test]
@@ -607,6 +665,22 @@ mod tests {
                 .get("pane_id")
                 .is_none());
         }
+    }
+
+    #[test]
+    fn pane_focus_jumps_by_id_or_moves_by_direction() {
+        let json = serde_json::to_value(request("focus", &["w1:p2"]).unwrap()).unwrap();
+        assert_eq!(json["method"], "pane.focus");
+        assert_eq!(json["params"], serde_json::json!({"pane_id": "w1:p2"}));
+        let json = serde_json::to_value(request("focus", &["--direction", "up"]).unwrap()).unwrap();
+        assert_eq!(json["method"], "pane.focus_direction");
+        assert!(request("focus", &[]).is_err());
+        assert!(request("focus", &["--pane", "w1:p2"]).is_err());
+        assert!(request("focus", &["w1:p2", "--direction", "up"]).is_err());
+        assert!(request("focus", &["w1:p2", "--current"]).is_err());
+        assert!(request("focus", &["--direcion", "up"]).is_err());
+        let json = serde_json::to_value(request("focus", &["-p"]).unwrap()).unwrap();
+        assert_eq!(json["params"]["pane_id"], "-p");
     }
 
     #[test]
@@ -925,6 +999,24 @@ mod tests {
             panic!()
         };
         assert_eq!(params.label, None);
+    }
+
+    #[test]
+    fn pane_projection_send_text_paste_flag_precedes_the_text() {
+        let json =
+            serde_json::to_value(request("send-text", &["--paste", "pane", "a", "b"]).unwrap())
+                .unwrap();
+        assert_eq!(
+            json["params"],
+            serde_json::json!({"pane_id": "pane", "text": "a b", "paste": true})
+        );
+        // After the text starts, `--paste` is text like any other word.
+        let json =
+            serde_json::to_value(request("send-text", &["pane", "a", "--paste"]).unwrap()).unwrap();
+        assert_eq!(
+            json["params"],
+            serde_json::json!({"pane_id": "pane", "text": "a --paste"})
+        );
     }
 
     #[test]

@@ -210,14 +210,19 @@ impl App {
 
         let mut worktree_restore_updates = Vec::new();
         if let AppEvent::PaneDied { pane_id, .. } = &ev {
-            if self
+            if let Some(popup) = self
                 .state
                 .popup_pane
                 .as_ref()
-                .is_some_and(|popup| popup.pane_id == *pane_id)
+                .filter(|popup| popup.pane_id == *pane_id)
             {
+                // A peek's pane is a tiled pane: close the view, then let its
+                // own death handling run.
+                let peek = popup.peek.is_some();
                 self.close_popup_pane();
-                return Vec::new();
+                if !peek {
+                    return Vec::new();
+                }
             }
             if worktree_restore_failed {
                 worktree_restore_updates
@@ -1239,6 +1244,14 @@ impl App {
                 return self.handle_pane_send_input(request.id, params);
             }
             Method::PaneClose(target) => return self.handle_pane_close(request.id, target),
+            Method::PanePeek(target) => return self.handle_pane_peek(request.id, target),
+            Method::PanePeekClose(_) => {
+                return if self.close_peek_popup() {
+                    responses::encode_success(request.id, ResponseResult::Ok {})
+                } else {
+                    responses::encode_error(request.id, "peek_not_open", "no peek is open")
+                };
+            }
             Method::PopupClose(_) => {
                 return if self.close_popup_pane() {
                     responses::encode_success(request.id, ResponseResult::Ok {})

@@ -617,15 +617,25 @@ fn mobile_items(
         &config.agents,
     );
     let agent_view_label = snapshot.agent_view_label.as_deref();
-    if !agents.is_empty() || agent_view_label.is_some() {
-        let title = agent_view_label
-            .map(|label| format!("agents · {label}"))
-            .unwrap_or_else(|| "agents".to_owned());
+    let needs_me_only = config.agents.needs_me_only;
+    if !agents.is_empty() || agent_view_label.is_some() || needs_me_only {
+        let title = match (agent_view_label, needs_me_only) {
+            (Some(label), true) => format!("agents · {label} · needs me"),
+            (Some(label), false) => format!("agents · {label}"),
+            (None, true) => "agents · needs me".to_owned(),
+            (None, false) => "agents".to_owned(),
+        };
         items.push(MobileItem::section(title, palette));
-        if agents.is_empty() {
+        if let Some(message) = agents
+            .is_empty()
+            .then(|| {
+                super::agent_sidebar::empty_agent_list_message(agent_view_label.is_some(), config)
+            })
+            .flatten()
+        {
             items.push(MobileItem {
                 lines: vec![Line::from(Span::styled(
-                    "  no matching agents",
+                    format!(" {message}"),
                     Style::default()
                         .fg(palette.overlay0)
                         .bg(palette.panel_bg)

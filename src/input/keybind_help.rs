@@ -156,6 +156,12 @@ pub(crate) fn keybind_help_groups(
                     "clear agent view",
                     KeybindAction::ClearAgentView,
                 ),
+                action_entry_kw(
+                    binding_label(&keybinds.toggle_needs_me),
+                    "toggle needs me",
+                    KeybindAction::ToggleNeedsMe,
+                    &["blocked agents", "waiting on me", "filter agents"],
+                ),
             ],
         ),
         (

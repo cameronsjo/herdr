@@ -119,6 +119,15 @@ pub(crate) fn agent_env() -> Input<crate::api::schema::AgentEnv> {
     .help("Set an environment variable for the agent process only (repeatable)")
 }
 
+/// Fork (#110): `--exec PATH` launches this executable instead of the kind's default.
+pub(crate) fn agent_exec() -> Input<Option<String>> {
+    Input::value("exec", "PATH", |slot, value| {
+        *slot = Some(value.to_owned());
+        Ok(())
+    })
+    .help("Launch this executable instead of the kind's default, e.g. a wrapper")
+}
+
 pub(crate) fn kind() -> Input<String> {
     Input::value("kind", "KIND", |slot, value| {
         *slot = value.to_owned();
@@ -260,6 +269,7 @@ pub(crate) fn command() -> Command {
         .subcommand(leaf("list", Vec::new(), "List agents"))
         .subcommands(crate::cli::fork_registered_agents::commands())
         .subcommands(crate::cli::fork_agent_pin::commands())
+        .subcommand(crate::cli::fork_agent_task::command())
         .subcommand(leaf("get", TargetProjection::arguments(), "Show an agent"))
         .subcommand(leaf("focus", TargetProjection::arguments(), "Focus an agent"))
         .subcommand(leaf("read", AgentReadProjection::arguments(), "Read agent terminal output")
@@ -280,6 +290,8 @@ pub(crate) fn command() -> Command {
             .after_help("If the agent is already blocked, submission is rejected with agent_blocked before any input is sent. When an accepted submission starts from another non-working state, --wait requires an observed working or blocked state within 5000ms; otherwise it returns agent_prompt_stalled. A caller timeout that expires first returns timeout. It then matches idle, done, or blocked by default, or any exact --until state. It does not track turns: if the agent is already working, that active turn's completion may match."))
         .subcommand(leaf("start", AgentStartProjection::arguments(), "Start a supported interactive agent in an existing pane")
             .arg(crate::cli::fork_agent_pin::start_pin_arg())
+            .arg(clap::Arg::new("parent").long("parent").value_name("NAME")
+                .help("Record the agent that launched this one, as the pane token `parent` (fork)"))
             .override_usage("herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]")
             .after_help("The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait"))
         .subcommand(leaf("attach", AttachProjection::arguments(), "Attach directly to an agent terminal")
