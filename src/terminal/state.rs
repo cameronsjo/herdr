@@ -2342,7 +2342,7 @@ impl TerminalState {
 
     /// The agent has left the pane: frees its name and, fork, its pin.
     /// `agent rename --clear` calls `clear_agent_name` alone and keeps the pin.
-    fn forget_agent(&mut self) {
+    pub(crate) fn forget_agent(&mut self) {
         self.clear_agent_name();
         self.pin_order = None;
     }
